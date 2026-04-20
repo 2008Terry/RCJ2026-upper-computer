@@ -27,9 +27,6 @@ def generate_launch_description():
         package_share / "launch" / "camera_ros_white_line_hsv_fastmap.launch.py"
     )
     map_yaml_default = package_share / "maps" / "rcj_map.yaml"
-    pinned_fastmap_default = str(
-        package_share / "config" / "undistort_map_20260414_204537_fast.xml"
-    )
 
     camera_index = LaunchConfiguration("camera_index")
     role = LaunchConfiguration("role")
@@ -119,7 +116,7 @@ def generate_launch_description():
             DeclareLaunchArgument("remap_topic", default_value="/camera/image_remapped"),  # Remapped image topic
             DeclareLaunchArgument("white_mask_topic", default_value="/camera/white_mask"),  # White mask topic
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
-            DeclareLaunchArgument("fastmap_file", default_value=pinned_fastmap_default),  # Specific Fastmap XML path when auto-select is disabled
+            DeclareLaunchArgument("fastmap_file", default_value=""),  # Specific Fastmap XML path when auto-select is disabled
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
             DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
             DeclareLaunchArgument("remap_enable_image_view", default_value="false"),  # Whether to show remap windows
@@ -131,10 +128,13 @@ def generate_launch_description():
             DeclareLaunchArgument("white_v_min", default_value="192"),  # White HSV minimum V
             DeclareLaunchArgument("hsv_enable_timing_log", default_value="true"),  # Whether to log HSV timing
             DeclareLaunchArgument("hsv_timing_log_interval", default_value="15"),  # HSV timing log frame interval
-            DeclareLaunchArgument("hsv_enable_image_view", default_value="false"),  # Whether to show HSV debug windows
-            DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Whether to show HSV input image
-            DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Whether to show white mask image
-            DeclareLaunchArgument("hsv_show_overlay_image", default_value="true"),  # Whether to show overlay image
+            DeclareLaunchArgument("hsv_enable_image_view", default_value="false"),  # Master switch for HSV debug windows; false means no window creation or GUI processing
+            DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Show the HSV input image window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Show the white-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_green_mask", default_value="false"),  # Show the green-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_black_mask", default_value="false"),  # Show the black-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_noise_mask", default_value="false"),  # Show the remaining noise mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_overlay_image", default_value="true"),  # Show the HSV overlay window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_display_max_width", default_value="960"),  # HSV window max width
             DeclareLaunchArgument("hsv_display_max_height", default_value="720"),  # HSV window max height
             DeclareLaunchArgument("map_yaml_file", default_value=str(map_yaml_default)),  # Map YAML file path
@@ -248,6 +248,15 @@ def generate_launch_description():
                     ),
                     "hsv_show_white_mask": LaunchConfiguration(
                         "hsv_show_white_mask"
+                    ),
+                    "hsv_show_green_mask": LaunchConfiguration(
+                        "hsv_show_green_mask"
+                    ),
+                    "hsv_show_black_mask": LaunchConfiguration(
+                        "hsv_show_black_mask"
+                    ),
+                    "hsv_show_noise_mask": LaunchConfiguration(
+                        "hsv_show_noise_mask"
                     ),
                     "hsv_show_overlay_image": LaunchConfiguration(
                         "hsv_show_overlay_image"

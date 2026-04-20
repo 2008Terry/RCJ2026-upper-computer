@@ -177,6 +177,15 @@ def build_nodes(context):
                     "show_white_mask": ParameterValue(
                         LaunchConfiguration("hsv_show_white_mask"), value_type=bool
                     ),  # Whether to show white mask image
+                    "show_green_mask": ParameterValue(
+                        LaunchConfiguration("hsv_show_green_mask"), value_type=bool
+                    ),  # Whether to show green priority mask image
+                    "show_black_mask": ParameterValue(
+                        LaunchConfiguration("hsv_show_black_mask"), value_type=bool
+                    ),  # Whether to show black priority mask image
+                    "show_noise_mask": ParameterValue(
+                        LaunchConfiguration("hsv_show_noise_mask"), value_type=bool
+                    ),  # Whether to show remaining noise mask image
                     "show_overlay_image": ParameterValue(
                         LaunchConfiguration("hsv_show_overlay_image"), value_type=bool
                     ),  # Whether to show overlay image
@@ -209,6 +218,10 @@ def build_nodes(context):
                         LaunchConfiguration("ridge_min_orientation_neighbors"),
                         value_type=int,
                     ),  # Minimum ridge neighbors for valid orientation
+                    "enable_orientation_estimate": ParameterValue(
+                        LaunchConfiguration("ridge_enable_orientation_estimate"),
+                        value_type=bool,
+                    ),  # Whether to run orientation estimation before side support
                     "side_margin_px": ParameterValue(
                         LaunchConfiguration("ridge_side_margin_px"), value_type=int
                     ),  # Offset from centerline before side sampling
@@ -237,6 +250,37 @@ def build_nodes(context):
                     "min_width_samples": ParameterValue(
                         LaunchConfiguration("ridge_min_width_samples"), value_type=int
                     ),  # Minimum samples before adaptive width estimation
+                    "enable_candidate_prefilter": ParameterValue(
+                        LaunchConfiguration("ridge_enable_candidate_prefilter"),
+                        value_type=bool,
+                    ),  # Whether to run candidate prefilter before orientation
+                    "candidate_min_component_px": ParameterValue(
+                        LaunchConfiguration("ridge_candidate_min_component_px"),
+                        value_type=int,
+                    ),  # Minimum candidate ridge component area before pruning
+                    "candidate_prune_rounds": ParameterValue(
+                        LaunchConfiguration("ridge_candidate_prune_rounds"),
+                        value_type=int,
+                    ),  # Endpoint pruning rounds for candidate ridge mask
+                    "side_scan_stride": ParameterValue(
+                        LaunchConfiguration("ridge_side_scan_stride"), value_type=int
+                    ),  # Seed sampling stride before side support scan
+                    "side_template_direction_bins": ParameterValue(
+                        LaunchConfiguration("ridge_side_template_direction_bins"),
+                        value_type=int,
+                    ),  # Number of direction bins for side scan templates
+                    "enable_parallel_side_scan": ParameterValue(
+                        LaunchConfiguration("ridge_enable_parallel_side_scan"),
+                        value_type=bool,
+                    ),  # Whether to parallelize side support seed scanning
+                    "enable_parallel_orientation_estimate": ParameterValue(
+                        LaunchConfiguration("ridge_enable_parallel_orientation_estimate"),
+                        value_type=bool,
+                    ),  # Whether to parallelize seed-only orientation estimation
+                    "enable_length_filter": ParameterValue(
+                        LaunchConfiguration("ridge_enable_length_filter"),
+                        value_type=bool,
+                    ),  # Whether to run connected-component length filtering
                     "min_skeleton_length_px": ParameterValue(
                         LaunchConfiguration("ridge_min_skeleton_length_px"),
                         value_type=int,
@@ -251,6 +295,9 @@ def build_nodes(context):
                     "show_morph_mask": ParameterValue(
                         LaunchConfiguration("ridge_show_morph_mask"), value_type=bool
                     ),  # Whether to show input white mask
+                    "show_distance_transform": ParameterValue(
+                        LaunchConfiguration("ridge_show_distance_transform"), value_type=bool
+                    ),  # Whether to show the DT image before orientation filtering
                     "show_green_mask": ParameterValue(
                         LaunchConfiguration("ridge_show_green_mask"), value_type=bool
                     ),  # Whether to show input green mask
@@ -263,10 +310,18 @@ def build_nodes(context):
                     "show_ridge_mask": ParameterValue(
                         LaunchConfiguration("ridge_show_ridge_mask"), value_type=bool
                     ),  # Whether to show extracted ridge mask
+                    "show_candidate_prefilter_mask": ParameterValue(
+                        LaunchConfiguration("ridge_show_candidate_prefilter_mask"),
+                        value_type=bool,
+                    ),  # Whether to show candidate-prefilter ridge mask
                     "show_orientation_valid_mask": ParameterValue(
                         LaunchConfiguration("ridge_show_orientation_valid_mask"),
                         value_type=bool,
                     ),  # Whether to show orientation-valid ridge mask
+                    "show_side_support_seed_mask": ParameterValue(
+                        LaunchConfiguration("ridge_show_side_support_seed_mask"),
+                        value_type=bool,
+                    ),  # Whether to show supported side-scan seed mask
                     "show_side_support_mask": ParameterValue(
                         LaunchConfiguration("ridge_show_side_support_mask"),
                         value_type=bool,
@@ -305,11 +360,6 @@ def build_nodes(context):
 
 
 def generate_launch_description():
-    pinned_fastmap_default = str(
-        Path(get_package_share_directory("rcj_localization"))
-        / "config"
-        / "undistort_map_20260414_204537_fast.xml"
-    )
     return LaunchDescription(
         [
             DeclareLaunchArgument("camera_index", default_value="0"),  # Camera index
@@ -340,7 +390,7 @@ def generate_launch_description():
             ),  # White mask topic
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument(
-                "fastmap_file", default_value=pinned_fastmap_default
+                "fastmap_file", default_value=""
             ),  # Specific Fastmap XML path when auto-select is disabled
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
             DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
@@ -370,12 +420,15 @@ def generate_launch_description():
             ),  # HSV timing log frame interval
             DeclareLaunchArgument(
                 "hsv_enable_image_view", default_value="false"
-            ),  # Whether to show HSV debug windows
-            DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Whether to show HSV input image
-            DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Whether to show white mask image
+            ),  # Master switch for HSV debug windows; false means no window creation or GUI processing
+            DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Show the HSV input image window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Show the white-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_green_mask", default_value="false"),  # Show the green-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_black_mask", default_value="false"),  # Show the black-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_noise_mask", default_value="false"),  # Show the remaining noise mask window when hsv_enable_image_view is true
             DeclareLaunchArgument(
                 "hsv_show_overlay_image", default_value="true"
-            ),  # Whether to show overlay image
+            ),  # Show the HSV overlay window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_display_max_width", default_value="960"),  # HSV window max width
             DeclareLaunchArgument("hsv_display_max_height", default_value="720"),  # HSV window max height
             DeclareLaunchArgument(
@@ -384,6 +437,9 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ridge_min_orientation_neighbors", default_value="6"
             ),  # Minimum ridge neighbors for valid orientation
+            DeclareLaunchArgument(
+                "ridge_enable_orientation_estimate", default_value="false"
+            ),  # Whether to run orientation estimation before side support
             DeclareLaunchArgument("ridge_side_margin_px", default_value="1"),  # Offset from centerline before side sampling
             DeclareLaunchArgument(
                 "ridge_side_band_depth_px", default_value="4"
@@ -400,22 +456,53 @@ def generate_launch_description():
             DeclareLaunchArgument("ridge_width_mad_scale", default_value="2.5"),  # MAD scale for adaptive width range
             DeclareLaunchArgument("ridge_min_width_samples", default_value="25"),  # Minimum samples before adaptive width estimation
             DeclareLaunchArgument(
+                "ridge_enable_candidate_prefilter", default_value="false"
+            ),  # Whether to run candidate prefilter before orientation
+            DeclareLaunchArgument(
+                "ridge_candidate_min_component_px", default_value="3"
+            ),  # Minimum candidate ridge component area before pruning
+            DeclareLaunchArgument(
+                "ridge_candidate_prune_rounds", default_value="1"
+            ),  # Endpoint pruning rounds for candidate ridge mask
+            DeclareLaunchArgument(
+                "ridge_side_scan_stride", default_value="3"
+            ),  # Seed sampling stride before side support scan
+            DeclareLaunchArgument(
+                "ridge_side_template_direction_bins", default_value="16"
+            ),  # Number of direction bins for side scan templates
+            DeclareLaunchArgument(
+                "ridge_enable_parallel_side_scan", default_value="true"
+            ),  # Whether to parallelize side support seed scanning
+            DeclareLaunchArgument(
+                "ridge_enable_parallel_orientation_estimate", default_value="true"
+            ),  # Whether to parallelize seed-only orientation estimation
+            DeclareLaunchArgument(
+                "ridge_enable_length_filter", default_value="false"
+            ),  # Whether to run connected-component length filtering
+            DeclareLaunchArgument(
                 "ridge_min_skeleton_length_px", default_value="12"
             ),  # Minimum ridge component length
             DeclareLaunchArgument(
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="false"
+                "ridge_enable_image_view", default_value="true"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
+            DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
             DeclareLaunchArgument("ridge_show_green_mask", default_value="false"),  # Whether to show input green mask
             DeclareLaunchArgument("ridge_show_black_mask", default_value="false"),  # Whether to show input black mask
             DeclareLaunchArgument("ridge_show_noise_mask", default_value="false"),  # Whether to show input noise mask
             DeclareLaunchArgument("ridge_show_ridge_mask", default_value="false"),  # Whether to show extracted ridge mask
             DeclareLaunchArgument(
-                "ridge_show_orientation_valid_mask", default_value="false"
+                "ridge_show_candidate_prefilter_mask", default_value="false"
+            ),  # Whether to show candidate-prefilter ridge mask
+            DeclareLaunchArgument(
+                "ridge_show_orientation_valid_mask", default_value="true"
             ),  # Whether to show orientation-valid ridge mask
+            DeclareLaunchArgument(
+                "ridge_show_side_support_seed_mask", default_value="false"
+            ),  # Whether to show supported side-scan seed mask
             DeclareLaunchArgument(
                 "ridge_show_side_support_mask", default_value="true"
             ),  # Whether to show side-support mask
