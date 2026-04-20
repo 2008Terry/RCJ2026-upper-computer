@@ -226,6 +226,9 @@ def generate_launch_description():
                 "ridge_show_side_support_seed_mask", default_value="false"
             ),  # Whether to show supported side-scan seed mask
             DeclareLaunchArgument(
+                "ridge_show_side_support_seed_mask", default_value="false"
+            ),  # Whether to show supported side-scan seed mask
+            DeclareLaunchArgument(
                 "ridge_show_side_support_mask", default_value="true"
             ),  # Whether to show side-support mask
             DeclareLaunchArgument(

@@ -317,11 +317,7 @@ def build_nodes(context):
                     "show_orientation_valid_mask": ParameterValue(
                         LaunchConfiguration("ridge_show_orientation_valid_mask"),
                         value_type=bool,
-                    ),  # Whether to show orientation-valid seed mask
-                    "show_side_support_seed_mask": ParameterValue(
-                        LaunchConfiguration("ridge_show_side_support_seed_mask"),
-                        value_type=bool,
-                    ),  # Whether to show supported side-scan seed mask
+                    ),  # Whether to show orientation-valid ridge mask
                     "show_side_support_mask": ParameterValue(
                         LaunchConfiguration("ridge_show_side_support_mask"),
                         value_type=bool,
@@ -437,9 +433,6 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ridge_min_orientation_neighbors", default_value="6"
             ),  # Minimum ridge neighbors for valid orientation
-            DeclareLaunchArgument(
-                "ridge_enable_orientation_estimate", default_value="true"
-            ),  # Whether to run orientation estimation before side support
             DeclareLaunchArgument("ridge_side_margin_px", default_value="1"),  # Offset from centerline before side sampling
             DeclareLaunchArgument(
                 "ridge_side_band_depth_px", default_value="4"
@@ -495,14 +488,8 @@ def generate_launch_description():
             DeclareLaunchArgument("ridge_show_noise_mask", default_value="false"),  # Whether to show input noise mask
             DeclareLaunchArgument("ridge_show_ridge_mask", default_value="false"),  # Whether to show extracted ridge mask
             DeclareLaunchArgument(
-                "ridge_show_candidate_prefilter_mask", default_value="false"
-            ),  # Whether to show candidate-prefilter ridge mask
-            DeclareLaunchArgument(
-                "ridge_show_orientation_valid_mask", default_value="true"
-            ),  # Whether to show orientation-valid seed mask
-            DeclareLaunchArgument(
-                "ridge_show_side_support_seed_mask", default_value="false"
-            ),  # Whether to show supported side-scan seed mask
+                "ridge_show_orientation_valid_mask", default_value="false"
+            ),  # Whether to show orientation-valid ridge mask
             DeclareLaunchArgument(
                 "ridge_show_side_support_mask", default_value="true"
             ),  # Whether to show side-support mask
