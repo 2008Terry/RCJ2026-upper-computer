@@ -258,6 +258,7 @@ ament_target_dependencies(white_line_dt_ridge_filter_node
 target_link_libraries(white_line_dt_ridge_filter_node
   white_line_debug_utils
   ${OpenCV_LIBRARIES}
+  OpenMP::OpenMP_CXX
 )
 
 add_executable(topdown_mask_points_node src/topdown_mask_points_node.cpp)

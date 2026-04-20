@@ -231,11 +231,6 @@ def build_nodes(context):
 
 
 def generate_launch_description():
-    pinned_fastmap_default = str(
-        Path(get_package_share_directory("rcj_localization"))
-        / "config"
-        / "undistort_map_20260414_204537_fast.xml"
-    )
     launch_arguments = [
         DeclareLaunchArgument("camera_index", default_value="0"),  # Camera index
         DeclareLaunchArgument("role", default_value="viewfinder"),  # camera_ros role
@@ -251,7 +246,7 @@ def generate_launch_description():
         DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
         DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),  # Remapped image topic
         DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Auto-select the latest fastmap XML
-        DeclareLaunchArgument("fastmap_file", default_value=pinned_fastmap_default),  # Specific fastmap XML path
+        DeclareLaunchArgument("fastmap_file", default_value=""),  # Specific fastmap XML path
         DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
         DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
         DeclareLaunchArgument("camera_enable_image_view", default_value="false"),  # Show camera debug window
@@ -287,7 +282,7 @@ def generate_launch_description():
         DeclareLaunchArgument("skeleton_show_white_final_mask", default_value="true"),  # Show the final white mask
         DeclareLaunchArgument("skeleton_show_white_mask", default_value="__unset__"),  # Deprecated alias for the final white mask view
         DeclareLaunchArgument("skeleton_show_debug_image", default_value="false"),  # Show the skeleton debug mosaic
-        DeclareLaunchArgument("skeleton_enable_timing_debug", default_value="false"),  # Enable skeleton timing logs
+        DeclareLaunchArgument("skeleton_enable_timing_debug", default_value="true"),  # Enable skeleton timing logs
         DeclareLaunchArgument("skeleton_timing_summary_interval", default_value="10"),  # Skeleton timing summary frame interval
     ]
 

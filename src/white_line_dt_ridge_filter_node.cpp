@@ -2,10 +2,12 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <iomanip>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #if __has_include(<cv_bridge/cv_bridge.hpp>)
@@ -28,11 +30,14 @@
 namespace {
 
 constexpr char kMorphWindow[] = "DT Ridge Filter Input Morph Mask";
+constexpr char kDistanceTransformWindow[] = "DT Ridge Filter Distance Transform";
 constexpr char kGreenWindow[] = "DT Ridge Filter Input Green Mask";
 constexpr char kBlackWindow[] = "DT Ridge Filter Input Black Mask";
 constexpr char kNoiseWindow[] = "DT Ridge Filter Input Noise Mask";
 constexpr char kRidgeWindow[] = "DT Ridge Filter Ridge";
+constexpr char kCandidatePrefilterWindow[] = "DT Ridge Filter Candidate Prefilter";
 constexpr char kOrientationValidWindow[] = "DT Ridge Filter Orientation Valid";
+constexpr char kSideSupportSeedWindow[] = "DT Ridge Filter Side Support Seeds";
 constexpr char kSideSupportWindow[] = "DT Ridge Filter Side Color Filter";
 constexpr char kWidthSupportedWindow[] = "DT Ridge Filter Width Filter";
 constexpr char kLengthFilteredRidgeWindow[] = "DT Ridge Filter Length-Filtered Ridge";
@@ -40,6 +45,38 @@ constexpr char kReconstructedWindow[] = "DT Ridge Filter Reconstruction";
 constexpr char kWhiteFinalMaskWindow[] = "DT Ridge Filter White Final Mask";
 constexpr char kDebugWindow[] = "DT Ridge Filter Composite Debug";
 constexpr bool kDefaultShowLengthFilteredRidgeMask = true;
+constexpr uchar kLabelOther = 0;
+constexpr uchar kLabelGreen = 1;
+constexpr uchar kLabelBlack = 2;
+constexpr uchar kLabelNoise = 3;
+
+struct SeedPoint
+{
+  cv::Point point;
+  int dir_bin = 0;
+  int start_offset = 1;
+  int tangent_half_span = 1;
+};
+
+struct SeedCandidate
+{
+  cv::Point point;
+  int start_offset = 1;
+  int tangent_half_span = 1;
+};
+
+struct RidgeFrameStats
+{
+  double ridge_point_count = 0.0;
+  double prefiltered_ridge_point_count = 0.0;
+  double orientation_valid_seed_count = 0.0;
+  double width_supported_point_count = 0.0;
+  double seed_point_count = 0.0;
+  double supported_seed_point_count = 0.0;
+  double total_side_samples = 0.0;
+  double avg_samples_per_seed = 0.0;
+  double max_local_width_px = 0.0;
+};
 
 cv::Size fitWithinBounds(const cv::Size & image_size, int max_width, int max_height)
 {
@@ -70,75 +107,128 @@ void resizeWindowToFitImage(
   cv::resizeWindow(window_name, fitted_size.width, fitted_size.height);
 }
 
-double computeMedian(std::vector<float> values)
+int computeStartOffset(float local_width_px, int side_margin_px)
 {
-  if (values.empty()) {
-    return 0.0;
-  }
+  const float half_width = 0.5F * std::max(local_width_px, 0.0F);
+  return std::max(1, static_cast<int>(std::round(half_width + static_cast<float>(side_margin_px))));
+}
 
-  const auto mid_it = values.begin() + static_cast<std::ptrdiff_t>(values.size() / 2);
-  std::nth_element(values.begin(), mid_it, values.end());
-  const double upper = *mid_it;
-  if ((values.size() % 2U) == 1U) {
-    return upper;
-  }
+int computeTangentHalfSpan(float local_width_px)
+{
+  const float half_width = 0.5F * std::max(local_width_px, 0.0F);
+  return std::max(1, static_cast<int>(std::round(std::max(1.0F, half_width))));
+}
 
-  const auto lower_it = std::max_element(values.begin(), mid_it);
-  return 0.5 * (upper + *lower_it);
+int quantizeDirectionBin(const cv::Point2f & tangent, int direction_bins)
+{
+  const int safe_bins = std::max(1, direction_bins);
+  const double step = CV_PI / static_cast<double>(safe_bins);
+  double angle = std::atan2(static_cast<double>(tangent.y), static_cast<double>(tangent.x));
+  if (angle < 0.0) {
+    angle += CV_PI;
+  }
+  if (angle >= CV_PI) {
+    angle -= CV_PI;
+  }
+  int bin = static_cast<int>(std::floor(angle / step));
+  if (bin >= safe_bins) {
+    bin = safe_bins - 1;
+  }
+  return std::max(0, bin);
+}
+
+std::uint64_t makeSideTemplateKey(
+  int dir_bin,
+  int start_offset,
+  int tangent_half_span,
+  int side_sign)
+{
+  const std::uint64_t side_index = side_sign < 0 ? 0ULL : 1ULL;
+  return (static_cast<std::uint64_t>(dir_bin) & 0xFFULL) |
+         ((static_cast<std::uint64_t>(start_offset) & 0xFFFFULL) << 8ULL) |
+         ((static_cast<std::uint64_t>(tangent_half_span) & 0xFFFFULL) << 24ULL) |
+         (side_index << 40ULL);
+}
+
+std::vector<cv::Point> buildSideTemplateOffsets(
+  int dir_bin,
+  int direction_bins,
+  int start_offset,
+  int tangent_half_span,
+  int side_band_depth_px,
+  int side_sign)
+{
+  const int safe_bins = std::max(1, direction_bins);
+  const double angle_step = CV_PI / static_cast<double>(safe_bins);
+  const double angle = (static_cast<double>(dir_bin) + 0.5) * angle_step;
+  const cv::Point2f tangent(
+    static_cast<float>(std::cos(angle)),
+    static_cast<float>(std::sin(angle)));
+  const cv::Point2f normal(-tangent.y, tangent.x);
+
+  std::vector<cv::Point> offsets;
+  offsets.reserve(
+    static_cast<std::size_t>((2 * tangent_half_span + 1) * std::max(1, side_band_depth_px)));
+  for (int tangential_step = -tangent_half_span; tangential_step <= tangent_half_span;
+    ++tangential_step)
+  {
+    const cv::Point2f tangential_offset = static_cast<float>(tangential_step) * tangent;
+    for (int depth_step = 0; depth_step < std::max(1, side_band_depth_px); ++depth_step) {
+      const float offset = static_cast<float>(start_offset + depth_step);
+      const cv::Point2f sample =
+        tangential_offset + static_cast<float>(side_sign) * offset * normal;
+      offsets.emplace_back(
+        static_cast<int>(std::round(sample.x)),
+        static_cast<int>(std::round(sample.y)));
+    }
+  }
+  return offsets;
 }
 
 bool estimateOrientation(
   const cv::Mat & centerline_mask,
   const cv::Point & center,
-  int radius,
+  const std::vector<cv::Point> & circle_offsets,
   int min_neighbors,
   cv::Point2f & tangent,
   cv::Point2f & normal)
 {
-  const int clamped_radius = std::max(1, radius);
-  const int x_min = std::max(0, center.x - clamped_radius);
-  const int x_max = std::min(centerline_mask.cols - 1, center.x + clamped_radius);
-  const int y_min = std::max(0, center.y - clamped_radius);
-  const int y_max = std::min(centerline_mask.rows - 1, center.y + clamped_radius);
-  const int radius_sq = clamped_radius * clamped_radius;
+  double sum_x = 0.0;
+  double sum_y = 0.0;
+  double sum_xx = 0.0;
+  double sum_xy = 0.0;
+  double sum_yy = 0.0;
+  int count = 0;
 
-  std::vector<cv::Point2f> neighbors;
-  neighbors.reserve(static_cast<std::size_t>((2 * clamped_radius + 1) * (2 * clamped_radius + 1)));
-  for (int y = y_min; y <= y_max; ++y) {
-    for (int x = x_min; x <= x_max; ++x) {
-      if (centerline_mask.at<uchar>(y, x) == 0) {
-        continue;
-      }
-      const int dx = x - center.x;
-      const int dy = y - center.y;
-      if (dx * dx + dy * dy > radius_sq) {
-        continue;
-      }
-      neighbors.emplace_back(static_cast<float>(x), static_cast<float>(y));
+  for (const cv::Point & offset : circle_offsets) {
+    const int x = center.x + offset.x;
+    const int y = center.y + offset.y;
+    if (x < 0 || x >= centerline_mask.cols || y < 0 || y >= centerline_mask.rows) {
+      continue;
     }
+    if (centerline_mask.at<uchar>(y, x) == 0) {
+      continue;
+    }
+
+    const double x_d = static_cast<double>(x);
+    const double y_d = static_cast<double>(y);
+    ++count;
+    sum_x += x_d;
+    sum_y += y_d;
+    sum_xx += x_d * x_d;
+    sum_xy += x_d * y_d;
+    sum_yy += y_d * y_d;
   }
 
-  if (static_cast<int>(neighbors.size()) < std::max(2, min_neighbors)) {
+  if (count < std::max(2, min_neighbors)) {
     return false;
   }
 
-  cv::Point2f mean(0.0F, 0.0F);
-  for (const auto & neighbor : neighbors) {
-    mean += neighbor;
-  }
-  mean.x /= static_cast<float>(neighbors.size());
-  mean.y /= static_cast<float>(neighbors.size());
-
-  double cov_xx = 0.0;
-  double cov_xy = 0.0;
-  double cov_yy = 0.0;
-  for (const auto & neighbor : neighbors) {
-    const double dx = neighbor.x - mean.x;
-    const double dy = neighbor.y - mean.y;
-    cov_xx += dx * dx;
-    cov_xy += dx * dy;
-    cov_yy += dy * dy;
-  }
+  const double mean_x = sum_x / static_cast<double>(count);
+  const double mean_y = sum_y / static_cast<double>(count);
+  const double cov_xx = sum_xx - static_cast<double>(count) * mean_x * mean_x;
+  const double cov_xy = sum_xy - static_cast<double>(count) * mean_x * mean_y;
+  const double cov_yy = sum_yy - static_cast<double>(count) * mean_y * mean_y;
 
   const double trace = cov_xx + cov_yy;
   const double det = cov_xx * cov_yy - cov_xy * cov_xy;
@@ -166,6 +256,23 @@ bool estimateOrientation(
   return true;
 }
 
+std::vector<cv::Point> buildOrientationCircleOffsets(int radius)
+{
+  const int clamped_radius = std::max(1, radius);
+  const int radius_sq = clamped_radius * clamped_radius;
+  std::vector<cv::Point> offsets;
+  offsets.reserve(static_cast<std::size_t>((2 * clamped_radius + 1) * (2 * clamped_radius + 1)));
+  for (int dy = -clamped_radius; dy <= clamped_radius; ++dy) {
+    for (int dx = -clamped_radius; dx <= clamped_radius; ++dx) {
+      if (dx * dx + dy * dy > radius_sq) {
+        continue;
+      }
+      offsets.emplace_back(dx, dy);
+    }
+  }
+  return offsets;
+}
+
 struct SideSampleStats
 {
   int total_samples = 0;
@@ -187,60 +294,30 @@ struct SideSampleStats
   }
 };
 
-SideSampleStats sampleSideSupport(
+SideSampleStats sampleSideSupportFromTemplate(
   const cv::Point & center,
-  const cv::Point2f & tangent,
-  const cv::Point2f & normal,
-  float local_width_px,
-  int side_sign,
-  const cv::Mat & green_mask,
-  const cv::Mat & black_mask,
-  const cv::Mat & noise_mask,
-  int side_margin_px,
-  int side_band_depth_px)
+  const cv::Mat & label_map,
+  const std::vector<cv::Point> & offsets)
 {
   SideSampleStats stats;
+  for (const cv::Point & offset : offsets) {
+    const int sample_x = center.x + offset.x;
+    const int sample_y = center.y + offset.y;
+    ++stats.total_samples;
+    if (sample_x < 0 || sample_x >= label_map.cols || sample_y < 0 || sample_y >= label_map.rows) {
+      ++stats.outside_samples;
+      continue;
+    }
 
-  const float half_width = 0.5F * std::max(local_width_px, 0.0F);
-  const int start_offset =
-    std::max(1, static_cast<int>(std::round(half_width + static_cast<float>(side_margin_px))));
-  const int depth = std::max(1, side_band_depth_px);
-  const int tangent_half_span =
-    std::max(1, static_cast<int>(std::round(std::max(1.0F, half_width))));
-
-  const cv::Point2f center_f(static_cast<float>(center.x), static_cast<float>(center.y));
-  for (int tangential_step = -tangent_half_span; tangential_step <= tangent_half_span;
-    ++tangential_step)
-  {
-    const cv::Point2f tangential_offset = static_cast<float>(tangential_step) * tangent;
-    for (int depth_step = 0; depth_step < depth; ++depth_step) {
-      const float offset = static_cast<float>(start_offset + depth_step);
-      const cv::Point2f sample =
-        center_f + tangential_offset + static_cast<float>(side_sign) * offset * normal;
-      const int sample_x = static_cast<int>(std::round(sample.x));
-      const int sample_y = static_cast<int>(std::round(sample.y));
-
-      ++stats.total_samples;
-      if (
-        sample_x < 0 || sample_x >= green_mask.cols || sample_y < 0 ||
-        sample_y >= green_mask.rows)
-      {
-        ++stats.outside_samples;
-        continue;
-      }
-
-      if (green_mask.at<uchar>(sample_y, sample_x) != 0) {
-        ++stats.green_samples;
-      }
-      if (black_mask.at<uchar>(sample_y, sample_x) != 0) {
-        ++stats.black_samples;
-      }
-      if (noise_mask.at<uchar>(sample_y, sample_x) != 0) {
-        ++stats.noise_samples;
-      }
+    const uchar label = label_map.at<uchar>(sample_y, sample_x);
+    if (label == kLabelGreen) {
+      ++stats.green_samples;
+    } else if (label == kLabelBlack) {
+      ++stats.black_samples;
+    } else if (label == kLabelNoise) {
+      ++stats.noise_samples;
     }
   }
-
   return stats;
 }
 
@@ -263,6 +340,86 @@ cv::Mat filterMaskByLength(const cv::Mat & binary_mask, int min_length_pixels)
   }
 
   return filtered;
+}
+
+cv::Mat filterMaskByMinComponentArea(const cv::Mat & binary_mask, int min_component_area)
+{
+  CV_Assert(binary_mask.type() == CV_8UC1);
+  if (min_component_area <= 1) {
+    return binary_mask.clone();
+  }
+
+  cv::Mat labels;
+  cv::Mat stats;
+  cv::Mat centroids;
+  cv::connectedComponentsWithStats(binary_mask, labels, stats, centroids, 8, CV_32S);
+
+  cv::Mat filtered = cv::Mat::zeros(binary_mask.size(), CV_8UC1);
+  for (int label = 1; label < stats.rows; ++label) {
+    const int component_area = stats.at<int>(label, cv::CC_STAT_AREA);
+    if (component_area < min_component_area) {
+      continue;
+    }
+    filtered.setTo(255, labels == label);
+  }
+  return filtered;
+}
+
+cv::Mat pruneMaskEndpoints(const cv::Mat & binary_mask, int rounds)
+{
+  CV_Assert(binary_mask.type() == CV_8UC1);
+  cv::Mat pruned = binary_mask.clone();
+  const int safe_rounds = std::max(0, rounds);
+  for (int round = 0; round < safe_rounds; ++round) {
+    cv::Mat to_remove = cv::Mat::zeros(pruned.size(), CV_8UC1);
+    for (int y = 0; y < pruned.rows; ++y) {
+      for (int x = 0; x < pruned.cols; ++x) {
+        if (pruned.at<uchar>(y, x) == 0) {
+          continue;
+        }
+        int neighbor_count = 0;
+        for (int dy = -1; dy <= 1; ++dy) {
+          for (int dx = -1; dx <= 1; ++dx) {
+            if (dx == 0 && dy == 0) {
+              continue;
+            }
+            const int nx = x + dx;
+            const int ny = y + dy;
+            if (nx < 0 || nx >= pruned.cols || ny < 0 || ny >= pruned.rows) {
+              continue;
+            }
+            if (pruned.at<uchar>(ny, nx) != 0) {
+              ++neighbor_count;
+            }
+          }
+        }
+        if (neighbor_count <= 1) {
+          to_remove.at<uchar>(y, x) = 255;
+        }
+      }
+    }
+    if (cv::countNonZero(to_remove) == 0) {
+      break;
+    }
+    pruned.setTo(0, to_remove);
+  }
+  return pruned;
+}
+
+cv::Mat buildLabelMap(
+  const cv::Mat & green_mask,
+  const cv::Mat & black_mask,
+  const cv::Mat & noise_mask)
+{
+  CV_Assert(green_mask.type() == CV_8UC1);
+  CV_Assert(black_mask.type() == CV_8UC1);
+  CV_Assert(noise_mask.type() == CV_8UC1);
+
+  cv::Mat label_map(green_mask.size(), CV_8UC1, cv::Scalar(kLabelOther));
+  label_map.setTo(cv::Scalar(kLabelGreen), green_mask);
+  label_map.setTo(cv::Scalar(kLabelBlack), black_mask);
+  label_map.setTo(cv::Scalar(kLabelNoise), noise_mask);
+  return label_map;
 }
 
 bool isLocalMaxPair(float center, float first, float second)
@@ -327,6 +484,26 @@ cv::Mat createDebugComposite(
   return debug_image;
 }
 
+cv::Mat createDistanceTransformDebugImage(const cv::Mat & distance_transform)
+{
+  CV_Assert(distance_transform.type() == CV_32FC1);
+
+  double min_value = 0.0;
+  double max_value = 0.0;
+  cv::minMaxLoc(distance_transform, &min_value, &max_value);
+
+  cv::Mat normalized_u8;
+  if (max_value <= 0.0) {
+    normalized_u8 = cv::Mat::zeros(distance_transform.size(), CV_8UC1);
+  } else {
+    distance_transform.convertTo(normalized_u8, CV_8UC1, 255.0 / max_value);
+  }
+
+  cv::Mat colorized;
+  cv::applyColorMap(normalized_u8, colorized, cv::COLORMAP_TURBO);
+  return colorized;
+}
+
 using SteadyClock = std::chrono::steady_clock;
 using TimePoint = SteadyClock::time_point;
 
@@ -340,16 +517,24 @@ enum class RidgeTimingStage : std::size_t
   RuntimeSync = 0,
   CvBridgeConvert,
   DistanceTransform,
+  DistanceTransformDebug,
   RidgeExtract,
-  SideSupportScan,
-  WidthRangeEstimate,
-  WidthFilter,
+  CandidatePrefilter,
+  StatsCollect,
+  OrientationEstimate,
+  LabelMapBuild,
+  WidthFilterPreSupport,
+  SideSupportSeedSelect,
+  SideTemplatePrepare,
+  SideSupportSeedScan,
+  SideSupportPropagate,
   LengthFilter,
   Reconstruct,
   FinalMask,
   DebugComposite,
   PublishOutputs,
   GuiDisplay,
+  UnaccountedOverhead,
   CallbackTotal,
   Count
 };
@@ -359,26 +544,83 @@ constexpr std::array<const char *, static_cast<std::size_t>(RidgeTimingStage::Co
     "runtime_sync",
     "cv_bridge",
     "distance_transform",
+    "distance_transform_debug",
     "ridge_extract",
-    "side_support_scan",
-    "width_range",
-    "width_filter",
+    "candidate_prefilter",
+    "stats_collect",
+    "orientation_seed_estimate",
+    "label_map_build",
+    "width_filter_pre_support",
+    "side_support_seed_select",
+    "side_template_prepare",
+    "side_support_seed_scan",
+    "side_support_propagate",
     "length_filter",
     "reconstruct",
     "final_mask",
     "debug_composite",
     "publish_outputs",
     "gui_display",
+    "unaccounted_overhead",
     "callback_total",
   };
 
 using RidgeTimingArray =
   std::array<long long, static_cast<std::size_t>(RidgeTimingStage::Count)>;
 
+enum class RidgeStatIndex : std::size_t
+{
+  RidgePoints = 0,
+  PrefilteredRidgePoints,
+  OrientationValidSeeds,
+  WidthSupportedPoints,
+  SeedPoints,
+  SupportedSeedPoints,
+  TotalSideSamples,
+  AvgSamplesPerSeed,
+  MaxLocalWidthPx,
+  Count
+};
+
+constexpr std::array<const char *, static_cast<std::size_t>(RidgeStatIndex::Count)>
+  kRidgeStatLabels = {
+    "ridge_point_count",
+    "prefiltered_ridge_point_count",
+    "orientation_valid_seed_count",
+    "width_supported_point_count",
+    "seed_point_count",
+    "supported_seed_point_count",
+    "total_side_samples",
+    "avg_samples_per_seed",
+    "max_local_width_px",
+  };
+
+using RidgeStatArray =
+  std::array<double, static_cast<std::size_t>(RidgeStatIndex::Count)>;
+
 struct RidgeFrameTiming
 {
   RidgeTimingArray stage_us{};
 };
+
+RidgeStatArray ridgeStatsToArray(const RidgeFrameStats & stats)
+{
+  RidgeStatArray values{};
+  values[static_cast<std::size_t>(RidgeStatIndex::RidgePoints)] = stats.ridge_point_count;
+  values[static_cast<std::size_t>(RidgeStatIndex::PrefilteredRidgePoints)] =
+    stats.prefiltered_ridge_point_count;
+  values[static_cast<std::size_t>(RidgeStatIndex::OrientationValidSeeds)] =
+    stats.orientation_valid_seed_count;
+  values[static_cast<std::size_t>(RidgeStatIndex::WidthSupportedPoints)] =
+    stats.width_supported_point_count;
+  values[static_cast<std::size_t>(RidgeStatIndex::SeedPoints)] = stats.seed_point_count;
+  values[static_cast<std::size_t>(RidgeStatIndex::SupportedSeedPoints)] =
+    stats.supported_seed_point_count;
+  values[static_cast<std::size_t>(RidgeStatIndex::TotalSideSamples)] = stats.total_side_samples;
+  values[static_cast<std::size_t>(RidgeStatIndex::AvgSamplesPerSeed)] = stats.avg_samples_per_seed;
+  values[static_cast<std::size_t>(RidgeStatIndex::MaxLocalWidthPx)] = stats.max_local_width_px;
+  return values;
+}
 
 void recordStageDuration(
   RidgeTimingArray & target,
@@ -387,6 +629,21 @@ void recordStageDuration(
   const TimePoint & end)
 {
   target[static_cast<std::size_t>(stage)] = elapsedUs(start, end);
+}
+
+long long sumTimingStagesExcludingCallback(const RidgeTimingArray & values)
+{
+  long long total_us = 0;
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (
+      i == static_cast<std::size_t>(RidgeTimingStage::UnaccountedOverhead) ||
+      i == static_cast<std::size_t>(RidgeTimingStage::CallbackTotal))
+    {
+      continue;
+    }
+    total_us += values[i];
+  }
+  return total_us;
 }
 
 template<typename PublisherT>
@@ -450,6 +707,27 @@ void appendTimingTable(
   }
 }
 
+void appendStatsTable(
+  std::ostringstream & oss,
+  const RidgeFrameStats & stats,
+  const RidgeStatArray & interval_totals,
+  std::size_t interval_frame_count)
+{
+  const RidgeStatArray current = ridgeStatsToArray(stats);
+  oss << '\n'
+      << std::left << std::setw(28) << "统计项"
+      << std::right << std::setw(14) << "当前"
+      << std::setw(16) << "区间平均" << '\n';
+
+  for (std::size_t i = 0; i < kRidgeStatLabels.size(); ++i) {
+    const double interval_average =
+      interval_frame_count > 0 ? interval_totals[i] / static_cast<double>(interval_frame_count) : 0.0;
+    oss << std::left << std::setw(28) << kRidgeStatLabels[i]
+        << std::right << std::setw(14) << std::fixed << std::setprecision(2) << current[i]
+        << std::setw(16) << std::fixed << std::setprecision(2) << interval_average << '\n';
+  }
+}
+
 }  // namespace
 
 class WhiteLineDtRidgeFilterNode : public rclcpp::Node
@@ -464,6 +742,7 @@ public:
     declare_parameter<std::string>("noise_mask_topic", "/white_line_hsv_white_node/noise_mask");
     declare_parameter("orientation_window_radius_px", 5);
     declare_parameter("min_orientation_neighbors", 6);
+    declare_parameter("enable_orientation_estimate", false);
     declare_parameter("side_margin_px", 1);
     declare_parameter("side_band_depth_px", 4);
     declare_parameter("min_green_ratio", 0.35);
@@ -473,16 +752,27 @@ public:
     declare_parameter("width_ceil_px", 40.0);
     declare_parameter("width_mad_scale", 2.5);
     declare_parameter("min_width_samples", 25);
+    declare_parameter("enable_candidate_prefilter", false);
+    declare_parameter("candidate_min_component_px", 3);
+    declare_parameter("candidate_prune_rounds", 1);
+    declare_parameter("side_scan_stride", 3);
+    declare_parameter("side_template_direction_bins", 16);
+    declare_parameter("enable_parallel_side_scan", true);
+    declare_parameter("enable_parallel_orientation_estimate", true);
+    declare_parameter("enable_length_filter", false);
     declare_parameter("min_skeleton_length_px", 12);
     declare_parameter("reconstruction_margin_px", 1.0);
     declare_parameter("enable_image_view", false);
     declare_parameter("show_morph_mask", true);
+    declare_parameter("show_distance_transform", false);
     declare_parameter("show_green_mask", false);
     declare_parameter("show_black_mask", false);
     declare_parameter("show_noise_mask", false);
     declare_parameter("show_ridge_mask", true);
     declare_parameter("show_skeleton_mask", true);
+    declare_parameter("show_candidate_prefilter_mask", false);
     declare_parameter("show_orientation_valid_mask", true);
+    declare_parameter("show_side_support_seed_mask", false);
     declare_parameter("show_side_support_mask", true);
     declare_parameter("show_width_supported_ridge_mask", true);
     declare_parameter("show_width_supported_skeleton_mask", true);
@@ -502,9 +792,15 @@ public:
     setupSubscribers();
 
     ridge_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/ridge_mask", 10);
+    distance_transform_pub_ =
+      create_publisher<sensor_msgs::msg::Image>("~/distance_transform_image", 10);
     legacy_skeleton_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/skeleton_mask", 10);
+    candidate_prefilter_mask_pub_ =
+      create_publisher<sensor_msgs::msg::Image>("~/candidate_prefilter_mask", 10);
     orientation_valid_mask_pub_ =
       create_publisher<sensor_msgs::msg::Image>("~/orientation_valid_mask", 10);
+    side_support_seed_mask_pub_ =
+      create_publisher<sensor_msgs::msg::Image>("~/side_support_seed_mask", 10);
     side_support_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/side_support_mask", 10);
     width_supported_ridge_mask_pub_ =
       create_publisher<sensor_msgs::msg::Image>("~/width_supported_ridge_mask", 10);
@@ -529,6 +825,10 @@ public:
       enable_timing_debug_ ? "true" : "false",
       timing_summary_interval_,
       morph_mask_topic_.c_str());
+    RCLCPP_INFO(
+      get_logger(),
+      "DT ridge fixed-width mode active. Parameters 'width_mad_scale' and 'min_width_samples' "
+      "are currently ignored.");
   }
 
   ~WhiteLineDtRidgeFilterNode() override
@@ -548,8 +848,11 @@ private:
   std::shared_ptr<message_filters::Synchronizer<ExactPolicy>> synchronizer_;
 
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr ridge_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr distance_transform_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr legacy_skeleton_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr candidate_prefilter_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr orientation_valid_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr side_support_seed_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr side_support_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr width_supported_ridge_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr legacy_width_supported_skeleton_mask_pub_;
@@ -567,6 +870,7 @@ private:
   std::string noise_mask_topic_;
   int orientation_window_radius_px_ = 5;
   int min_orientation_neighbors_ = 6;
+  bool enable_orientation_estimate_ = false;
   int side_margin_px_ = 1;
   int side_band_depth_px_ = 4;
   double min_green_ratio_ = 0.35;
@@ -576,15 +880,26 @@ private:
   double width_ceil_px_ = 40.0;
   double width_mad_scale_ = 2.5;
   int min_width_samples_ = 25;
+  bool enable_candidate_prefilter_ = false;
+  int candidate_min_component_px_ = 3;
+  int candidate_prune_rounds_ = 1;
+  int side_scan_stride_ = 3;
+  int side_template_direction_bins_ = 16;
+  bool enable_parallel_side_scan_ = true;
+  bool enable_parallel_orientation_estimate_ = true;
+  bool enable_length_filter_ = false;
   int min_skeleton_length_px_ = 12;
   double reconstruction_margin_px_ = 1.0;
   bool enable_image_view_ = false;
   bool show_morph_mask_ = true;
+  bool show_distance_transform_ = false;
   bool show_green_mask_ = false;
   bool show_black_mask_ = false;
   bool show_noise_mask_ = false;
   bool show_ridge_mask_ = true;
+  bool show_candidate_prefilter_mask_ = false;
   bool show_orientation_valid_mask_ = true;
+  bool show_side_support_seed_mask_ = false;
   bool show_side_support_mask_ = true;
   bool show_width_supported_ridge_mask_ = true;
   bool show_length_filtered_ridge_mask_ = kDefaultShowLengthFilteredRidgeMask;
@@ -593,11 +908,14 @@ private:
   bool show_debug_image_ = true;
   bool enable_timing_debug_ = false;
   bool morph_window_created_ = false;
+  bool distance_transform_window_created_ = false;
   bool green_window_created_ = false;
   bool black_window_created_ = false;
   bool noise_window_created_ = false;
   bool ridge_window_created_ = false;
+  bool candidate_prefilter_window_created_ = false;
   bool orientation_valid_window_created_ = false;
+  bool side_support_seed_window_created_ = false;
   bool side_support_window_created_ = false;
   bool width_supported_window_created_ = false;
   bool length_filtered_ridge_window_created_ = false;
@@ -614,6 +932,12 @@ private:
   long long timing_interval_total_us_ = 0;
   long long timing_interval_max_us_ = 0;
   RidgeTimingArray timing_stage_interval_totals_{};
+  RidgeStatArray stats_interval_totals_{};
+  int cached_orientation_radius_ = -1;
+  std::vector<cv::Point> orientation_circle_offsets_;
+  int cached_template_direction_bins_ = -1;
+  int cached_template_side_band_depth_ = -1;
+  std::unordered_map<std::uint64_t, std::vector<cv::Point>> side_template_cache_;
 
   bool isParameterOverridden(const char * name)
   {
@@ -644,6 +968,7 @@ private:
       std::max(1, static_cast<int>(get_parameter("orientation_window_radius_px").as_int()));
     min_orientation_neighbors_ =
       std::max(2, static_cast<int>(get_parameter("min_orientation_neighbors").as_int()));
+    enable_orientation_estimate_ = get_parameter("enable_orientation_estimate").as_bool();
     side_margin_px_ = std::max(0, static_cast<int>(get_parameter("side_margin_px").as_int()));
     side_band_depth_px_ =
       std::max(1, static_cast<int>(get_parameter("side_band_depth_px").as_int()));
@@ -654,17 +979,32 @@ private:
     width_ceil_px_ = std::max(width_floor_px_, get_parameter("width_ceil_px").as_double());
     width_mad_scale_ = std::max(0.0, get_parameter("width_mad_scale").as_double());
     min_width_samples_ = std::max(1, static_cast<int>(get_parameter("min_width_samples").as_int()));
+    enable_candidate_prefilter_ = get_parameter("enable_candidate_prefilter").as_bool();
+    candidate_min_component_px_ =
+      std::max(1, static_cast<int>(get_parameter("candidate_min_component_px").as_int()));
+    candidate_prune_rounds_ =
+      std::max(0, static_cast<int>(get_parameter("candidate_prune_rounds").as_int()));
+    side_scan_stride_ = std::max(1, static_cast<int>(get_parameter("side_scan_stride").as_int()));
+    side_template_direction_bins_ =
+      std::max(4, static_cast<int>(get_parameter("side_template_direction_bins").as_int()));
+    enable_parallel_side_scan_ = get_parameter("enable_parallel_side_scan").as_bool();
+    enable_parallel_orientation_estimate_ =
+      get_parameter("enable_parallel_orientation_estimate").as_bool();
+    enable_length_filter_ = get_parameter("enable_length_filter").as_bool();
     min_skeleton_length_px_ =
       std::max(1, static_cast<int>(get_parameter("min_skeleton_length_px").as_int()));
     reconstruction_margin_px_ =
       std::max(0.0, get_parameter("reconstruction_margin_px").as_double());
     enable_image_view_ = get_parameter("enable_image_view").as_bool();
     show_morph_mask_ = get_parameter("show_morph_mask").as_bool();
+    show_distance_transform_ = get_parameter("show_distance_transform").as_bool();
     show_green_mask_ = get_parameter("show_green_mask").as_bool();
     show_black_mask_ = get_parameter("show_black_mask").as_bool();
     show_noise_mask_ = get_parameter("show_noise_mask").as_bool();
     show_ridge_mask_ = resolveBoolParameter("show_ridge_mask", {"show_skeleton_mask"});
+    show_candidate_prefilter_mask_ = get_parameter("show_candidate_prefilter_mask").as_bool();
     show_orientation_valid_mask_ = get_parameter("show_orientation_valid_mask").as_bool();
+    show_side_support_seed_mask_ = get_parameter("show_side_support_seed_mask").as_bool();
     show_side_support_mask_ = get_parameter("show_side_support_mask").as_bool();
     show_width_supported_ridge_mask_ = resolveBoolParameter(
       "show_width_supported_ridge_mask",
@@ -681,6 +1021,20 @@ private:
     display_max_width_ = std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
     display_max_height_ =
       std::max(1, static_cast<int>(get_parameter("display_max_height").as_int()));
+
+    if (cached_orientation_radius_ != orientation_window_radius_px_) {
+      orientation_circle_offsets_ = buildOrientationCircleOffsets(orientation_window_radius_px_);
+      cached_orientation_radius_ = orientation_window_radius_px_;
+    }
+
+    if (
+      cached_template_direction_bins_ != side_template_direction_bins_ ||
+      cached_template_side_band_depth_ != side_band_depth_px_)
+    {
+      side_template_cache_.clear();
+      cached_template_direction_bins_ = side_template_direction_bins_;
+      cached_template_side_band_depth_ = side_band_depth_px_;
+    }
   }
 
   void resetTimingSummary()
@@ -690,10 +1044,12 @@ private:
     timing_interval_total_us_ = 0;
     timing_interval_max_us_ = 0;
     timing_stage_interval_totals_.fill(0);
+    stats_interval_totals_.fill(0.0);
   }
 
   void maybeLogTimingSummary(
     const RidgeFrameTiming & timing,
+    const RidgeFrameStats & stats,
     unsigned long long current_frame_index)
   {
     if (!enable_timing_debug_) {
@@ -713,6 +1069,10 @@ private:
     for (std::size_t i = 0; i < timing_stage_interval_totals_.size(); ++i) {
       timing_stage_interval_totals_[i] += timing.stage_us[i];
     }
+    const RidgeStatArray current_stats = ridgeStatsToArray(stats);
+    for (std::size_t i = 0; i < stats_interval_totals_.size(); ++i) {
+      stats_interval_totals_[i] += current_stats[i];
+    }
 
     if (timing_frames_in_interval_ < static_cast<std::size_t>(timing_summary_interval_)) {
       return;
@@ -730,6 +1090,8 @@ private:
         << " ms, 区间平均: " << avg_ms
         << " ms, 区间最大: " << static_cast<double>(timing_interval_max_us_) / 1000.0 << " ms\n\n";
     appendTimingTable(oss, timing, timing_stage_interval_totals_, timing_frames_in_interval_);
+    appendStatsTable(oss, stats, stats_interval_totals_, timing_frames_in_interval_);
+    oss << "\n宽度模式: fixed_floor_ceil (width_mad_scale/min_width_samples ignored)\n";
     oss << "========================================================";
     RCLCPP_INFO_STREAM(get_logger(), oss.str());
 
@@ -738,16 +1100,21 @@ private:
 
   bool anyImageWindowRequested() const
   {
-    return show_morph_mask_ || show_green_mask_ || show_black_mask_ || show_noise_mask_ ||
-           show_ridge_mask_ || show_orientation_valid_mask_ || show_side_support_mask_ ||
+    return show_morph_mask_ || show_distance_transform_ || show_green_mask_ ||
+           show_black_mask_ || show_noise_mask_ ||
+           show_ridge_mask_ || show_candidate_prefilter_mask_ ||
+           (enable_orientation_estimate_ && show_orientation_valid_mask_) ||
+           show_side_support_seed_mask_ || show_side_support_mask_ ||
            show_width_supported_ridge_mask_ || show_length_filtered_ridge_mask_ ||
            show_reconstructed_mask_ || show_white_final_mask_ || show_debug_image_;
   }
 
   bool anyImageWindowCreated() const
   {
-    return morph_window_created_ || green_window_created_ || black_window_created_ ||
-           noise_window_created_ || ridge_window_created_ || orientation_valid_window_created_ ||
+    return morph_window_created_ || distance_transform_window_created_ || green_window_created_ ||
+           black_window_created_ ||
+           noise_window_created_ || ridge_window_created_ || candidate_prefilter_window_created_ ||
+           orientation_valid_window_created_ || side_support_seed_window_created_ ||
            side_support_window_created_ || width_supported_window_created_ ||
            length_filtered_ridge_window_created_ || reconstructed_window_created_ ||
            white_final_mask_window_created_ || debug_window_created_;
@@ -767,11 +1134,14 @@ private:
   void destroyDebugWindows()
   {
     syncWindow(kMorphWindow, false, morph_window_created_);
+    syncWindow(kDistanceTransformWindow, false, distance_transform_window_created_);
     syncWindow(kGreenWindow, false, green_window_created_);
     syncWindow(kBlackWindow, false, black_window_created_);
     syncWindow(kNoiseWindow, false, noise_window_created_);
     syncWindow(kRidgeWindow, false, ridge_window_created_);
+    syncWindow(kCandidatePrefilterWindow, false, candidate_prefilter_window_created_);
     syncWindow(kOrientationValidWindow, false, orientation_valid_window_created_);
+    syncWindow(kSideSupportSeedWindow, false, side_support_seed_window_created_);
     syncWindow(kSideSupportWindow, false, side_support_window_created_);
     syncWindow(kWidthSupportedWindow, false, width_supported_window_created_);
     syncWindow(kLengthFilteredRidgeWindow, false, length_filtered_ridge_window_created_);
@@ -785,14 +1155,26 @@ private:
     loadRuntimeParameters();
     const bool master_enabled = enable_image_view_ && anyImageWindowRequested();
     syncWindow(kMorphWindow, master_enabled && show_morph_mask_, morph_window_created_);
+    syncWindow(
+      kDistanceTransformWindow,
+      master_enabled && show_distance_transform_,
+      distance_transform_window_created_);
     syncWindow(kGreenWindow, master_enabled && show_green_mask_, green_window_created_);
     syncWindow(kBlackWindow, master_enabled && show_black_mask_, black_window_created_);
     syncWindow(kNoiseWindow, master_enabled && show_noise_mask_, noise_window_created_);
     syncWindow(kRidgeWindow, master_enabled && show_ridge_mask_, ridge_window_created_);
     syncWindow(
+      kCandidatePrefilterWindow,
+      master_enabled && show_candidate_prefilter_mask_,
+      candidate_prefilter_window_created_);
+    syncWindow(
       kOrientationValidWindow,
-      master_enabled && show_orientation_valid_mask_,
+      master_enabled && enable_orientation_estimate_ && show_orientation_valid_mask_,
       orientation_valid_window_created_);
+    syncWindow(
+      kSideSupportSeedWindow,
+      master_enabled && show_side_support_seed_mask_,
+      side_support_seed_window_created_);
     syncWindow(
       kSideSupportWindow,
       master_enabled && show_side_support_mask_,
@@ -838,10 +1220,93 @@ private:
         std::placeholders::_4));
   }
 
+  std::vector<SeedCandidate> selectSeedPoints(
+    const cv::Mat & width_supported_ridge_mask,
+    const cv::Mat & local_width_map) const
+  {
+    CV_Assert(width_supported_ridge_mask.type() == CV_8UC1);
+    CV_Assert(local_width_map.type() == CV_32FC1);
+
+    std::vector<SeedCandidate> seeds;
+    if (cv::countNonZero(width_supported_ridge_mask) == 0) {
+      return seeds;
+    }
+
+    cv::Mat labels;
+    cv::Mat stats;
+    cv::Mat centroids;
+    cv::connectedComponentsWithStats(width_supported_ridge_mask, labels, stats, centroids, 8, CV_32S);
+    std::vector<int> component_counts(static_cast<std::size_t>(stats.rows), 0);
+    seeds.reserve(static_cast<std::size_t>(cv::countNonZero(width_supported_ridge_mask)));
+    for (int y = 0; y < width_supported_ridge_mask.rows; ++y) {
+      for (int x = 0; x < width_supported_ridge_mask.cols; ++x) {
+        if (width_supported_ridge_mask.at<uchar>(y, x) == 0) {
+          continue;
+        }
+        const int label = labels.at<int>(y, x);
+        if (label <= 0) {
+          continue;
+        }
+        const int component_index = component_counts[static_cast<std::size_t>(label)]++;
+        if ((component_index % side_scan_stride_) != 0) {
+          continue;
+        }
+        const float local_width_px = local_width_map.at<float>(y, x);
+        seeds.push_back(SeedCandidate{
+            cv::Point(x, y),
+            computeStartOffset(local_width_px, side_margin_px_),
+            computeTangentHalfSpan(local_width_px)});
+      }
+    }
+    return seeds;
+  }
+
+  void ensureSideTemplates(const std::vector<SeedPoint> & seeds)
+  {
+    for (const SeedPoint & seed : seeds) {
+      const std::uint64_t left_key = makeSideTemplateKey(
+        seed.dir_bin,
+        seed.start_offset,
+        seed.tangent_half_span,
+        -1);
+      if (side_template_cache_.find(left_key) == side_template_cache_.end()) {
+        side_template_cache_.emplace(
+          left_key,
+          buildSideTemplateOffsets(
+            seed.dir_bin,
+            side_template_direction_bins_,
+            seed.start_offset,
+            seed.tangent_half_span,
+            side_band_depth_px_,
+            -1));
+      }
+
+      const std::uint64_t right_key = makeSideTemplateKey(
+        seed.dir_bin,
+        seed.start_offset,
+        seed.tangent_half_span,
+        1);
+      if (side_template_cache_.find(right_key) == side_template_cache_.end()) {
+        side_template_cache_.emplace(
+          right_key,
+          buildSideTemplateOffsets(
+            seed.dir_bin,
+            side_template_direction_bins_,
+            seed.start_offset,
+            seed.tangent_half_span,
+            side_band_depth_px_,
+            1));
+      }
+    }
+  }
+
   bool publishOutputs(
     const std_msgs::msg::Header & header,
+    const cv::Mat & distance_transform_debug_image,
     const cv::Mat & ridge_mask,
+    const cv::Mat & candidate_prefilter_mask,
     const cv::Mat & orientation_valid_mask,
+    const cv::Mat & side_support_seed_mask,
     const cv::Mat & side_support_mask,
     const cv::Mat & width_supported_ridge_mask,
     const cv::Mat & length_filtered_ridge_mask,
@@ -874,12 +1339,33 @@ private:
         "mono8",
         ridge_mask);
     }
-    if (show_orientation_valid_mask_) {
+    if (show_candidate_prefilter_mask_) {
+      published_any |= publishImageIfSubscribed(
+        candidate_prefilter_mask_pub_,
+        header,
+        "mono8",
+        candidate_prefilter_mask);
+    }
+    if (show_distance_transform_ && !distance_transform_debug_image.empty()) {
+      published_any |= publishImageIfSubscribed(
+        distance_transform_pub_,
+        header,
+        "bgr8",
+        distance_transform_debug_image);
+    }
+    if (enable_orientation_estimate_ && show_orientation_valid_mask_) {
       published_any |= publishImageIfSubscribed(
         orientation_valid_mask_pub_,
         header,
         "mono8",
         orientation_valid_mask);
+    }
+    if (show_side_support_seed_mask_) {
+      published_any |= publishImageIfSubscribed(
+        side_support_seed_mask_pub_,
+        header,
+        "mono8",
+        side_support_seed_mask);
     }
     if (show_side_support_mask_) {
       published_any |= publishImageIfSubscribed(
@@ -933,8 +1419,11 @@ private:
 
   bool displayOutputs(
     const cv::Mat & morph_mask,
+    const cv::Mat & distance_transform_debug_image,
     const cv::Mat & ridge_mask,
+    const cv::Mat & candidate_prefilter_mask,
     const cv::Mat & orientation_valid_mask,
+    const cv::Mat & side_support_seed_mask,
     const cv::Mat & side_support_mask,
     const cv::Mat & width_supported_ridge_mask,
     const cv::Mat & length_filtered_ridge_mask,
@@ -949,6 +1438,15 @@ private:
     if (morph_window_created_) {
       cv::imshow(kMorphWindow, morph_mask);
       resizeWindowToFitImage(kMorphWindow, morph_mask, display_max_width_, display_max_height_);
+      displayed_any_window = true;
+    }
+    if (distance_transform_window_created_ && !distance_transform_debug_image.empty()) {
+      cv::imshow(kDistanceTransformWindow, distance_transform_debug_image);
+      resizeWindowToFitImage(
+        kDistanceTransformWindow,
+        distance_transform_debug_image,
+        display_max_width_,
+        display_max_height_);
       displayed_any_window = true;
     }
     if (green_window_created_) {
@@ -971,11 +1469,29 @@ private:
       resizeWindowToFitImage(kRidgeWindow, ridge_mask, display_max_width_, display_max_height_);
       displayed_any_window = true;
     }
-    if (orientation_valid_window_created_) {
+    if (candidate_prefilter_window_created_) {
+      cv::imshow(kCandidatePrefilterWindow, candidate_prefilter_mask);
+      resizeWindowToFitImage(
+        kCandidatePrefilterWindow,
+        candidate_prefilter_mask,
+        display_max_width_,
+        display_max_height_);
+      displayed_any_window = true;
+    }
+    if (enable_orientation_estimate_ && orientation_valid_window_created_) {
       cv::imshow(kOrientationValidWindow, orientation_valid_mask);
       resizeWindowToFitImage(
         kOrientationValidWindow,
         orientation_valid_mask,
+        display_max_width_,
+        display_max_height_);
+      displayed_any_window = true;
+    }
+    if (side_support_seed_window_created_) {
+      cv::imshow(kSideSupportSeedWindow, side_support_seed_mask);
+      resizeWindowToFitImage(
+        kSideSupportSeedWindow,
+        side_support_seed_mask,
         display_max_width_,
         display_max_height_);
       displayed_any_window = true;
@@ -1108,6 +1624,22 @@ private:
         SteadyClock::now());
     }
 
+    const bool distance_transform_debug_image_needed =
+      show_distance_transform_ &&
+      (distance_transform_window_created_ || hasSubscribers(distance_transform_pub_));
+    cv::Mat distance_transform_debug_image;
+    if (distance_transform_debug_image_needed) {
+      stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+      distance_transform_debug_image = createDistanceTransformDebugImage(distance_transform);
+      if (timing_enabled) {
+        recordStageDuration(
+          timing.stage_us,
+          RidgeTimingStage::DistanceTransformDebug,
+          stage_start,
+          SteadyClock::now());
+      }
+    }
+
     stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
     const cv::Mat ridge_mask = extractDistanceTransformRidgeMask(morph_mask, distance_transform);
     if (timing_enabled) {
@@ -1118,145 +1650,337 @@ private:
         SteadyClock::now());
     }
 
+    RidgeFrameStats frame_stats;
+    cv::Mat candidate_prefilter_mask;
+    stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+    if (enable_candidate_prefilter_) {
+      candidate_prefilter_mask =
+        filterMaskByMinComponentArea(ridge_mask, candidate_min_component_px_);
+      candidate_prefilter_mask = pruneMaskEndpoints(candidate_prefilter_mask, candidate_prune_rounds_);
+    } else {
+      candidate_prefilter_mask = ridge_mask.clone();
+    }
+    if (timing_enabled) {
+      if (enable_candidate_prefilter_) {
+        recordStageDuration(
+          timing.stage_us,
+          RidgeTimingStage::CandidatePrefilter,
+          stage_start,
+          SteadyClock::now());
+      } else {
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::CandidatePrefilter)] = 0;
+      }
+    }
+    stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+    frame_stats.ridge_point_count = static_cast<double>(cv::countNonZero(ridge_mask));
+    frame_stats.prefiltered_ridge_point_count =
+      static_cast<double>(cv::countNonZero(candidate_prefilter_mask));
+    if (timing_enabled) {
+      recordStageDuration(
+        timing.stage_us,
+        RidgeTimingStage::StatsCollect,
+        stage_start,
+        SteadyClock::now());
+    }
+
     cv::Mat orientation_valid_mask = cv::Mat::zeros(morph_mask.size(), CV_8UC1);
+    cv::Mat side_support_seed_mask = cv::Mat::zeros(morph_mask.size(), CV_8UC1);
     cv::Mat side_support_mask = cv::Mat::zeros(morph_mask.size(), CV_8UC1);
     cv::Mat local_width_map = cv::Mat::zeros(morph_mask.size(), CV_32FC1);
-    std::vector<float> supported_widths;
-    supported_widths.reserve(static_cast<std::size_t>(cv::countNonZero(ridge_mask)));
-
-    stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
-    for (int y = 0; y < ridge_mask.rows; ++y) {
-      for (int x = 0; x < ridge_mask.cols; ++x) {
-        if (ridge_mask.at<uchar>(y, x) == 0) {
-          continue;
-        }
-
-        const float local_width_px = 2.0F * distance_transform.at<float>(y, x);
-        if (local_width_px <= 0.0F) {
-          continue;
-        }
-
-        cv::Point2f tangent;
-        cv::Point2f normal;
-        if (!estimateOrientation(
-            ridge_mask,
-            cv::Point(x, y),
-            orientation_window_radius_px_,
-            min_orientation_neighbors_,
-            tangent,
-            normal))
-        {
-          continue;
-        }
-
-        orientation_valid_mask.at<uchar>(y, x) = 255;
-        local_width_map.at<float>(y, x) = local_width_px;
-        const SideSampleStats left_stats = sampleSideSupport(
-          cv::Point(x, y),
-          tangent,
-          normal,
-          local_width_px,
-          -1,
-          green_mask,
-          black_mask,
-          noise_mask,
-          side_margin_px_,
-          side_band_depth_px_);
-        const SideSampleStats right_stats = sampleSideSupport(
-          cv::Point(x, y),
-          tangent,
-          normal,
-          local_width_px,
-          1,
-          green_mask,
-          black_mask,
-          noise_mask,
-          side_margin_px_,
-          side_band_depth_px_);
-
-        const bool interior_supported =
-          left_stats.greenRatio() >= min_green_ratio_ &&
-          right_stats.greenRatio() >= min_green_ratio_;
-        const bool boundary_supported =
-          enable_boundary_mode_ &&
-          ((left_stats.greenRatio() >= min_green_ratio_ &&
-          right_stats.boundaryRatio() >= min_boundary_ratio_) ||
-          (right_stats.greenRatio() >= min_green_ratio_ &&
-          left_stats.boundaryRatio() >= min_boundary_ratio_));
-
-        if (!interior_supported && !boundary_supported) {
-          continue;
-        }
-
-        side_support_mask.at<uchar>(y, x) = 255;
-        supported_widths.push_back(local_width_px);
-      }
-    }
-    if (timing_enabled) {
-      recordStageDuration(
-        timing.stage_us,
-        RidgeTimingStage::SideSupportScan,
-        stage_start,
-        SteadyClock::now());
-    }
-
-    double width_lower_bound = width_floor_px_;
-    double width_upper_bound = width_ceil_px_;
-    stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
-    if (static_cast<int>(supported_widths.size()) >= min_width_samples_) {
-      const double width_median = computeMedian(supported_widths);
-      std::vector<float> deviations;
-      deviations.reserve(supported_widths.size());
-      for (const float width : supported_widths) {
-        deviations.push_back(static_cast<float>(std::abs(width - width_median)));
-      }
-      const double width_mad = computeMedian(deviations);
-      width_lower_bound = std::max(width_floor_px_, width_median - width_mad_scale_ * width_mad);
-      width_upper_bound = std::min(width_ceil_px_, width_median + width_mad_scale_ * width_mad);
-      if (width_upper_bound < width_lower_bound) {
-        width_lower_bound = width_floor_px_;
-        width_upper_bound = width_ceil_px_;
-      }
-    }
-    if (timing_enabled) {
-      recordStageDuration(
-        timing.stage_us,
-        RidgeTimingStage::WidthRangeEstimate,
-        stage_start,
-        SteadyClock::now());
-    }
-
     cv::Mat width_supported_ridge_mask = cv::Mat::zeros(morph_mask.size(), CV_8UC1);
+    const cv::Mat & ridge_processing_mask = enable_candidate_prefilter_ ? candidate_prefilter_mask :
+      ridge_mask;
     stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
-    for (int y = 0; y < side_support_mask.rows; ++y) {
-      for (int x = 0; x < side_support_mask.cols; ++x) {
-        if (side_support_mask.at<uchar>(y, x) == 0) {
-          continue;
-        }
-        const float local_width_px = local_width_map.at<float>(y, x);
-        if (local_width_px < width_lower_bound || local_width_px > width_upper_bound) {
-          continue;
-        }
-        width_supported_ridge_mask.at<uchar>(y, x) = 255;
+    std::vector<cv::Point> ridge_points;
+    cv::findNonZero(ridge_processing_mask, ridge_points);
+    for (const cv::Point & point : ridge_points) {
+      const float local_width_px = 2.0F * distance_transform.at<float>(point.y, point.x);
+      if (local_width_px <= 0.0F) {
+        continue;
       }
+      local_width_map.at<float>(point.y, point.x) = local_width_px;
+      if (local_width_px < width_floor_px_ || local_width_px > width_ceil_px_) {
+        continue;
+      }
+      width_supported_ridge_mask.at<uchar>(point.y, point.x) = 255;
+      frame_stats.width_supported_point_count += 1.0;
+      frame_stats.max_local_width_px = std::max(
+        frame_stats.max_local_width_px,
+        static_cast<double>(local_width_px));
     }
     if (timing_enabled) {
       recordStageDuration(
         timing.stage_us,
-        RidgeTimingStage::WidthFilter,
+        RidgeTimingStage::WidthFilterPreSupport,
         stage_start,
         SteadyClock::now());
     }
 
-    stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
-    const cv::Mat length_filtered_ridge_mask =
-      filterMaskByLength(width_supported_ridge_mask, min_skeleton_length_px_);
-    if (timing_enabled) {
-      recordStageDuration(
-        timing.stage_us,
-        RidgeTimingStage::LengthFilter,
-        stage_start,
-        SteadyClock::now());
+    std::vector<SeedPoint> oriented_seed_points;
+    if (enable_orientation_estimate_) {
+      stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+      const std::vector<SeedCandidate> seed_candidates =
+        selectSeedPoints(width_supported_ridge_mask, local_width_map);
+      frame_stats.seed_point_count = static_cast<double>(seed_candidates.size());
+      if (timing_enabled) {
+        recordStageDuration(
+          timing.stage_us,
+          RidgeTimingStage::SideSupportSeedSelect,
+          stage_start,
+          SteadyClock::now());
+      }
+
+      stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+      oriented_seed_points.reserve(seed_candidates.size());
+      if (enable_parallel_orientation_estimate_ && !seed_candidates.empty()) {
+#ifdef _OPENMP
+#pragma omp parallel
+        {
+          std::vector<SeedPoint> local_oriented;
+          local_oriented.reserve(64);
+#pragma omp for schedule(static) nowait
+          for (int i = 0; i < static_cast<int>(seed_candidates.size()); ++i) {
+            const SeedCandidate & seed_candidate = seed_candidates[static_cast<std::size_t>(i)];
+            cv::Point2f tangent;
+            cv::Point2f normal;
+            if (!estimateOrientation(
+                  width_supported_ridge_mask,
+                  seed_candidate.point,
+                  orientation_circle_offsets_,
+                  min_orientation_neighbors_,
+                  tangent,
+                  normal))
+            {
+              continue;
+            }
+            local_oriented.push_back(SeedPoint{
+                seed_candidate.point,
+                quantizeDirectionBin(tangent, side_template_direction_bins_),
+                seed_candidate.start_offset,
+                seed_candidate.tangent_half_span});
+          }
+#pragma omp critical
+          {
+            oriented_seed_points.insert(
+              oriented_seed_points.end(),
+              local_oriented.begin(),
+              local_oriented.end());
+          }
+        }
+#else
+        for (const SeedCandidate & seed_candidate : seed_candidates) {
+          cv::Point2f tangent;
+          cv::Point2f normal;
+          if (!estimateOrientation(
+                width_supported_ridge_mask,
+                seed_candidate.point,
+                orientation_circle_offsets_,
+                min_orientation_neighbors_,
+                tangent,
+                normal))
+          {
+            continue;
+          }
+          oriented_seed_points.push_back(SeedPoint{
+              seed_candidate.point,
+              quantizeDirectionBin(tangent, side_template_direction_bins_),
+              seed_candidate.start_offset,
+              seed_candidate.tangent_half_span});
+        }
+#endif
+      } else {
+        for (const SeedCandidate & seed_candidate : seed_candidates) {
+          cv::Point2f tangent;
+          cv::Point2f normal;
+          if (!estimateOrientation(
+                width_supported_ridge_mask,
+                seed_candidate.point,
+                orientation_circle_offsets_,
+                min_orientation_neighbors_,
+                tangent,
+                normal))
+          {
+            continue;
+          }
+          oriented_seed_points.push_back(SeedPoint{
+              seed_candidate.point,
+              quantizeDirectionBin(tangent, side_template_direction_bins_),
+              seed_candidate.start_offset,
+              seed_candidate.tangent_half_span});
+        }
+      }
+      for (const SeedPoint & seed : oriented_seed_points) {
+        orientation_valid_mask.at<uchar>(seed.point.y, seed.point.x) = 255;
+      }
+      frame_stats.orientation_valid_seed_count = static_cast<double>(oriented_seed_points.size());
+      if (timing_enabled) {
+        recordStageDuration(
+          timing.stage_us,
+          RidgeTimingStage::OrientationEstimate,
+          stage_start,
+          SteadyClock::now());
+      }
+
+      cv::Mat label_map;
+      if (!oriented_seed_points.empty()) {
+        stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+        label_map = buildLabelMap(green_mask, black_mask, noise_mask);
+        if (timing_enabled) {
+          recordStageDuration(
+            timing.stage_us,
+            RidgeTimingStage::LabelMapBuild,
+            stage_start,
+            SteadyClock::now());
+        }
+
+        stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+        ensureSideTemplates(oriented_seed_points);
+        if (timing_enabled) {
+          recordStageDuration(
+            timing.stage_us,
+            RidgeTimingStage::SideTemplatePrepare,
+            stage_start,
+            SteadyClock::now());
+        }
+      } else if (timing_enabled) {
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::LabelMapBuild)] = 0;
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::SideTemplatePrepare)] = 0;
+      }
+
+      stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+      std::vector<cv::Point> supported_seed_points;
+      supported_seed_points.reserve(oriented_seed_points.size());
+      long long total_side_samples = 0;
+      auto scan_seed_range = [&](int begin, int end, std::vector<cv::Point> & local_supported,
+          long long & local_total_samples) {
+          for (int i = begin; i < end; ++i) {
+            const SeedPoint & seed = oriented_seed_points[static_cast<std::size_t>(i)];
+            const auto & left_offsets = side_template_cache_.at(makeSideTemplateKey(
+                seed.dir_bin,
+                seed.start_offset,
+                seed.tangent_half_span,
+                -1));
+            const auto & right_offsets = side_template_cache_.at(makeSideTemplateKey(
+                seed.dir_bin,
+                seed.start_offset,
+                seed.tangent_half_span,
+                1));
+
+            const SideSampleStats left_stats =
+              sampleSideSupportFromTemplate(seed.point, label_map, left_offsets);
+            const SideSampleStats right_stats =
+              sampleSideSupportFromTemplate(seed.point, label_map, right_offsets);
+            local_total_samples += left_stats.total_samples + right_stats.total_samples;
+
+            const bool interior_supported =
+              left_stats.greenRatio() >= min_green_ratio_ &&
+              right_stats.greenRatio() >= min_green_ratio_;
+            const bool boundary_supported =
+              enable_boundary_mode_ &&
+              ((left_stats.greenRatio() >= min_green_ratio_ &&
+              right_stats.boundaryRatio() >= min_boundary_ratio_) ||
+              (right_stats.greenRatio() >= min_green_ratio_ &&
+              left_stats.boundaryRatio() >= min_boundary_ratio_));
+            if (interior_supported || boundary_supported) {
+              local_supported.push_back(seed.point);
+            }
+          }
+        };
+
+      if (enable_parallel_side_scan_ && !oriented_seed_points.empty()) {
+#ifdef _OPENMP
+#pragma omp parallel
+        {
+          std::vector<cv::Point> local_supported;
+          local_supported.reserve(64);
+          long long local_total_samples = 0;
+#pragma omp for schedule(static) nowait
+          for (int i = 0; i < static_cast<int>(oriented_seed_points.size()); ++i) {
+            scan_seed_range(i, i + 1, local_supported, local_total_samples);
+          }
+#pragma omp critical
+          {
+            total_side_samples += local_total_samples;
+            supported_seed_points.insert(
+              supported_seed_points.end(),
+              local_supported.begin(),
+              local_supported.end());
+          }
+        }
+#else
+        scan_seed_range(
+          0,
+          static_cast<int>(oriented_seed_points.size()),
+          supported_seed_points,
+          total_side_samples);
+#endif
+      } else {
+        scan_seed_range(
+          0,
+          static_cast<int>(oriented_seed_points.size()),
+          supported_seed_points,
+          total_side_samples);
+      }
+      for (const cv::Point & point : supported_seed_points) {
+        side_support_seed_mask.at<uchar>(point.y, point.x) = 255;
+      }
+      frame_stats.supported_seed_point_count = static_cast<double>(supported_seed_points.size());
+      frame_stats.total_side_samples = static_cast<double>(total_side_samples);
+      frame_stats.avg_samples_per_seed =
+        oriented_seed_points.empty() ? 0.0 : static_cast<double>(total_side_samples) /
+        static_cast<double>(oriented_seed_points.size());
+      if (timing_enabled) {
+        recordStageDuration(
+          timing.stage_us,
+          RidgeTimingStage::SideSupportSeedScan,
+          stage_start,
+          SteadyClock::now());
+      }
+
+      stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+      if (!supported_seed_points.empty()) {
+        cv::Mat propagated_seed_mask;
+        const cv::Mat kernel =
+          cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+        cv::dilate(side_support_seed_mask, propagated_seed_mask, kernel);
+        cv::bitwise_and(propagated_seed_mask, width_supported_ridge_mask, side_support_mask);
+      }
+      if (timing_enabled) {
+        recordStageDuration(
+          timing.stage_us,
+          RidgeTimingStage::SideSupportPropagate,
+          stage_start,
+          SteadyClock::now());
+      }
+    } else {
+      side_support_mask = width_supported_ridge_mask.clone();
+      if (timing_enabled) {
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::OrientationEstimate)] = 0;
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::LabelMapBuild)] = 0;
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::SideSupportSeedSelect)] = 0;
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::SideTemplatePrepare)] = 0;
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::SideSupportSeedScan)] = 0;
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::SideSupportPropagate)] = 0;
+      }
+    }
+
+    cv::Mat length_filtered_ridge_mask;
+    if (enable_length_filter_) {
+      stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+      length_filtered_ridge_mask =
+        filterMaskByLength(side_support_mask, min_skeleton_length_px_);
+      if (timing_enabled) {
+        recordStageDuration(
+          timing.stage_us,
+          RidgeTimingStage::LengthFilter,
+          stage_start,
+          SteadyClock::now());
+      }
+    } else {
+      length_filtered_ridge_mask = side_support_mask.clone();
+      if (timing_enabled) {
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::LengthFilter)] = 0;
+      }
     }
 
     cv::Mat reconstructed_mask = cv::Mat::zeros(morph_mask.size(), CV_8UC1);
@@ -1316,8 +2040,11 @@ private:
     stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
     const bool published_any = publishOutputs(
       morph_msg->header,
+      distance_transform_debug_image,
       ridge_mask,
+      candidate_prefilter_mask,
       orientation_valid_mask,
+      side_support_seed_mask,
       side_support_mask,
       width_supported_ridge_mask,
       length_filtered_ridge_mask,
@@ -1338,8 +2065,11 @@ private:
       stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
       displayed_any = displayOutputs(
         morph_mask,
+        distance_transform_debug_image,
         ridge_mask,
+        candidate_prefilter_mask,
         orientation_valid_mask,
+        side_support_seed_mask,
         side_support_mask,
         width_supported_ridge_mask,
         length_filtered_ridge_mask,
@@ -1366,9 +2096,15 @@ private:
         RidgeTimingStage::CallbackTotal,
         callback_start,
         SteadyClock::now());
+      const long long accounted_stage_us = sumTimingStagesExcludingCallback(timing.stage_us);
+      timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::UnaccountedOverhead)] =
+        std::max(
+        0LL,
+        timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::CallbackTotal)] -
+        accounted_stage_us);
     }
 
-    maybeLogTimingSummary(timing, current_frame_index);
+    maybeLogTimingSummary(timing, frame_stats, current_frame_index);
   }
 };
 

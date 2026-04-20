@@ -27,6 +27,9 @@ constexpr int kHueMax = 179;
 constexpr int kByteMax = 255;
 constexpr char kInputWindowName[] = "HSV White Input";
 constexpr char kMaskWindowName[] = "HSV White Mask";
+constexpr char kGreenMaskWindowName[] = "HSV Green Mask";
+constexpr char kBlackMaskWindowName[] = "HSV Black Mask";
+constexpr char kNoiseMaskWindowName[] = "HSV Noise Mask";
 constexpr char kOverlayWindowName[] = "HSV White Overlay";
 
 using SteadyClock = std::chrono::steady_clock;
@@ -191,6 +194,9 @@ public:
     declare_parameter("enable_image_view", false);
     declare_parameter("show_input_image", true);
     declare_parameter("show_white_mask", true);
+    declare_parameter("show_green_mask", false);
+    declare_parameter("show_black_mask", false);
+    declare_parameter("show_noise_mask", false);
     declare_parameter("show_overlay_image", true);
     declare_parameter("display_max_width", 960);
     declare_parameter("display_max_height", 720);
@@ -268,6 +274,9 @@ private:
     enable_image_view_ = get_parameter("enable_image_view").as_bool();
     show_input_image_ = get_parameter("show_input_image").as_bool();
     show_white_mask_ = get_parameter("show_white_mask").as_bool();
+    show_green_mask_ = get_parameter("show_green_mask").as_bool();
+    show_black_mask_ = get_parameter("show_black_mask").as_bool();
+    show_noise_mask_ = get_parameter("show_noise_mask").as_bool();
     show_overlay_image_ = get_parameter("show_overlay_image").as_bool();
     display_max_width_ =
       std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
@@ -290,6 +299,12 @@ private:
     syncWindow(kInputWindowName, enable_image_view_ && show_input_image_, input_window_created_);
     syncWindow(kMaskWindowName, enable_image_view_ && show_white_mask_, mask_window_created_);
     syncWindow(
+      kGreenMaskWindowName, enable_image_view_ && show_green_mask_, green_mask_window_created_);
+    syncWindow(
+      kBlackMaskWindowName, enable_image_view_ && show_black_mask_, black_mask_window_created_);
+    syncWindow(
+      kNoiseMaskWindowName, enable_image_view_ && show_noise_mask_, noise_mask_window_created_);
+    syncWindow(
       kOverlayWindowName, enable_image_view_ && show_overlay_image_, overlay_window_created_);
   }
 
@@ -297,10 +312,18 @@ private:
   {
     syncWindow(kInputWindowName, false, input_window_created_);
     syncWindow(kMaskWindowName, false, mask_window_created_);
+    syncWindow(kGreenMaskWindowName, false, green_mask_window_created_);
+    syncWindow(kBlackMaskWindowName, false, black_mask_window_created_);
+    syncWindow(kNoiseMaskWindowName, false, noise_mask_window_created_);
     syncWindow(kOverlayWindowName, false, overlay_window_created_);
   }
 
-  void showDebugImages(const cv::Mat & frame, const cv::Mat & white_mask)
+  void showDebugImages(
+    const cv::Mat & frame,
+    const cv::Mat & white_mask,
+    const cv::Mat & green_mask,
+    const cv::Mat & black_mask,
+    const cv::Mat & noise_mask)
   {
     if (input_window_created_) {
       cv::imshow(kInputWindowName, frame);
@@ -314,6 +337,24 @@ private:
         kMaskWindowName, white_mask, display_max_width_, display_max_height_);
     }
 
+    if (green_mask_window_created_) {
+      cv::imshow(kGreenMaskWindowName, green_mask);
+      resizeWindowToFitImage(
+        kGreenMaskWindowName, green_mask, display_max_width_, display_max_height_);
+    }
+
+    if (black_mask_window_created_) {
+      cv::imshow(kBlackMaskWindowName, black_mask);
+      resizeWindowToFitImage(
+        kBlackMaskWindowName, black_mask, display_max_width_, display_max_height_);
+    }
+
+    if (noise_mask_window_created_) {
+      cv::imshow(kNoiseMaskWindowName, noise_mask);
+      resizeWindowToFitImage(
+        kNoiseMaskWindowName, noise_mask, display_max_width_, display_max_height_);
+    }
+
     if (overlay_window_created_) {
       cv::Mat overlay = frame.clone();
       overlay.setTo(cv::Scalar(0, 255, 0), white_mask);
@@ -322,7 +363,10 @@ private:
         kOverlayWindowName, overlay, display_max_width_, display_max_height_);
     }
 
-    if (input_window_created_ || mask_window_created_ || overlay_window_created_) {
+    if (
+      input_window_created_ || mask_window_created_ || green_mask_window_created_ ||
+      black_mask_window_created_ || noise_mask_window_created_ || overlay_window_created_)
+    {
       cv::waitKey(1);
     }
   }
@@ -536,10 +580,12 @@ private:
         SteadyClock::now());
     }
 
-    const bool gui_enabled = input_window_created_ || mask_window_created_ || overlay_window_created_;
+    const bool gui_enabled =
+      input_window_created_ || mask_window_created_ || green_mask_window_created_ ||
+      black_mask_window_created_ || noise_mask_window_created_ || overlay_window_created_;
     if (gui_enabled) {
       stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
-      showDebugImages(frame, white_mask);
+      showDebugImages(frame, white_mask, green_mask, black_mask, noise_mask);
       if (timing_enabled) {
         recordStageDuration(
           timing.stage_us,
@@ -579,10 +625,16 @@ private:
   bool enable_image_view_{false};
   bool show_input_image_{true};
   bool show_white_mask_{true};
+  bool show_green_mask_{false};
+  bool show_black_mask_{false};
+  bool show_noise_mask_{false};
   bool show_overlay_image_{true};
   bool headless_warned_{false};
   bool input_window_created_{false};
   bool mask_window_created_{false};
+  bool green_mask_window_created_{false};
+  bool black_mask_window_created_{false};
+  bool noise_mask_window_created_{false};
   bool overlay_window_created_{false};
   int display_max_width_{960};
   int display_max_height_{720};

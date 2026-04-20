@@ -16,9 +16,6 @@ def generate_launch_description():
         package_share / "launch" / "camera_ros_white_line_hsv_dt_ridge_fastmap.launch.py"
     )
     map_yaml_default = package_share / "maps" / "rcj_map.yaml"
-    pinned_fastmap_default = str(
-        package_share / "config" / "undistort_map_20260414_204537_fast.xml"
-    )
 
     camera_index = LaunchConfiguration("camera_index")
     role = LaunchConfiguration("role")
@@ -115,7 +112,7 @@ def generate_launch_description():
             ),  # White mask topic
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument(
-                "fastmap_file", default_value=pinned_fastmap_default
+                "fastmap_file", default_value=""
             ),  # Specific Fastmap XML path when auto-select is disabled
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
             DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
@@ -145,12 +142,15 @@ def generate_launch_description():
             ),  # HSV timing log frame interval
             DeclareLaunchArgument(
                 "hsv_enable_image_view", default_value="false"
-            ),  # Whether to show HSV debug windows
-            DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Whether to show HSV input image
-            DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Whether to show white mask image
+            ),  # Master switch for HSV debug windows; false means no window creation or GUI processing
+            DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Show the HSV input image window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Show the white-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_green_mask", default_value="false"),  # Show the green-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_black_mask", default_value="false"),  # Show the black-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_noise_mask", default_value="false"),  # Show the remaining noise mask window when hsv_enable_image_view is true
             DeclareLaunchArgument(
                 "hsv_show_overlay_image", default_value="true"
-            ),  # Whether to show overlay image
+            ),  # Show the HSV overlay window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_display_max_width", default_value="960"),  # HSV window max width
             DeclareLaunchArgument("hsv_display_max_height", default_value="720"),  # HSV window max height
             DeclareLaunchArgument(
@@ -159,6 +159,15 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ridge_min_orientation_neighbors", default_value="6"
             ),  # Minimum ridge neighbors for valid orientation
+            DeclareLaunchArgument(
+                "ridge_enable_orientation_estimate", default_value="false"
+            ),  # Whether to run orientation estimation before side support
+            DeclareLaunchArgument(
+                "ridge_enable_parallel_orientation_estimate", default_value="true"
+            ),  # Whether to parallelize seed-only orientation estimation
+            DeclareLaunchArgument(
+                "ridge_enable_length_filter", default_value="false"
+            ),  # Whether to run connected-component length filtering
             DeclareLaunchArgument("ridge_side_margin_px", default_value="1"),  # Offset from centerline before side sampling
             DeclareLaunchArgument(
                 "ridge_side_band_depth_px", default_value="4"
@@ -175,6 +184,24 @@ def generate_launch_description():
             DeclareLaunchArgument("ridge_width_mad_scale", default_value="2.5"),  # MAD scale for adaptive width range
             DeclareLaunchArgument("ridge_min_width_samples", default_value="25"),  # Minimum samples before adaptive width estimation
             DeclareLaunchArgument(
+                "ridge_enable_candidate_prefilter", default_value="false"
+            ),  # Whether to run candidate prefilter before orientation
+            DeclareLaunchArgument(
+                "ridge_candidate_min_component_px", default_value="3"
+            ),  # Minimum candidate ridge component area before pruning
+            DeclareLaunchArgument(
+                "ridge_candidate_prune_rounds", default_value="1"
+            ),  # Endpoint pruning rounds for candidate ridge mask
+            DeclareLaunchArgument(
+                "ridge_side_scan_stride", default_value="3"
+            ),  # Seed sampling stride before side support scan
+            DeclareLaunchArgument(
+                "ridge_side_template_direction_bins", default_value="16"
+            ),  # Number of direction bins for side scan templates
+            DeclareLaunchArgument(
+                "ridge_enable_parallel_side_scan", default_value="true"
+            ),  # Whether to parallelize side support seed scanning
+            DeclareLaunchArgument(
                 "ridge_min_skeleton_length_px", default_value="12"
             ),  # Minimum ridge component length
             DeclareLaunchArgument(
@@ -184,13 +211,20 @@ def generate_launch_description():
                 "ridge_enable_image_view", default_value="false"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
+            DeclareLaunchArgument("ridge_show_distance_transform", default_value="false"),  # Whether to show the DT image before orientation filtering
             DeclareLaunchArgument("ridge_show_green_mask", default_value="false"),  # Whether to show input green mask
             DeclareLaunchArgument("ridge_show_black_mask", default_value="false"),  # Whether to show input black mask
             DeclareLaunchArgument("ridge_show_noise_mask", default_value="false"),  # Whether to show input noise mask
             DeclareLaunchArgument("ridge_show_ridge_mask", default_value="false"),  # Whether to show extracted ridge mask
             DeclareLaunchArgument(
+                "ridge_show_candidate_prefilter_mask", default_value="false"
+            ),  # Whether to show candidate-prefilter ridge mask
+            DeclareLaunchArgument(
                 "ridge_show_orientation_valid_mask", default_value="false"
-            ),  # Whether to show orientation-valid ridge mask
+            ),  # Whether to show orientation-valid seed mask
+            DeclareLaunchArgument(
+                "ridge_show_side_support_seed_mask", default_value="false"
+            ),  # Whether to show supported side-scan seed mask
             DeclareLaunchArgument(
                 "ridge_show_side_support_mask", default_value="true"
             ),  # Whether to show side-support mask
@@ -333,6 +367,15 @@ def generate_launch_description():
                     "hsv_show_white_mask": LaunchConfiguration(
                         "hsv_show_white_mask"
                     ),
+                    "hsv_show_green_mask": LaunchConfiguration(
+                        "hsv_show_green_mask"
+                    ),
+                    "hsv_show_black_mask": LaunchConfiguration(
+                        "hsv_show_black_mask"
+                    ),
+                    "hsv_show_noise_mask": LaunchConfiguration(
+                        "hsv_show_noise_mask"
+                    ),
                     "hsv_show_overlay_image": LaunchConfiguration(
                         "hsv_show_overlay_image"
                     ),
@@ -347,6 +390,12 @@ def generate_launch_description():
                     ),
                     "ridge_min_orientation_neighbors": LaunchConfiguration(
                         "ridge_min_orientation_neighbors"
+                    ),
+                    "ridge_enable_orientation_estimate": LaunchConfiguration(
+                        "ridge_enable_orientation_estimate"
+                    ),
+                    "ridge_enable_parallel_orientation_estimate": LaunchConfiguration(
+                        "ridge_enable_parallel_orientation_estimate"
                     ),
                     "ridge_side_margin_px": LaunchConfiguration(
                         "ridge_side_margin_px"
@@ -375,6 +424,27 @@ def generate_launch_description():
                     "ridge_min_width_samples": LaunchConfiguration(
                         "ridge_min_width_samples"
                     ),
+                    "ridge_enable_candidate_prefilter": LaunchConfiguration(
+                        "ridge_enable_candidate_prefilter"
+                    ),
+                    "ridge_candidate_min_component_px": LaunchConfiguration(
+                        "ridge_candidate_min_component_px"
+                    ),
+                    "ridge_candidate_prune_rounds": LaunchConfiguration(
+                        "ridge_candidate_prune_rounds"
+                    ),
+                    "ridge_side_scan_stride": LaunchConfiguration(
+                        "ridge_side_scan_stride"
+                    ),
+                    "ridge_side_template_direction_bins": LaunchConfiguration(
+                        "ridge_side_template_direction_bins"
+                    ),
+                    "ridge_enable_parallel_side_scan": LaunchConfiguration(
+                        "ridge_enable_parallel_side_scan"
+                    ),
+                    "ridge_enable_length_filter": LaunchConfiguration(
+                        "ridge_enable_length_filter"
+                    ),
                     "ridge_min_skeleton_length_px": LaunchConfiguration(
                         "ridge_min_skeleton_length_px"
                     ),
@@ -386,6 +456,9 @@ def generate_launch_description():
                     ),
                     "ridge_show_morph_mask": LaunchConfiguration(
                         "ridge_show_morph_mask"
+                    ),
+                    "ridge_show_distance_transform": LaunchConfiguration(
+                        "ridge_show_distance_transform"
                     ),
                     "ridge_show_green_mask": LaunchConfiguration(
                         "ridge_show_green_mask"
@@ -399,8 +472,14 @@ def generate_launch_description():
                     "ridge_show_ridge_mask": LaunchConfiguration(
                         "ridge_show_ridge_mask"
                     ),
+                    "ridge_show_candidate_prefilter_mask": LaunchConfiguration(
+                        "ridge_show_candidate_prefilter_mask"
+                    ),
                     "ridge_show_orientation_valid_mask": LaunchConfiguration(
                         "ridge_show_orientation_valid_mask"
+                    ),
+                    "ridge_show_side_support_seed_mask": LaunchConfiguration(
+                        "ridge_show_side_support_seed_mask"
                     ),
                     "ridge_show_side_support_mask": LaunchConfiguration(
                         "ridge_show_side_support_mask"

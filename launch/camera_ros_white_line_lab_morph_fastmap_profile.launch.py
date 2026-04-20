@@ -155,11 +155,6 @@ def build_nodes(context):
 
 
 def generate_launch_description():
-    pinned_fastmap_default = str(
-        Path(get_package_share_directory("rcj_localization"))
-        / "config"
-        / "undistort_map_20260414_204537_fast.xml"
-    )
     return LaunchDescription(
         [
             DeclareLaunchArgument("camera_index", default_value="0"),  # Camera index
@@ -176,7 +171,7 @@ def generate_launch_description():
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
             DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),  # Remapped image topic
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Auto-select the latest fastmap XML
-            DeclareLaunchArgument("fastmap_file", default_value=pinned_fastmap_default),  # Specific fastmap XML path
+            DeclareLaunchArgument("fastmap_file", default_value=""),  # Specific fastmap XML path
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
             DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
             DeclareLaunchArgument("remap_enable_image_view", default_value="false"),  # Show remap debug windows

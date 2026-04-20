@@ -49,6 +49,7 @@ enum class MainTimingStage : std::size_t {
     Overlay,
     Publish,
     Gui,
+    UnaccountedOverhead,
     CallbackTotal,
     Count,
 };
@@ -92,6 +93,7 @@ constexpr std::array<const char *, kMainTimingStageCount> kMainTimingLabels = {
     "overlay构建",
     "消息发布",
     "GUI显示/waitKey",
+    "未归类开销",
     "callback总计",
 };
 
@@ -239,6 +241,18 @@ void appendTimingTable(
             << std::setw(14) << std::fixed << std::setprecision(3) << interval_average_ms
             << std::setw(12) << std::fixed << std::setprecision(1) << ratio << '\n';
     }
+}
+
+long long sumMainTimingStagesExcludingCallback(const MainTimingArray &values) {
+    long long total_us = 0;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i == static_cast<std::size_t>(MainTimingStage::UnaccountedOverhead) ||
+            i == static_cast<std::size_t>(MainTimingStage::CallbackTotal)) {
+            continue;
+        }
+        total_us += values[i];
+    }
+    return total_us;
 }
 
 std::string toToggleText(bool enabled) {
@@ -1043,6 +1057,13 @@ private:
                 MainTimingStage::CallbackTotal,
                 callback_start,
                 SteadyClock::now());
+            const long long accounted_stage_us =
+                sumMainTimingStagesExcludingCallback(timing.main_stage_us);
+            timing.main_stage_us[static_cast<std::size_t>(MainTimingStage::UnaccountedOverhead)] =
+                std::max(
+                    0LL,
+                    timing.main_stage_us[static_cast<std::size_t>(MainTimingStage::CallbackTotal)] -
+                        accounted_stage_us);
         }
 
         TimingSummaryContext summary_context;
