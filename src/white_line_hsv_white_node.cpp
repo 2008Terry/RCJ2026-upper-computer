@@ -51,6 +51,7 @@ enum class HsvTimingStage : std::size_t
   ContextResolve,
   PublishOutputs,
   GuiDisplay,
+  UnaccountedOverhead,
   CallbackTotal,
   Count
 };
@@ -66,6 +67,7 @@ constexpr std::array<const char *, static_cast<std::size_t>(HsvTimingStage::Coun
     "context_resolve",
     "publish_outputs",
     "gui_display",
+    "unaccounted_overhead",
     "callback_total",
   };
 
@@ -84,6 +86,21 @@ void recordStageDuration(
   const TimePoint & end)
 {
   target[static_cast<std::size_t>(stage)] = elapsedUs(start, end);
+}
+
+long long sumTimingStagesExcludingCallback(const HsvTimingArray & timing)
+{
+  long long total = 0;
+  for (std::size_t i = 0; i < timing.size(); ++i) {
+    if (i == static_cast<std::size_t>(HsvTimingStage::CallbackTotal)) {
+      continue;
+    }
+    if (i == static_cast<std::size_t>(HsvTimingStage::UnaccountedOverhead)) {
+      continue;
+    }
+    total += timing[i];
+  }
+  return total;
 }
 
 void appendTimingTable(
@@ -601,6 +618,12 @@ private:
         HsvTimingStage::CallbackTotal,
         callback_start,
         SteadyClock::now());
+      const long long accounted_stage_us = sumTimingStagesExcludingCallback(timing.stage_us);
+      timing.stage_us[static_cast<std::size_t>(HsvTimingStage::UnaccountedOverhead)] =
+        std::max(
+        0LL,
+        timing.stage_us[static_cast<std::size_t>(HsvTimingStage::CallbackTotal)] -
+        accounted_stage_us);
       logTimingSummary(timing);
     }
   }

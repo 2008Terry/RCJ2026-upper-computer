@@ -415,13 +415,13 @@ def generate_launch_description():
                 "hsv_timing_log_interval", default_value="15"
             ),  # HSV timing log frame interval
             DeclareLaunchArgument(
-                "hsv_enable_image_view", default_value="false"
+                "hsv_enable_image_view", default_value="true"
             ),  # Master switch for HSV debug windows; false means no window creation or GUI processing
             DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Show the HSV input image window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Show the white-priority mask window when hsv_enable_image_view is true
-            DeclareLaunchArgument("hsv_show_green_mask", default_value="false"),  # Show the green-priority mask window when hsv_enable_image_view is true
-            DeclareLaunchArgument("hsv_show_black_mask", default_value="false"),  # Show the black-priority mask window when hsv_enable_image_view is true
-            DeclareLaunchArgument("hsv_show_noise_mask", default_value="false"),  # Show the remaining noise mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_green_mask", default_value="true"),  # Show the green-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_black_mask", default_value="true"),  # Show the black-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_noise_mask", default_value="true"),  # Show the remaining noise mask window when hsv_enable_image_view is true
             DeclareLaunchArgument(
                 "hsv_show_overlay_image", default_value="true"
             ),  # Show the HSV overlay window when hsv_enable_image_view is true
@@ -433,6 +433,9 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ridge_min_orientation_neighbors", default_value="6"
             ),  # Minimum ridge neighbors for valid orientation
+            DeclareLaunchArgument(
+                "ridge_enable_orientation_estimate", default_value="true"
+            ),  # Whether to run orientation estimation before side support
             DeclareLaunchArgument("ridge_side_margin_px", default_value="1"),  # Offset from centerline before side sampling
             DeclareLaunchArgument(
                 "ridge_side_band_depth_px", default_value="4"
@@ -479,7 +482,7 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="true"
+                "ridge_enable_image_view", default_value="false"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
             DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
@@ -487,6 +490,9 @@ def generate_launch_description():
             DeclareLaunchArgument("ridge_show_black_mask", default_value="false"),  # Whether to show input black mask
             DeclareLaunchArgument("ridge_show_noise_mask", default_value="false"),  # Whether to show input noise mask
             DeclareLaunchArgument("ridge_show_ridge_mask", default_value="false"),  # Whether to show extracted ridge mask
+            DeclareLaunchArgument(
+                "ridge_show_candidate_prefilter_mask", default_value="false"
+            ),  # Whether to show candidate-prefilter ridge mask
             DeclareLaunchArgument(
                 "ridge_show_orientation_valid_mask", default_value="false"
             ),  # Whether to show orientation-valid ridge mask

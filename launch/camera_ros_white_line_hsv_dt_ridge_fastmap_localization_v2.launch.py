@@ -127,13 +127,13 @@ def generate_launch_description():
             ),  # Remap timing log frame interval
             DeclareLaunchArgument("white_h_min", default_value="0"),  # White HSV minimum H
             DeclareLaunchArgument("white_h_max", default_value="179"),  # White HSV maximum H
-            DeclareLaunchArgument("white_s_max", default_value="107"),  # White HSV maximum S
-            DeclareLaunchArgument("white_v_min", default_value="192"),  # White HSV minimum V
-            DeclareLaunchArgument("black_v_max", default_value="70"),  # Black HSV maximum V
+            DeclareLaunchArgument("white_s_max", default_value="153"),  # White HSV maximum S
+            DeclareLaunchArgument("white_v_min", default_value="170"),  # White HSV minimum V
+            DeclareLaunchArgument("black_v_max", default_value="140"),  # Black HSV maximum V
             DeclareLaunchArgument("green_h_min", default_value="35"),  # Green HSV minimum H
-            DeclareLaunchArgument("green_h_max", default_value="95"),  # Green HSV maximum H
-            DeclareLaunchArgument("green_s_min", default_value="40"),  # Green HSV minimum S
-            DeclareLaunchArgument("green_v_min", default_value="40"),  # Green HSV minimum V
+            DeclareLaunchArgument("green_h_max", default_value="100"),  # Green HSV maximum H
+            DeclareLaunchArgument("green_s_min", default_value="150"),  # Green HSV minimum S
+            DeclareLaunchArgument("green_v_min", default_value="100"),  # Green HSV minimum V
             DeclareLaunchArgument(
                 "hsv_enable_timing_log", default_value="true"
             ),  # Whether to log HSV timing
@@ -160,7 +160,7 @@ def generate_launch_description():
                 "ridge_min_orientation_neighbors", default_value="6"
             ),  # Minimum ridge neighbors for valid orientation
             DeclareLaunchArgument(
-                "ridge_enable_orientation_estimate", default_value="false"
+                "ridge_enable_orientation_estimate", default_value="true"
             ),  # Whether to run orientation estimation before side support
             DeclareLaunchArgument(
                 "ridge_enable_parallel_orientation_estimate", default_value="true"
@@ -208,10 +208,10 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="false"
+                "ridge_enable_image_view", default_value="true"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
-            DeclareLaunchArgument("ridge_show_distance_transform", default_value="false"),  # Whether to show the DT image before orientation filtering
+            DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
             DeclareLaunchArgument("ridge_show_green_mask", default_value="false"),  # Whether to show input green mask
             DeclareLaunchArgument("ridge_show_black_mask", default_value="false"),  # Whether to show input black mask
             DeclareLaunchArgument("ridge_show_noise_mask", default_value="false"),  # Whether to show input noise mask
@@ -222,9 +222,6 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ridge_show_orientation_valid_mask", default_value="false"
             ),  # Whether to show orientation-valid seed mask
-            DeclareLaunchArgument(
-                "ridge_show_side_support_seed_mask", default_value="false"
-            ),  # Whether to show supported side-scan seed mask
             DeclareLaunchArgument(
                 "ridge_show_side_support_seed_mask", default_value="false"
             ),  # Whether to show supported side-scan seed mask
@@ -245,7 +242,7 @@ def generate_launch_description():
             ),  # Whether to show final white mask
             DeclareLaunchArgument("ridge_show_debug_image", default_value="false"),  # Whether to show composite debug image
             DeclareLaunchArgument(
-                "ridge_enable_timing_debug", default_value="false"
+                "ridge_enable_timing_debug", default_value="true"
             ),  # Whether to log ridge timing summary
             DeclareLaunchArgument(
                 "ridge_timing_summary_interval", default_value="10"
@@ -253,7 +250,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "map_yaml_file", default_value=str(map_yaml_default)
             ),  # Nav2 map YAML path
-            DeclareLaunchArgument("use_fake_yaw", default_value="true"),  # Whether to use synthetic yaw
+            DeclareLaunchArgument("use_fake_yaw", default_value="false"),  # Whether to use synthetic yaw
             DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Robot yaw topic
             DeclareLaunchArgument(
                 "yaw_enable_publish_log", default_value="false"
@@ -275,7 +272,7 @@ def generate_launch_description():
                 "enable_topdown_pf_localization_node_v2",
                 default_value="true",
             ),  # Whether to start topdown PF node
-            DeclareLaunchArgument("meters_per_pixel", default_value="0.0019"),  # Camera projection scale
+            DeclareLaunchArgument("meters_per_pixel", default_value="0.0036"),  # Camera projection scale
             DeclareLaunchArgument("forward_axis", default_value="v+"),  # Image axis treated as robot forward
             DeclareLaunchArgument("left_axis", default_value="u-"),  # Image axis treated as robot left
             DeclareLaunchArgument("max_points", default_value="3000"),  # Maximum observation points per frame
