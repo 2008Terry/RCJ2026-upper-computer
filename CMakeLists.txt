@@ -347,6 +347,33 @@ target_link_libraries(black_feature_detector_node
   ${OpenCV_LIBRARIES}
 )
 
+add_executable(orange_ball_detector_node src/orange_ball_detector_node.cpp)
+ament_target_dependencies(orange_ball_detector_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+  cv_bridge
+)
+target_link_libraries(orange_ball_detector_node
+  ${OpenCV_LIBRARIES}
+)
+
+add_executable(orange_ball_hsv_tuner_node src/orange_ball_hsv_tuner_node.cpp)
+ament_target_dependencies(orange_ball_hsv_tuner_node
+  rclcpp
+  sensor_msgs
+  cv_bridge
+)
+target_link_libraries(orange_ball_hsv_tuner_node
+  ${OpenCV_LIBRARIES}
+)
+
+add_executable(orange_ball_lut_checker src/orange_ball_lut_checker.cpp)
+target_link_libraries(orange_ball_lut_checker
+  ${OpenCV_LIBRARIES}
+)
+
 install(TARGETS
   hsv_tuner
   white_line_edge_node
@@ -365,11 +392,20 @@ install(TARGETS
   topdown_pf_localization_node_v2
   white_line_probability_node
   black_feature_detector_node
+  orange_ball_detector_node
+  orange_ball_hsv_tuner_node
+  orange_ball_lut_checker
   DESTINATION lib/${PROJECT_NAME}
 )
 
 install(DIRECTORY launch maps config docs
   DESTINATION share/${PROJECT_NAME}
+)
+
+install(FILES
+  src/export_raw_ball_top_lut.m
+  src/run_export_raw_ball_top_lut.m
+  DESTINATION share/${PROJECT_NAME}/matlab
 )
 
 ament_package()
