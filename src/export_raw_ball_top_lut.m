@@ -81,6 +81,9 @@ validMask = reshape(uint8(validMaskVec), sourceHeight, sourceWidth);
 
 groundX(~logical(validMask)) = single(0);
 groundY(~logical(validMask)) = single(0);
+[areaPriorDistanceM, areaPriorExpectedAreaPx] = buildBallAreaPriorCurve( ...
+    ocamModel, cameraHeightM, ballDiameterM, forwardMapping, leftMapping, ...
+    centerRaySign, groundX, groundY, validMask);
 
 if isempty(outputPath)
     scriptDir = fileparts(mfilename('fullpath'));
@@ -99,15 +102,21 @@ exportMeta = struct( ...
     'left_axis', leftAxis, ...
     'plane_distance_m', planeDistanceM, ...
     'plane_z', planeZ, ...
-    'center_ray_z_sign', centerRaySign);
+    'center_ray_z_sign', centerRaySign, ...
+    'area_prior_sample_count', numel(areaPriorDistanceM));
 
-writeOpenCvXml(outputPath, groundX, groundY, validMask, exportMeta);
-verifyBallDetectorCompatibleXml(outputPath, groundX, groundY, validMask, exportMeta);
+writeOpenCvXml(outputPath, groundX, groundY, validMask, ...
+    areaPriorDistanceM, areaPriorExpectedAreaPx, exportMeta);
+verifyBallDetectorCompatibleXml(outputPath, groundX, groundY, validMask, ...
+    areaPriorDistanceM, areaPriorExpectedAreaPx, exportMeta);
 
 fprintf('Saved raw ball LUT:\n  %s\n', outputPath);
 fprintf('Source size: %dx%d\n', sourceWidth, sourceHeight);
 fprintf('Forward axis: %s, Left axis: %s\n', forwardAxis, leftAxis);
 fprintf('Camera height: %.6f m, Ball diameter: %.6f m\n', cameraHeightM, ballDiameterM);
+fprintf('Area prior samples: %d, distance range [%.6f, %.6f] m, expected area range [%.6f, %.6f] px\n', ...
+    numel(areaPriorDistanceM), double(areaPriorDistanceM(1)), double(areaPriorDistanceM(end)), ...
+    double(areaPriorExpectedAreaPx(end)), double(areaPriorExpectedAreaPx(1)));
 
 end
 
@@ -177,6 +186,152 @@ else
 end
 end
 
+function [distanceSamplesM, expectedAreaSamplesPx] = buildBallAreaPriorCurve( ...
+    ocamModel, cameraHeightM, ballDiameterM, forwardMapping, leftMapping, ...
+    centerRaySign, groundX, groundY, validMask)
+ballRadiusM = ballDiameterM * 0.5;
+validDistances = hypot(double(groundX(logical(validMask))), double(groundY(logical(validMask))));
+validDistances = validDistances(isfinite(validDistances) & validDistances > 0);
+if numel(validDistances) < 2
+    error('Cannot build area prior because the LUT valid region does not contain enough positive distances.');
+end
+
+distanceSamplesM = linspace(min(validDistances), max(validDistances), 256).';
+ballCenterZ = centerRaySign * (cameraHeightM - ballRadiusM);
+[thetaSamples, rhoSamples] = buildThetaRhoLookup(ocamModel);
+
+expectedAreaSamplesPx = nan(size(distanceSamplesM), 'single');
+for idx = 1:numel(distanceSamplesM)
+    [cameraX, cameraY] = groundToCameraAxes( ...
+        distanceSamplesM(idx), 0.0, forwardMapping, leftMapping);
+    sphereCenter = [cameraX; cameraY; ballCenterZ];
+    areaPx = estimateSphereProjectedAreaPx( ...
+        sphereCenter, ballRadiusM, ocamModel, thetaSamples, rhoSamples);
+    if isfinite(areaPx) && areaPx > 0
+        expectedAreaSamplesPx(idx) = single(areaPx);
+    end
+end
+
+validSamples = isfinite(expectedAreaSamplesPx) & expectedAreaSamplesPx > 0;
+distanceSamplesM = single(distanceSamplesM(validSamples));
+expectedAreaSamplesPx = single(expectedAreaSamplesPx(validSamples));
+if numel(distanceSamplesM) < 2
+    error('Cannot build area prior because fewer than two valid projected-area samples were generated.');
+end
+
+for idx = 2:numel(expectedAreaSamplesPx)
+    expectedAreaSamplesPx(idx) = min(expectedAreaSamplesPx(idx), expectedAreaSamplesPx(idx - 1));
+end
+end
+
+function [cameraX, cameraY] = groundToCameraAxes(forwardValue, leftValue, forwardMapping, leftMapping)
+cameraX = 0.0;
+cameraY = 0.0;
+
+if forwardMapping.axis == 'x'
+    cameraX = forwardMapping.sign * forwardValue;
+else
+    cameraY = forwardMapping.sign * forwardValue;
+end
+
+if leftMapping.axis == 'x'
+    cameraX = leftMapping.sign * leftValue;
+else
+    cameraY = leftMapping.sign * leftValue;
+end
+end
+
+function areaPx = estimateSphereProjectedAreaPx( ...
+    sphereCenter, sphereRadiusM, ocamModel, thetaSamples, rhoSamples)
+centerDistance = norm(sphereCenter);
+if ~isfinite(centerDistance) || centerDistance <= sphereRadiusM
+    areaPx = nan;
+    return;
+end
+
+centerDirection = sphereCenter / centerDistance;
+circleCenter = centerDirection * ((centerDistance^2 - sphereRadiusM^2) / centerDistance);
+circleRadius = sphereRadiusM * sqrt(max(0.0, 1.0 - (sphereRadiusM^2 / centerDistance^2)));
+
+referenceAxis = [0; 0; 1];
+if abs(dot(centerDirection, referenceAxis)) > 0.95
+    referenceAxis = [0; 1; 0];
+end
+uAxis = cross(centerDirection, referenceAxis);
+uNorm = norm(uAxis);
+if uNorm < eps
+    areaPx = nan;
+    return;
+end
+uAxis = uAxis / uNorm;
+vAxis = cross(centerDirection, uAxis);
+vAxis = vAxis / max(norm(vAxis), eps);
+
+angles = linspace(0, 2 * pi, 145);
+angles(end) = [];
+boundaryPoints = circleCenter + circleRadius * (uAxis * cos(angles) + vAxis * sin(angles));
+imagePoints = world2camLocal(boundaryPoints, ocamModel, thetaSamples, rhoSamples);
+if any(~isfinite(imagePoints(:)))
+    areaPx = nan;
+    return;
+end
+
+areaPx = polyarea(imagePoints(1, :), imagePoints(2, :));
+end
+
+function [thetaSamples, rhoSamples] = buildThetaRhoLookup(ocamModel)
+maxRho = computeMaxNormalizedImageRadius(ocamModel) * 1.05;
+rhoSamples = linspace(0, maxRho, 4096).';
+zSamples = polyval(ocamModel.ss(end:-1:1), rhoSamples);
+thetaSamples = atan2(zSamples, rhoSamples);
+
+validSamples = isfinite(thetaSamples) & isfinite(rhoSamples);
+thetaSamples = thetaSamples(validSamples);
+rhoSamples = rhoSamples(validSamples);
+
+[thetaSamples, sortIdx] = sort(thetaSamples);
+rhoSamples = rhoSamples(sortIdx);
+[thetaSamples, uniqueIdx] = unique(thetaSamples, 'stable');
+rhoSamples = rhoSamples(uniqueIdx);
+if numel(thetaSamples) < 2
+    error('Failed to build a valid theta-to-rho lookup for the ocam model.');
+end
+end
+
+function maxRho = computeMaxNormalizedImageRadius(ocamModel)
+pixelCorners = [ ...
+    1, 1, ocamModel.height, ocamModel.height; ...
+    1, ocamModel.width, 1, ocamModel.width];
+A = [ocamModel.c, ocamModel.d; ocamModel.e, 1];
+T = [ocamModel.xc; ocamModel.yc];
+normalizedCorners = A \ (pixelCorners - T);
+cornerRho = hypot(normalizedCorners(1, :), normalizedCorners(2, :));
+maxRho = max(cornerRho);
+if ~isfinite(maxRho) || maxRho <= 0
+    error('Failed to infer a valid normalized image radius from the ocam model.');
+end
+end
+
+function imagePoints = world2camLocal(points3D, ocamModel, thetaSamples, rhoSamples)
+xyNorm = hypot(points3D(1, :), points3D(2, :));
+theta = atan2(points3D(3, :), xyNorm);
+rho = interp1(thetaSamples, rhoSamples, theta, 'linear', nan);
+
+xNorm = nan(size(theta));
+yNorm = nan(size(theta));
+centerMask = xyNorm <= eps & isfinite(rho);
+xNorm(centerMask) = 0;
+yNorm(centerMask) = 0;
+
+offAxisMask = xyNorm > eps & isfinite(rho);
+xNorm(offAxisMask) = points3D(1, offAxisMask) ./ xyNorm(offAxisMask) .* rho(offAxisMask);
+yNorm(offAxisMask) = points3D(2, offAxisMask) ./ xyNorm(offAxisMask) .* rho(offAxisMask);
+
+imagePoints = [ ...
+    xNorm * ocamModel.c + yNorm * ocamModel.d + ocamModel.xc; ...
+    xNorm * ocamModel.e + yNorm + ocamModel.yc];
+end
+
 function rays = cam2worldLocal(pixelPoints, ocamModel)
 nPoints = size(pixelPoints, 2);
 A = [ocamModel.c, ocamModel.d; ocamModel.e, 1];
@@ -190,7 +345,8 @@ norms(norms < eps) = 1;
 rays = rays ./ norms;
 end
 
-function writeOpenCvXml(filename, groundX, groundY, validMask, meta)
+function writeOpenCvXml( ...
+    filename, groundX, groundY, validMask, areaPriorDistanceM, areaPriorExpectedAreaPx, meta)
 fid = fopen(filename, 'w');
 if fid < 0
     error('Cannot open output file for writing:\n  %s', filename);
@@ -214,6 +370,8 @@ fprintf(fid, '<left_axis>%s</left_axis>\n', meta.left_axis);
 writeOpenCvMatrix(fid, 'ground_x_m', groundX);
 writeOpenCvMatrix(fid, 'ground_y_m', groundY);
 writeOpenCvMatrix(fid, 'valid_mask', validMask);
+writeOpenCvMatrix(fid, 'area_prior_distance_m', areaPriorDistanceM);
+writeOpenCvMatrix(fid, 'area_prior_expected_area_px', areaPriorExpectedAreaPx);
 fprintf(fid, '</opencv_storage>\n');
 end
 
@@ -260,7 +418,9 @@ fprintf(fid, '  </data>\n');
 fprintf(fid, '</%s>\n', name);
 end
 
-function verifyBallDetectorCompatibleXml(filename, expectedGroundX, expectedGroundY, expectedValidMask, meta)
+function verifyBallDetectorCompatibleXml( ...
+    filename, expectedGroundX, expectedGroundY, expectedValidMask, ...
+    expectedAreaPriorDistanceM, expectedAreaPriorExpectedAreaPx, meta)
 % Verifies the XML contract that orange_ball_detector_node.cpp reads via OpenCV FileStorage.
 xmlData = readBallDetectorLutXml(filename);
 
@@ -283,6 +443,10 @@ if ~isequal(size(xmlData.ground_x_m), expectedSize) || ...
         ~isequal(size(xmlData.valid_mask), expectedSize)
     error('XML verification failed: round-tripped LUT matrix sizes do not match the exported matrices.');
 end
+if xmlData.area_prior_distance_m_total ~= numel(expectedAreaPriorDistanceM) || ...
+        xmlData.area_prior_expected_area_px_total ~= numel(expectedAreaPriorExpectedAreaPx)
+    error('XML verification failed: round-tripped area-prior vector sizes do not match the exported vectors.');
+end
 
 if ~strcmp(xmlData.ground_x_dt, 'f') || ~strcmp(xmlData.ground_y_dt, 'f')
     error('XML verification failed: ground_x_m and ground_y_m must be stored as OpenCV dt="f".');
@@ -291,18 +455,44 @@ end
 if ~strcmp(xmlData.valid_mask_dt, 'u')
     error('XML verification failed: valid_mask must be stored as OpenCV dt="u".');
 end
+if ~strcmp(xmlData.area_prior_distance_dt, 'f') || ~strcmp(xmlData.area_prior_expected_area_dt, 'f')
+    error('XML verification failed: area_prior_distance_m and area_prior_expected_area_px must be stored as OpenCV dt="f".');
+end
 
 if ~isequal(xmlData.valid_mask, expectedValidMask)
     error('XML verification failed: valid_mask changed after XML round-trip.');
 end
+if any(double(xmlData.area_prior_distance_m(:)) ~= sort(double(xmlData.area_prior_distance_m(:))))
+    error('XML verification failed: area_prior_distance_m must be strictly increasing.');
+end
+if any(diff(double(xmlData.area_prior_distance_m(:))) <= 0)
+    error('XML verification failed: area_prior_distance_m must be strictly increasing.');
+end
+if any(diff(double(xmlData.area_prior_expected_area_px(:))) > 1e-6)
+    error('XML verification failed: area_prior_expected_area_px must be monotonic non-increasing.');
+end
+if any(~isfinite(double(xmlData.area_prior_expected_area_px(:)))) || ...
+        any(double(xmlData.area_prior_expected_area_px(:)) <= 0)
+    error('XML verification failed: area_prior_expected_area_px must stay positive and finite.');
+end
 
 groundXTol = 1e-5;
 groundYTol = 1e-5;
+areaPriorDistanceTol = 1e-5;
+areaPriorExpectedAreaTol = 1e-4;
 maxGroundXErr = max(abs(double(xmlData.ground_x_m(:)) - double(expectedGroundX(:))));
 maxGroundYErr = max(abs(double(xmlData.ground_y_m(:)) - double(expectedGroundY(:))));
+maxAreaPriorDistanceErr = max(abs(double(xmlData.area_prior_distance_m(:)) - double(expectedAreaPriorDistanceM(:))));
+maxAreaPriorExpectedAreaErr = max(abs(double(xmlData.area_prior_expected_area_px(:)) - double(expectedAreaPriorExpectedAreaPx(:))));
 if maxGroundXErr > groundXTol || maxGroundYErr > groundYTol
     error(['XML verification failed: LUT values changed after XML round-trip. ' ...
         'maxGroundXErr=%.9g, maxGroundYErr=%.9g'], maxGroundXErr, maxGroundYErr);
+end
+if maxAreaPriorDistanceErr > areaPriorDistanceTol || ...
+        maxAreaPriorExpectedAreaErr > areaPriorExpectedAreaTol
+    error(['XML verification failed: area-prior values changed after XML round-trip. ' ...
+        'maxAreaPriorDistanceErr=%.9g, maxAreaPriorExpectedAreaErr=%.9g'], ...
+        maxAreaPriorDistanceErr, maxAreaPriorExpectedAreaErr);
 end
 
 scalarTol = 1e-9;
@@ -313,9 +503,12 @@ assertScalarClose(xmlData.ball_diameter_m, meta.ball_diameter_m, scalarTol, 'bal
 
 fprintf('Verified ball-detector XML contract:\n');
 fprintf('  %s\n', filename);
-fprintf('  Matrices: ground_x_m(CV_32FC1), ground_y_m(CV_32FC1), valid_mask(CV_8UC1)\n');
+fprintf('  Matrices: ground_x_m(CV_32FC1), ground_y_m(CV_32FC1), valid_mask(CV_8UC1), ');
+fprintf('area_prior_distance_m(CV_32FC1), area_prior_expected_area_px(CV_32FC1)\n');
 fprintf('  Source size: %dx%d\n', xmlData.source_width, xmlData.source_height);
 fprintf('  Max round-trip error: ground_x=%.9g m, ground_y=%.9g m\n', maxGroundXErr, maxGroundYErr);
+fprintf('  Area prior round-trip error: distance=%.9g m, expected_area=%.9g px\n', ...
+    maxAreaPriorDistanceErr, maxAreaPriorExpectedAreaErr);
 end
 
 function xmlData = readBallDetectorLutXml(filename)
@@ -333,6 +526,12 @@ xmlData.ball_diameter_m = readScalarNode(root, 'ball_diameter_m');
 [xmlData.ground_x_m, xmlData.ground_x_dt] = readOpenCvMatrixNode(root, 'ground_x_m');
 [xmlData.ground_y_m, xmlData.ground_y_dt] = readOpenCvMatrixNode(root, 'ground_y_m');
 [xmlData.valid_mask, xmlData.valid_mask_dt] = readOpenCvMatrixNode(root, 'valid_mask');
+[xmlData.area_prior_distance_m, xmlData.area_prior_distance_dt] = ...
+    readOpenCvMatrixNode(root, 'area_prior_distance_m');
+[xmlData.area_prior_expected_area_px, xmlData.area_prior_expected_area_dt] = ...
+    readOpenCvMatrixNode(root, 'area_prior_expected_area_px');
+xmlData.area_prior_distance_m_total = numel(xmlData.area_prior_distance_m);
+xmlData.area_prior_expected_area_px_total = numel(xmlData.area_prior_expected_area_px);
 end
 
 function [matrix, dt] = readOpenCvMatrixNode(root, tagName)

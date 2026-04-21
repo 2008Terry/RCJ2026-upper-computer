@@ -25,6 +25,8 @@ struct LutData
   cv::Mat ground_x_m;
   cv::Mat ground_y_m;
   cv::Mat valid_mask;
+  cv::Mat area_prior_distance_m;
+  cv::Mat area_prior_expected_area_px;
   int source_width = 0;
   int source_height = 0;
   double ocam_xc = 0.0;
@@ -34,6 +36,8 @@ struct LutData
   int original_ground_x_type = -1;
   int original_ground_y_type = -1;
   int original_valid_mask_type = -1;
+  int original_area_prior_distance_type = -1;
+  int original_area_prior_expected_area_type = -1;
 };
 
 std::string pathToString(const std::filesystem::path & path)
@@ -257,6 +261,8 @@ LutData loadLutFileLikeDetector(const std::filesystem::path & lut_path)
   fs["ground_x_m"] >> lut.ground_x_m;
   fs["ground_y_m"] >> lut.ground_y_m;
   fs["valid_mask"] >> lut.valid_mask;
+  fs["area_prior_distance_m"] >> lut.area_prior_distance_m;
+  fs["area_prior_expected_area_px"] >> lut.area_prior_expected_area_px;
   fs["source_width"] >> lut.source_width;
   fs["source_height"] >> lut.source_height;
   fs["ocam_xc"] >> lut.ocam_xc;
@@ -272,6 +278,11 @@ LutData loadLutFileLikeDetector(const std::filesystem::path & lut_path)
   {
     throw std::runtime_error("LUT file is missing required matrices: " + pathToString(lut_path));
   }
+  if (lut.area_prior_distance_m.empty() || lut.area_prior_expected_area_px.empty()) {
+    throw std::runtime_error(
+            "LUT file is missing area_prior_distance_m / area_prior_expected_area_px. "
+            "The detector now requires a regenerated LUT: " + pathToString(lut_path));
+  }
 
   if (lut.source_width <= 0 || lut.source_height <= 0) {
     throw std::runtime_error("LUT file has invalid source dimensions: " + pathToString(lut_path));
@@ -280,6 +291,8 @@ LutData loadLutFileLikeDetector(const std::filesystem::path & lut_path)
   lut.original_ground_x_type = lut.ground_x_m.type();
   lut.original_ground_y_type = lut.ground_y_m.type();
   lut.original_valid_mask_type = lut.valid_mask.type();
+  lut.original_area_prior_distance_type = lut.area_prior_distance_m.type();
+  lut.original_area_prior_expected_area_type = lut.area_prior_expected_area_px.type();
 
   if (lut.ground_x_m.type() != CV_32FC1) {
     lut.ground_x_m.convertTo(lut.ground_x_m, CV_32FC1);
@@ -291,6 +304,12 @@ LutData loadLutFileLikeDetector(const std::filesystem::path & lut_path)
     cv::Mat converted;
     lut.valid_mask.convertTo(converted, CV_8UC1);
     lut.valid_mask = converted;
+  }
+  if (lut.area_prior_distance_m.type() != CV_32FC1) {
+    lut.area_prior_distance_m.convertTo(lut.area_prior_distance_m, CV_32FC1);
+  }
+  if (lut.area_prior_expected_area_px.type() != CV_32FC1) {
+    lut.area_prior_expected_area_px.convertTo(lut.area_prior_expected_area_px, CV_32FC1);
   }
 
   return lut;
@@ -314,11 +333,25 @@ void validateLutContract(const LutData & lut, const CommandLineOptions & options
   require(
     lut.valid_mask.type() == CV_8UC1,
     "valid_mask is not CV_8UC1 after detector-style conversion.");
+  require(
+    lut.area_prior_distance_m.type() == CV_32FC1,
+    "area_prior_distance_m is not CV_32FC1 after detector-style conversion.");
+  require(
+    lut.area_prior_expected_area_px.type() == CV_32FC1,
+    "area_prior_expected_area_px is not CV_32FC1 after detector-style conversion.");
 
   require(
     lut.ground_x_m.cols == lut.source_width && lut.ground_x_m.rows == lut.source_height,
     "LUT matrix size does not match source_width/source_height. Detector later compares frame size "
     "against source_width/source_height.");
+  require(
+    (lut.area_prior_distance_m.rows == 1 || lut.area_prior_distance_m.cols == 1) &&
+    (lut.area_prior_expected_area_px.rows == 1 || lut.area_prior_expected_area_px.cols == 1),
+    "area_prior_distance_m and area_prior_expected_area_px must be stored as 1D vectors.");
+  require(
+    lut.area_prior_distance_m.total() == lut.area_prior_expected_area_px.total() &&
+    lut.area_prior_distance_m.total() >= 2U,
+    "Area-prior LUT vectors must have matching lengths and contain at least 2 samples.");
 
   require(isFinite(lut.ocam_xc) && isFinite(lut.ocam_yc), "ocam_xc/ocam_yc must be finite.");
   require(
@@ -327,6 +360,39 @@ void validateLutContract(const LutData & lut, const CommandLineOptions & options
 
   const int valid_pixels = cv::countNonZero(lut.valid_mask);
   require(valid_pixels > 0, "valid_mask contains no valid pixels.");
+
+  const cv::Mat area_prior_distance_flat = lut.area_prior_distance_m.reshape(1, 1);
+  const cv::Mat area_prior_expected_area_flat = lut.area_prior_expected_area_px.reshape(1, 1);
+  double min_area_prior_distance = std::numeric_limits<double>::infinity();
+  double max_area_prior_distance = -std::numeric_limits<double>::infinity();
+  double max_expected_area = -std::numeric_limits<double>::infinity();
+  double min_expected_area = std::numeric_limits<double>::infinity();
+  for (int i = 0; i < area_prior_distance_flat.cols; ++i) {
+    const double distance_m = static_cast<double>(area_prior_distance_flat.at<float>(0, i));
+    const double expected_area_px =
+      static_cast<double>(area_prior_expected_area_flat.at<float>(0, i));
+    require(std::isfinite(distance_m), "Area-prior distances must be finite.");
+    require(
+      std::isfinite(expected_area_px) && expected_area_px > 0.0,
+      "Area-prior expected areas must be finite and positive.");
+    if (i > 0) {
+      const double prev_distance_m =
+        static_cast<double>(area_prior_distance_flat.at<float>(0, i - 1));
+      const double prev_expected_area_px =
+        static_cast<double>(area_prior_expected_area_flat.at<float>(0, i - 1));
+      require(
+        distance_m > prev_distance_m,
+        "area_prior_distance_m must be strictly increasing.");
+      require(
+        expected_area_px <= prev_expected_area_px + 1e-3,
+        "area_prior_expected_area_px must be monotonic non-increasing.");
+    }
+
+    min_area_prior_distance = std::min(min_area_prior_distance, distance_m);
+    max_area_prior_distance = std::max(max_area_prior_distance, distance_m);
+    max_expected_area = std::max(max_expected_area, expected_area_px);
+    min_expected_area = std::min(min_expected_area, expected_area_px);
+  }
 
   std::size_t non_binary_mask_pixels = 0;
   std::size_t invalid_nonzero_ground_pixels = 0;
@@ -392,15 +458,23 @@ void validateLutContract(const LutData & lut, const CommandLineOptions & options
   std::cout << "  Original matrix types: "
             << "ground_x_m=" << cvTypeToString(lut.original_ground_x_type) << ", "
             << "ground_y_m=" << cvTypeToString(lut.original_ground_y_type) << ", "
-            << "valid_mask=" << cvTypeToString(lut.original_valid_mask_type) << "\n";
+            << "valid_mask=" << cvTypeToString(lut.original_valid_mask_type) << ", "
+            << "area_prior_distance_m=" << cvTypeToString(lut.original_area_prior_distance_type) << ", "
+            << "area_prior_expected_area_px=" << cvTypeToString(lut.original_area_prior_expected_area_type) << "\n";
   std::cout << "  Detector runtime types: "
             << "ground_x_m=" << cvTypeToString(lut.ground_x_m.type()) << ", "
             << "ground_y_m=" << cvTypeToString(lut.ground_y_m.type()) << ", "
-            << "valid_mask=" << cvTypeToString(lut.valid_mask.type()) << "\n";
+            << "valid_mask=" << cvTypeToString(lut.valid_mask.type()) << ", "
+            << "area_prior_distance_m=" << cvTypeToString(lut.area_prior_distance_m.type()) << ", "
+            << "area_prior_expected_area_px=" << cvTypeToString(lut.area_prior_expected_area_px.type()) << "\n";
   std::cout << std::fixed << std::setprecision(6);
   std::cout << "  ocam center: (" << lut.ocam_xc << ", " << lut.ocam_yc << ")\n";
   std::cout << "  camera_height_m=" << lut.camera_height_m
             << ", ball_diameter_m=" << lut.ball_diameter_m << "\n";
+  std::cout << "  Area prior distance range: [" << min_area_prior_distance
+            << ", " << max_area_prior_distance << "] m\n";
+  std::cout << "  Area prior expected area range: [" << min_expected_area
+            << ", " << max_expected_area << "] px\n";
   std::cout << "  Valid coverage: " << valid_pixels << " / "
             << (lut.valid_mask.rows * lut.valid_mask.cols)
             << " (" << (valid_ratio * 100.0) << "%)\n";

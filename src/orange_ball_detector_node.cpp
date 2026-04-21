@@ -39,9 +39,21 @@ using TimePoint = SteadyClock::time_point;
 
 constexpr int kHueMax = 179;
 constexpr int kByteMax = 255;
+constexpr char kInputWindowName[] = "Orange Ball Input";
+constexpr char kThresholdMaskWindowName[] = "Orange Ball Threshold Mask";
+constexpr char kMorphMaskWindowName[] = "Orange Ball Morph Mask";
 constexpr char kOverlayWindowName[] = "Orange Ball Overlay";
-constexpr char kMaskWindowName[] = "Orange Ball Mask";
+constexpr char kRawMaskWindowName[] = "Orange Ball Raw Mask";
+constexpr char kFilteredMaskWindowName[] = "Orange Ball Filtered Mask";
+constexpr char kAreaFilterWindowName[] = "Orange Ball Area Filter";
+constexpr char kAspectFilterWindowName[] = "Orange Ball Aspect Filter";
+constexpr char kEdgeFilterWindowName[] = "Orange Ball Edge Filter";
+constexpr char kFillFilterWindowName[] = "Orange Ball Fill Filter";
+constexpr char kLutFilterWindowName[] = "Orange Ball LUT Filter";
+constexpr char kTopBandFilterWindowName[] = "Orange Ball Top-Band Filter";
+constexpr char kSearchDebugWindowName[] = "Orange Ball Search Debug";
 constexpr char kRoiWindowName[] = "Orange Ball ROI";
+constexpr char kRoiMaskWindowName[] = "Orange Ball ROI Mask";
 constexpr std::size_t kTimingStageCount = 8;
 constexpr double kMinValidLutCoverageRatio = 0.35;
 constexpr double kMinTopBandValidRatio = 0.35;
@@ -198,11 +210,22 @@ std::string trackingModeToString(TrackingMode mode)
   return mode == TrackingMode::Search ? "SEARCH" : "TRACK";
 }
 
+cv::Point clampPointToImage(const cv::Point & point, const cv::Size & image_size)
+{
+  return cv::Point(
+    std::clamp(point.x, 0, std::max(0, image_size.width - 1)),
+    std::clamp(point.y, 0, std::max(0, image_size.height - 1)));
+}
+
 struct LutData
 {
   cv::Mat ground_x_m;
   cv::Mat ground_y_m;
   cv::Mat valid_mask;
+  cv::Mat area_prior_distance_m;
+  cv::Mat area_prior_expected_area_px;
+  std::vector<double> area_prior_distance_samples_m;
+  std::vector<double> area_prior_expected_area_samples_px;
   int source_width = 0;
   int source_height = 0;
   double ocam_xc = 0.0;
@@ -233,8 +256,18 @@ struct Candidate
 struct DetectorOutputs
 {
   Candidate candidate;
+  cv::Mat threshold_debug_mask;
+  cv::Mat morph_debug_mask;
   cv::Mat raw_debug_mask;
   cv::Mat filtered_debug_mask;
+  cv::Mat area_debug_mask;
+  cv::Mat aspect_debug_mask;
+  cv::Mat edge_debug_mask;
+  cv::Mat fill_debug_mask;
+  cv::Mat lut_debug_mask;
+  cv::Mat top_band_debug_mask;
+  cv::Mat search_debug_image;
+  cv::Mat roi_debug_mask;
   cv::Rect roi;
 };
 
@@ -243,6 +276,98 @@ struct CoarseCandidate
   bool valid = false;
   cv::Rect bbox;
   double score = -std::numeric_limits<double>::infinity();
+};
+
+struct AreaPriorEvaluation
+{
+  bool valid = false;
+  bool passed = false;
+  double distance_m = 0.0;
+  double expected_area_px = 0.0;
+  double min_ratio = 0.0;
+  double max_ratio = 0.0;
+  double min_area_px = 0.0;
+  double max_area_px = 0.0;
+  double area_score = 0.0;
+};
+
+struct DetectionDebugOptions
+{
+  bool capture_threshold_mask = false;
+  bool capture_morph_mask = false;
+  bool capture_raw_mask = false;
+  bool capture_filtered_mask = false;
+  bool capture_area_mask = false;
+  bool capture_aspect_mask = false;
+  bool capture_edge_mask = false;
+  bool capture_fill_mask = false;
+  bool capture_lut_mask = false;
+  bool capture_top_band_mask = false;
+  bool capture_search_debug = false;
+  bool capture_roi_mask = false;
+};
+
+struct DebugRequest
+{
+  bool publish_raw_mask = false;
+  bool publish_filtered_mask = false;
+  bool publish_overlay = false;
+  bool show_input_image = false;
+  bool show_threshold_mask = false;
+  bool show_morph_mask = false;
+  bool show_raw_mask = false;
+  bool show_filtered_mask = false;
+  bool show_area_filter = false;
+  bool show_aspect_filter = false;
+  bool show_edge_filter = false;
+  bool show_fill_filter = false;
+  bool show_lut_filter = false;
+  bool show_top_band_filter = false;
+  bool show_search_debug = false;
+  bool show_overlay_image = false;
+  bool show_roi_image = false;
+  bool show_roi_mask = false;
+
+  bool needThresholdMask() const
+  {
+    return show_threshold_mask;
+  }
+
+  bool needMorphMask() const
+  {
+    return show_morph_mask || show_roi_mask;
+  }
+
+  bool needRawMask() const
+  {
+    return publish_raw_mask || show_raw_mask;
+  }
+
+  bool needFilteredMask() const
+  {
+    return publish_filtered_mask || show_filtered_mask;
+  }
+
+  bool needOverlay() const
+  {
+    return publish_overlay || show_overlay_image;
+  }
+
+  bool needAnyWindows() const
+  {
+    return show_input_image || show_threshold_mask || show_morph_mask || show_raw_mask ||
+           show_filtered_mask || show_area_filter || show_aspect_filter || show_edge_filter ||
+           show_fill_filter || show_lut_filter || show_top_band_filter || show_search_debug ||
+           show_overlay_image || show_roi_image || show_roi_mask;
+  }
+
+  bool needAnyOutputs() const
+  {
+    return needThresholdMask() || needMorphMask() || needRawMask() || needFilteredMask() ||
+           show_area_filter || show_aspect_filter || show_edge_filter || show_fill_filter ||
+           show_lut_filter || show_top_band_filter || show_search_debug || needOverlay() ||
+           show_roi_image || show_roi_mask || show_input_image;
+  }
 };
 
 }  // namespace
@@ -283,13 +408,15 @@ public:
     RCLCPP_INFO(
       get_logger(),
       "orange_ball_detector_node started. input_topic=%s, lut_file=%s, search_scale=%.2f, "
-      "roi_scale=%.2f, lost_frame_tolerance=%d, ema_alpha=%.2f, image_view=%s, timing_log=%s",
+      "roi_scale=%.2f, lost_frame_tolerance=%d, ema_alpha=%.2f, force_search_mode=%s, "
+      "image_view=%s, timing_log=%s",
       input_topic_.c_str(),
       lut_file_.c_str(),
       search_downsample_scale_,
       roi_scale_,
       lost_frame_tolerance_,
       ema_alpha_,
+      force_search_mode_ ? "true" : "false",
       enable_image_view_ ? "true" : "false",
       enable_timing_log_ ? "true" : "false");
   }
@@ -313,6 +440,10 @@ private:
     declare_parameter("search_downsample_scale", 0.5);
     declare_parameter("min_blob_area_px", 20);
     declare_parameter("max_blob_area_px", 40000);
+    declare_parameter("area_prior_near_min_ratio", 0.75);
+    declare_parameter("area_prior_near_max_ratio", 1.25);
+    declare_parameter("area_prior_far_min_ratio", 0.50);
+    declare_parameter("area_prior_far_max_ratio", 2.00);
     declare_parameter("min_aspect_ratio", 0.35);
     declare_parameter("max_aspect_ratio", 2.8);
     declare_parameter("max_edge_touch_ratio", 0.35);
@@ -322,11 +453,27 @@ private:
     declare_parameter("roi_max_half_size_px", 140);
     declare_parameter("lost_frame_tolerance", 3);
     declare_parameter("ema_alpha", 0.6);
+    declare_parameter("force_search_mode", false);
     declare_parameter("enable_timing_log", true);
     declare_parameter("timing_log_interval", 30);
     declare_parameter("publish_processing_time", true);
     declare_parameter<std::string>("processing_time_topic", "~/processing_time_ms");
     declare_parameter("enable_image_view", false);
+    declare_parameter("show_input_image", true);
+    declare_parameter("show_threshold_mask", false);
+    declare_parameter("show_morph_mask", false);
+    declare_parameter("show_raw_mask", true);
+    declare_parameter("show_filtered_mask", true);
+    declare_parameter("show_area_filter", false);
+    declare_parameter("show_aspect_filter", false);
+    declare_parameter("show_edge_filter", false);
+    declare_parameter("show_fill_filter", false);
+    declare_parameter("show_lut_filter", false);
+    declare_parameter("show_top_band_filter", false);
+    declare_parameter("show_search_debug", false);
+    declare_parameter("show_overlay_image", true);
+    declare_parameter("show_roi_image", true);
+    declare_parameter("show_roi_mask", false);
     declare_parameter("display_max_width", 960);
     declare_parameter("display_max_height", 720);
   }
@@ -347,6 +494,10 @@ private:
       std::max(1, static_cast<int>(get_parameter("min_blob_area_px").as_int()));
     max_blob_area_px_ =
       std::max(min_blob_area_px_, static_cast<int>(get_parameter("max_blob_area_px").as_int()));
+    area_prior_near_min_ratio_ = get_parameter("area_prior_near_min_ratio").as_double();
+    area_prior_near_max_ratio_ = get_parameter("area_prior_near_max_ratio").as_double();
+    area_prior_far_min_ratio_ = get_parameter("area_prior_far_min_ratio").as_double();
+    area_prior_far_max_ratio_ = get_parameter("area_prior_far_max_ratio").as_double();
     min_aspect_ratio_ = get_parameter("min_aspect_ratio").as_double();
     max_aspect_ratio_ = get_parameter("max_aspect_ratio").as_double();
     max_edge_touch_ratio_ = get_parameter("max_edge_touch_ratio").as_double();
@@ -361,12 +512,28 @@ private:
     lost_frame_tolerance_ =
       std::max(1, static_cast<int>(get_parameter("lost_frame_tolerance").as_int()));
     ema_alpha_ = clamp01(get_parameter("ema_alpha").as_double());
+    force_search_mode_ = get_parameter("force_search_mode").as_bool();
     enable_timing_log_ = get_parameter("enable_timing_log").as_bool();
     timing_log_interval_ =
       std::max(1, static_cast<int>(get_parameter("timing_log_interval").as_int()));
     publish_processing_time_ = get_parameter("publish_processing_time").as_bool();
     processing_time_topic_ = get_parameter("processing_time_topic").as_string();
     enable_image_view_ = get_parameter("enable_image_view").as_bool();
+    show_input_image_ = get_parameter("show_input_image").as_bool();
+    show_threshold_mask_ = get_parameter("show_threshold_mask").as_bool();
+    show_morph_mask_ = get_parameter("show_morph_mask").as_bool();
+    show_raw_mask_ = get_parameter("show_raw_mask").as_bool();
+    show_filtered_mask_ = get_parameter("show_filtered_mask").as_bool();
+    show_area_filter_ = get_parameter("show_area_filter").as_bool();
+    show_aspect_filter_ = get_parameter("show_aspect_filter").as_bool();
+    show_edge_filter_ = get_parameter("show_edge_filter").as_bool();
+    show_fill_filter_ = get_parameter("show_fill_filter").as_bool();
+    show_lut_filter_ = get_parameter("show_lut_filter").as_bool();
+    show_top_band_filter_ = get_parameter("show_top_band_filter").as_bool();
+    show_search_debug_ = get_parameter("show_search_debug").as_bool();
+    show_overlay_image_ = get_parameter("show_overlay_image").as_bool();
+    show_roi_image_ = get_parameter("show_roi_image").as_bool();
+    show_roi_mask_ = get_parameter("show_roi_mask").as_bool();
     display_max_width_ =
       std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
     display_max_height_ =
@@ -382,6 +549,26 @@ private:
     }
     if (roi_scale_ < 1.0) {
       throw std::runtime_error("Parameter 'roi_scale' must be at least 1.0.");
+    }
+    if (
+      !std::isfinite(area_prior_near_min_ratio_) || !std::isfinite(area_prior_near_max_ratio_) ||
+      !std::isfinite(area_prior_far_min_ratio_) || !std::isfinite(area_prior_far_max_ratio_))
+    {
+      throw std::runtime_error("Area-prior ratio parameters must be finite.");
+    }
+    if (
+      area_prior_near_min_ratio_ <= 0.0 || area_prior_near_max_ratio_ <= 0.0 ||
+      area_prior_far_min_ratio_ <= 0.0 || area_prior_far_max_ratio_ <= 0.0)
+    {
+      throw std::runtime_error("Area-prior ratio parameters must be positive.");
+    }
+    if (area_prior_near_max_ratio_ < area_prior_near_min_ratio_) {
+      throw std::runtime_error(
+              "Parameter 'area_prior_near_max_ratio' must be >= 'area_prior_near_min_ratio'.");
+    }
+    if (area_prior_far_max_ratio_ < area_prior_far_min_ratio_) {
+      throw std::runtime_error(
+              "Parameter 'area_prior_far_max_ratio' must be >= 'area_prior_far_min_ratio'.");
     }
     if (processing_time_topic_.empty()) {
       throw std::runtime_error("Parameter 'processing_time_topic' must not be empty.");
@@ -401,6 +588,8 @@ private:
     fs["ground_x_m"] >> lut_.ground_x_m;
     fs["ground_y_m"] >> lut_.ground_y_m;
     fs["valid_mask"] >> lut_.valid_mask;
+    fs["area_prior_distance_m"] >> lut_.area_prior_distance_m;
+    fs["area_prior_expected_area_px"] >> lut_.area_prior_expected_area_px;
     fs["source_width"] >> lut_.source_width;
     fs["source_height"] >> lut_.source_height;
     fs["ocam_xc"] >> lut_.ocam_xc;
@@ -415,6 +604,12 @@ private:
       lut_.ground_x_m.size() != lut_.valid_mask.size())
     {
       throw std::runtime_error("LUT file is missing required matrices: " + lut_file_);
+    }
+    if (lut_.area_prior_distance_m.empty() || lut_.area_prior_expected_area_px.empty()) {
+      throw std::runtime_error(
+              "LUT file is missing the distance-aware area prior fields "
+              "(area_prior_distance_m / area_prior_expected_area_px). "
+              "Regenerate the raw ball LUT before launching: " + lut_file_);
     }
 
     if (lut_.source_width <= 0 || lut_.source_height <= 0) {
@@ -432,6 +627,187 @@ private:
       lut_.valid_mask.convertTo(converted, CV_8UC1);
       lut_.valid_mask = converted;
     }
+    if (lut_.area_prior_distance_m.type() != CV_32FC1) {
+      lut_.area_prior_distance_m.convertTo(lut_.area_prior_distance_m, CV_32FC1);
+    }
+    if (lut_.area_prior_expected_area_px.type() != CV_32FC1) {
+      lut_.area_prior_expected_area_px.convertTo(lut_.area_prior_expected_area_px, CV_32FC1);
+    }
+
+    if (
+      (lut_.area_prior_distance_m.rows != 1 && lut_.area_prior_distance_m.cols != 1) ||
+      (lut_.area_prior_expected_area_px.rows != 1 && lut_.area_prior_expected_area_px.cols != 1))
+    {
+      throw std::runtime_error(
+              "Area prior LUT entries must be stored as 1D vectors in: " + lut_file_);
+    }
+
+    const std::size_t prior_count = lut_.area_prior_distance_m.total();
+    if (prior_count != lut_.area_prior_expected_area_px.total() || prior_count < 2U) {
+      throw std::runtime_error(
+              "Area prior LUT vectors must be non-empty, have matching lengths, and contain at "
+              "least 2 samples: " + lut_file_);
+    }
+
+    const cv::Mat distance_flat = lut_.area_prior_distance_m.reshape(1, 1);
+    const cv::Mat expected_area_flat = lut_.area_prior_expected_area_px.reshape(1, 1);
+    lut_.area_prior_distance_samples_m.clear();
+    lut_.area_prior_expected_area_samples_px.clear();
+    lut_.area_prior_distance_samples_m.reserve(prior_count);
+    lut_.area_prior_expected_area_samples_px.reserve(prior_count);
+    for (std::size_t i = 0; i < prior_count; ++i) {
+      const double distance_m = static_cast<double>(distance_flat.at<float>(0, static_cast<int>(i)));
+      const double expected_area_px =
+        static_cast<double>(expected_area_flat.at<float>(0, static_cast<int>(i)));
+      if (!std::isfinite(distance_m) || !std::isfinite(expected_area_px) || expected_area_px <= 0.0) {
+        throw std::runtime_error(
+                "Area prior LUT contains non-finite distance/area samples: " + lut_file_);
+      }
+      if (i > 0U) {
+        if (distance_m <= lut_.area_prior_distance_samples_m.back()) {
+          throw std::runtime_error(
+                  "area_prior_distance_m must be strictly increasing in LUT file: " + lut_file_);
+        }
+        if (expected_area_px > lut_.area_prior_expected_area_samples_px.back() + 1e-3) {
+          throw std::runtime_error(
+                  "area_prior_expected_area_px must be monotonic non-increasing in LUT file: " +
+                  lut_file_);
+        }
+      }
+      lut_.area_prior_distance_samples_m.push_back(distance_m);
+      lut_.area_prior_expected_area_samples_px.push_back(expected_area_px);
+    }
+  }
+
+  cv::Point mapSearchPointToRaw(const cv::Point & point_small) const
+  {
+    const double raw_x =
+      ((static_cast<double>(point_small.x) + 0.5) / search_downsample_scale_) - 0.5;
+    const double raw_y =
+      ((static_cast<double>(point_small.y) + 0.5) / search_downsample_scale_) - 0.5;
+    return clampPointToImage(
+      cv::Point(
+        static_cast<int>(std::lround(raw_x)),
+        static_cast<int>(std::lround(raw_y))),
+      cv::Size(lut_.source_width, lut_.source_height));
+  }
+
+  bool lookupGroundDistanceAtPixel(const cv::Point & raw_pixel, double & distance_m) const
+  {
+    if (
+      raw_pixel.x < 0 || raw_pixel.x >= lut_.source_width ||
+      raw_pixel.y < 0 || raw_pixel.y >= lut_.source_height)
+    {
+      return false;
+    }
+    if (lut_.valid_mask.at<uchar>(raw_pixel) == 0) {
+      return false;
+    }
+
+    const double ground_x_m = static_cast<double>(lut_.ground_x_m.at<float>(raw_pixel));
+    const double ground_y_m = static_cast<double>(lut_.ground_y_m.at<float>(raw_pixel));
+    if (!std::isfinite(ground_x_m) || !std::isfinite(ground_y_m)) {
+      return false;
+    }
+
+    distance_m = std::hypot(ground_x_m, ground_y_m);
+    return std::isfinite(distance_m);
+  }
+
+  double interpolateAreaPriorExpectedArea(double distance_m) const
+  {
+    const auto & distances = lut_.area_prior_distance_samples_m;
+    const auto & expected_areas = lut_.area_prior_expected_area_samples_px;
+    if (distances.empty() || expected_areas.empty()) {
+      throw std::runtime_error("Area prior LUT samples are unavailable at runtime.");
+    }
+
+    if (distance_m <= distances.front()) {
+      return expected_areas.front();
+    }
+    if (distance_m >= distances.back()) {
+      return expected_areas.back();
+    }
+
+    const auto upper_it = std::lower_bound(distances.begin(), distances.end(), distance_m);
+    const std::size_t upper_index = static_cast<std::size_t>(upper_it - distances.begin());
+    const std::size_t lower_index = upper_index - 1U;
+    const double lower_distance = distances[lower_index];
+    const double upper_distance = distances[upper_index];
+    const double lower_area = expected_areas[lower_index];
+    const double upper_area = expected_areas[upper_index];
+    const double span = upper_distance - lower_distance;
+    const double t = span > 1e-9 ? (distance_m - lower_distance) / span : 0.0;
+    return lower_area + (upper_area - lower_area) * t;
+  }
+
+  double interpolateAreaPriorRatio(
+    double distance_m,
+    double near_ratio,
+    double far_ratio) const
+  {
+    const auto & distances = lut_.area_prior_distance_samples_m;
+    if (distances.size() < 2U) {
+      return near_ratio;
+    }
+
+    const double min_distance = distances.front();
+    const double max_distance = distances.back();
+    const double span = max_distance - min_distance;
+    if (span <= 1e-9) {
+      return near_ratio;
+    }
+
+    const double t = clamp01((distance_m - min_distance) / span);
+    return near_ratio + (far_ratio - near_ratio) * t;
+  }
+
+  AreaPriorEvaluation evaluateAreaPrior(
+    double distance_m,
+    double actual_area_px,
+    double area_scale = 1.0) const
+  {
+    AreaPriorEvaluation evaluation;
+    evaluation.distance_m = distance_m;
+    if (!std::isfinite(distance_m) || !std::isfinite(actual_area_px) || actual_area_px <= 0.0) {
+      return evaluation;
+    }
+
+    const double expected_area_px =
+      interpolateAreaPriorExpectedArea(distance_m) * std::max(area_scale, 1e-9);
+    if (!std::isfinite(expected_area_px) || expected_area_px <= 0.0) {
+      return evaluation;
+    }
+
+    const double min_ratio = interpolateAreaPriorRatio(
+      distance_m,
+      area_prior_near_min_ratio_,
+      area_prior_far_min_ratio_);
+    const double max_ratio = interpolateAreaPriorRatio(
+      distance_m,
+      area_prior_near_max_ratio_,
+      area_prior_far_max_ratio_);
+    if (
+      !std::isfinite(min_ratio) || !std::isfinite(max_ratio) || min_ratio <= 0.0 ||
+      max_ratio <= 0.0)
+    {
+      return evaluation;
+    }
+
+    const double log_error = std::abs(std::log(actual_area_px / expected_area_px));
+    const double log_width =
+      std::max(std::abs(std::log(min_ratio)), std::abs(std::log(max_ratio)));
+
+    evaluation.valid = true;
+    evaluation.expected_area_px = expected_area_px;
+    evaluation.min_ratio = min_ratio;
+    evaluation.max_ratio = max_ratio;
+    evaluation.min_area_px = expected_area_px * min_ratio;
+    evaluation.max_area_px = expected_area_px * max_ratio;
+    evaluation.passed =
+      actual_area_px >= evaluation.min_area_px && actual_area_px <= evaluation.max_area_px;
+    evaluation.area_score = clamp01(1.0 - (log_error / std::max(log_width, 1e-6)));
+    return evaluation;
   }
 
   void syncWindow(const std::string & window_name, bool should_show, bool & created)
@@ -457,16 +833,101 @@ private:
       enable_image_view_ = false;
     }
 
-    syncWindow(kOverlayWindowName, enable_image_view_, overlay_window_created_);
-    syncWindow(kMaskWindowName, enable_image_view_, mask_window_created_);
-    syncWindow(kRoiWindowName, enable_image_view_, roi_window_created_);
+    const bool master_enabled = enable_image_view_;
+    syncWindow(kInputWindowName, master_enabled && show_input_image_, input_window_created_);
+    syncWindow(
+      kThresholdMaskWindowName,
+      master_enabled && show_threshold_mask_,
+      threshold_mask_window_created_);
+    syncWindow(
+      kMorphMaskWindowName,
+      master_enabled && show_morph_mask_,
+      morph_mask_window_created_);
+    syncWindow(kRawMaskWindowName, master_enabled && show_raw_mask_, raw_mask_window_created_);
+    syncWindow(
+      kFilteredMaskWindowName,
+      master_enabled && show_filtered_mask_,
+      filtered_mask_window_created_);
+    syncWindow(
+      kAreaFilterWindowName,
+      master_enabled && show_area_filter_,
+      area_filter_window_created_);
+    syncWindow(
+      kAspectFilterWindowName,
+      master_enabled && show_aspect_filter_,
+      aspect_filter_window_created_);
+    syncWindow(
+      kEdgeFilterWindowName,
+      master_enabled && show_edge_filter_,
+      edge_filter_window_created_);
+    syncWindow(
+      kFillFilterWindowName,
+      master_enabled && show_fill_filter_,
+      fill_filter_window_created_);
+    syncWindow(
+      kLutFilterWindowName,
+      master_enabled && show_lut_filter_,
+      lut_filter_window_created_);
+    syncWindow(
+      kTopBandFilterWindowName,
+      master_enabled && show_top_band_filter_,
+      top_band_filter_window_created_);
+    syncWindow(
+      kSearchDebugWindowName,
+      master_enabled && show_search_debug_,
+      search_debug_window_created_);
+    syncWindow(
+      kOverlayWindowName,
+      master_enabled && show_overlay_image_,
+      overlay_window_created_);
+    syncWindow(kRoiWindowName, master_enabled && show_roi_image_, roi_window_created_);
+    syncWindow(kRoiMaskWindowName, master_enabled && show_roi_mask_, roi_mask_window_created_);
   }
 
   void destroyDebugWindows()
   {
+    syncWindow(kInputWindowName, false, input_window_created_);
+    syncWindow(kThresholdMaskWindowName, false, threshold_mask_window_created_);
+    syncWindow(kMorphMaskWindowName, false, morph_mask_window_created_);
     syncWindow(kOverlayWindowName, false, overlay_window_created_);
-    syncWindow(kMaskWindowName, false, mask_window_created_);
+    syncWindow(kRawMaskWindowName, false, raw_mask_window_created_);
+    syncWindow(kFilteredMaskWindowName, false, filtered_mask_window_created_);
+    syncWindow(kAreaFilterWindowName, false, area_filter_window_created_);
+    syncWindow(kAspectFilterWindowName, false, aspect_filter_window_created_);
+    syncWindow(kEdgeFilterWindowName, false, edge_filter_window_created_);
+    syncWindow(kFillFilterWindowName, false, fill_filter_window_created_);
+    syncWindow(kLutFilterWindowName, false, lut_filter_window_created_);
+    syncWindow(kTopBandFilterWindowName, false, top_band_filter_window_created_);
+    syncWindow(kSearchDebugWindowName, false, search_debug_window_created_);
     syncWindow(kRoiWindowName, false, roi_window_created_);
+    syncWindow(kRoiMaskWindowName, false, roi_mask_window_created_);
+  }
+
+  DebugRequest buildDebugRequest() const
+  {
+    DebugRequest request;
+    request.publish_raw_mask =
+      debug_mask_pub_ && debug_mask_pub_->get_subscription_count() > 0U;
+    request.publish_filtered_mask =
+      debug_mask_filtered_pub_ && debug_mask_filtered_pub_->get_subscription_count() > 0U;
+    request.publish_overlay =
+      debug_image_pub_ && debug_image_pub_->get_subscription_count() > 0U;
+    request.show_input_image = input_window_created_;
+    request.show_threshold_mask = threshold_mask_window_created_;
+    request.show_morph_mask = morph_mask_window_created_;
+    request.show_raw_mask = raw_mask_window_created_;
+    request.show_filtered_mask = filtered_mask_window_created_;
+    request.show_area_filter = area_filter_window_created_;
+    request.show_aspect_filter = aspect_filter_window_created_;
+    request.show_edge_filter = edge_filter_window_created_;
+    request.show_fill_filter = fill_filter_window_created_;
+    request.show_lut_filter = lut_filter_window_created_;
+    request.show_top_band_filter = top_band_filter_window_created_;
+    request.show_search_debug = search_debug_window_created_;
+    request.show_overlay_image = overlay_window_created_;
+    request.show_roi_image = roi_window_created_;
+    request.show_roi_mask = roi_mask_window_created_;
+    return request;
   }
 
   void logTimingSummary(const std::array<long long, kTimingStageCount> & stage_us)
@@ -504,7 +965,7 @@ private:
     timing_interval_totals_us_.fill(0);
   }
 
-  void buildOrangeMask(const cv::Mat & bgr, cv::Mat & mask) const
+  void buildThresholdMask(const cv::Mat & bgr, cv::Mat & mask) const
   {
     cv::Mat hsv;
     cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
@@ -530,13 +991,22 @@ private:
         high_mask);
       cv::bitwise_or(low_mask, high_mask, mask);
     }
+  }
 
+  void applyMorphOpen(cv::Mat & mask) const
+  {
     if (enable_morph_open_ && morph_kernel_size_ > 1) {
       const cv::Mat kernel = cv::getStructuringElement(
         cv::MORPH_ELLIPSE,
         cv::Size(morph_kernel_size_, morph_kernel_size_));
       cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
     }
+  }
+
+  void buildOrangeMask(const cv::Mat & bgr, cv::Mat & mask) const
+  {
+    buildThresholdMask(bgr, mask);
+    applyMorphOpen(mask);
   }
 
   std::vector<CoarseCandidate> findCoarseCandidates(const cv::Mat & frame_small)
@@ -550,6 +1020,29 @@ private:
     cv::Mat centroids;
     const int label_count =
       cv::connectedComponentsWithStats(mask, labels, stats, centroids, 8, CV_32S);
+    std::vector<cv::Point> farthest_pixels(static_cast<std::size_t>(label_count));
+    std::vector<double> farthest_radius_sq(
+      static_cast<std::size_t>(label_count),
+      -std::numeric_limits<double>::infinity());
+    const double ocam_x_small = lut_.ocam_xc * search_downsample_scale_;
+    const double ocam_y_small = lut_.ocam_yc * search_downsample_scale_;
+    for (int y = 0; y < labels.rows; ++y) {
+      const int * label_row = labels.ptr<int>(y);
+      for (int x = 0; x < labels.cols; ++x) {
+        const int label = label_row[x];
+        if (label <= 0) {
+          continue;
+        }
+
+        const double dx = static_cast<double>(x) - ocam_x_small;
+        const double dy = static_cast<double>(y) - ocam_y_small;
+        const double radius_sq = dx * dx + dy * dy;
+        if (radius_sq > farthest_radius_sq[static_cast<std::size_t>(label)]) {
+          farthest_radius_sq[static_cast<std::size_t>(label)] = radius_sq;
+          farthest_pixels[static_cast<std::size_t>(label)] = cv::Point(x, y);
+        }
+      }
+    }
 
     const double scale_sq = search_downsample_scale_ * search_downsample_scale_;
     const int scaled_min_area = std::max(1, static_cast<int>(std::round(min_blob_area_px_ * scale_sq)));
@@ -585,11 +1078,25 @@ private:
         continue;
       }
 
+      double distance_m = 0.0;
+      const cv::Point raw_reference_point =
+        mapSearchPointToRaw(farthest_pixels[static_cast<std::size_t>(label)]);
+      if (!lookupGroundDistanceAtPixel(raw_reference_point, distance_m)) {
+        continue;
+      }
+
+      const AreaPriorEvaluation area_prior = evaluateAreaPrior(
+        distance_m,
+        static_cast<double>(area),
+        scale_sq);
+      if (!area_prior.valid || !area_prior.passed) {
+        continue;
+      }
+
       const double aspect_score =
         clamp01(1.0 - (std::abs(std::log(aspect)) / std::log(std::max(1.001, max_aspect_ratio_))));
       const double fill_score = clamp01(fill_ratio / 0.85);
-      const double area_score =
-        clamp01(static_cast<double>(area) / static_cast<double>(scaled_max_area));
+      const double area_score = area_prior.area_score;
       const double score = 0.45 * aspect_score + 0.30 * fill_score + 0.25 * area_score;
 
       CoarseCandidate coarse_candidate;
@@ -611,21 +1118,44 @@ private:
   DetectorOutputs detectCandidateInRoi(
     const cv::Mat & frame,
     const cv::Rect & roi,
-    TrackingMode mode)
+    TrackingMode mode,
+    const DetectionDebugOptions & debug_options)
   {
     DetectorOutputs outputs;
     outputs.roi = roi;
-    outputs.raw_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
-    outputs.filtered_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
 
     if (roi.width <= 0 || roi.height <= 0) {
       return outputs;
     }
 
     const cv::Mat frame_roi = frame(roi);
-    cv::Mat mask_roi;
-    buildOrangeMask(frame_roi, mask_roi);
-    mask_roi.copyTo(outputs.raw_debug_mask(roi));
+    cv::Mat threshold_roi_mask;
+    buildThresholdMask(frame_roi, threshold_roi_mask);
+    if (debug_options.capture_threshold_mask || debug_options.capture_raw_mask) {
+      outputs.threshold_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+      threshold_roi_mask.copyTo(outputs.threshold_debug_mask(roi));
+    }
+
+    cv::Mat mask_roi = threshold_roi_mask.clone();
+    applyMorphOpen(mask_roi);
+    if (debug_options.capture_morph_mask || debug_options.capture_roi_mask) {
+      outputs.morph_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+      mask_roi.copyTo(outputs.morph_debug_mask(roi));
+    }
+    if (debug_options.capture_raw_mask) {
+      if (outputs.morph_debug_mask.empty()) {
+        outputs.raw_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+        mask_roi.copyTo(outputs.raw_debug_mask(roi));
+      } else {
+        outputs.raw_debug_mask = outputs.morph_debug_mask;
+      }
+    }
+    if (debug_options.capture_roi_mask) {
+      outputs.roi_debug_mask = mask_roi.clone();
+    }
+    if (debug_options.capture_filtered_mask) {
+      outputs.filtered_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+    }
 
     cv::Mat labels;
     cv::Mat stats;
@@ -652,6 +1182,8 @@ private:
     for (int label = 1; label < label_count; ++label) {
       Candidate candidate;
       candidate.area_px = static_cast<double>(stats.at<int>(label, cv::CC_STAT_AREA));
+      const std::vector<cv::Point> & component_pixels =
+        label_pixels[static_cast<std::size_t>(label)];
       candidate.bbox = cv::Rect(
         stats.at<int>(label, cv::CC_STAT_LEFT) + roi.x,
         stats.at<int>(label, cv::CC_STAT_TOP) + roi.y,
@@ -663,6 +1195,14 @@ private:
         candidate.area_px > static_cast<double>(max_blob_area_px_))
       {
         continue;
+      }
+      if (debug_options.capture_area_mask) {
+        if (outputs.area_debug_mask.empty()) {
+          outputs.area_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+        }
+        for (const cv::Point & pixel : component_pixels) {
+          outputs.area_debug_mask.at<uchar>(pixel) = 255;
+        }
       }
       if (candidate.bbox.width <= 0 || candidate.bbox.height <= 0) {
         continue;
@@ -676,10 +1216,26 @@ private:
       {
         continue;
       }
+      if (debug_options.capture_aspect_mask) {
+        if (outputs.aspect_debug_mask.empty()) {
+          outputs.aspect_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+        }
+        for (const cv::Point & pixel : component_pixels) {
+          outputs.aspect_debug_mask.at<uchar>(pixel) = 255;
+        }
+      }
 
       candidate.edge_touch_ratio = computeEdgeTouchRatio(candidate.bbox, frame.size());
       if (candidate.edge_touch_ratio > max_edge_touch_ratio_) {
         continue;
+      }
+      if (debug_options.capture_edge_mask) {
+        if (outputs.edge_debug_mask.empty()) {
+          outputs.edge_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+        }
+        for (const cv::Point & pixel : component_pixels) {
+          outputs.edge_debug_mask.at<uchar>(pixel) = 255;
+        }
       }
 
       candidate.fill_ratio =
@@ -690,8 +1246,16 @@ private:
       if (candidate.fill_ratio < kMinFillRatio) {
         continue;
       }
+      if (debug_options.capture_fill_mask) {
+        if (outputs.fill_debug_mask.empty()) {
+          outputs.fill_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+        }
+        for (const cv::Point & pixel : component_pixels) {
+          outputs.fill_debug_mask.at<uchar>(pixel) = 255;
+        }
+      }
 
-      candidate.pixels = std::move(label_pixels[static_cast<std::size_t>(label)]);
+      candidate.pixels = component_pixels;
       if (candidate.pixels.empty()) {
         continue;
       }
@@ -718,6 +1282,14 @@ private:
         static_cast<double>(valid_lut_pixels) / static_cast<double>(candidate.pixels.size());
       if (candidate.valid_lut_ratio < kMinValidLutCoverageRatio) {
         continue;
+      }
+      if (debug_options.capture_lut_mask) {
+        if (outputs.lut_debug_mask.empty()) {
+          outputs.lut_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+        }
+        for (const cv::Point & pixel : component_pixels) {
+          outputs.lut_debug_mask.at<uchar>(pixel) = 255;
+        }
       }
 
       const double band_threshold = max_radius - static_cast<double>(top_band_px_);
@@ -759,11 +1331,26 @@ private:
       if (candidate.top_band_valid_ratio < kMinTopBandValidRatio) {
         continue;
       }
+      if (debug_options.capture_top_band_mask) {
+        if (outputs.top_band_debug_mask.empty()) {
+          outputs.top_band_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+        }
+        for (const cv::Point & pixel : component_pixels) {
+          outputs.top_band_debug_mask.at<uchar>(pixel) = 255;
+        }
+      }
 
       candidate.top_point_px = cv::Point2d(top_x_sum / top_weight_sum, top_y_sum / top_weight_sum);
       candidate.ground_center_m = cv::Point2d(
         ground_x_sum / ground_weight_sum,
         ground_y_sum / ground_weight_sum);
+
+      const double distance_m =
+        std::hypot(candidate.ground_center_m.x, candidate.ground_center_m.y);
+      const AreaPriorEvaluation area_prior = evaluateAreaPrior(distance_m, candidate.area_px);
+      if (!area_prior.valid || !area_prior.passed) {
+        continue;
+      }
 
       const double aspect_score =
         clamp01(
@@ -771,8 +1358,7 @@ private:
         std::log(std::max(1.001, max_aspect_ratio_))));
       const double fill_score = clamp01(candidate.fill_ratio / 0.85);
       const double valid_score = clamp01(candidate.top_band_valid_ratio);
-      const double area_score =
-        clamp01(candidate.area_px / static_cast<double>(max_blob_area_px_));
+      const double area_score = area_prior.area_score;
 
       if (mode == TrackingMode::Track && has_filtered_state_) {
         const double distance =
@@ -783,11 +1369,12 @@ private:
             static_cast<double>(outputs.roi.height)));
         const double proximity_score = clamp01(1.0 - distance_norm);
         candidate.score =
-          0.45 * proximity_score + 0.25 * aspect_score + 0.20 * valid_score + 0.10 * fill_score;
+          0.40 * proximity_score + 0.25 * aspect_score + 0.20 * valid_score +
+          0.05 * fill_score + 0.10 * area_score;
         candidate.confidence =
           clamp01(
-          0.35 * proximity_score + 0.25 * aspect_score + 0.20 * valid_score +
-          0.20 * fill_score);
+          0.30 * proximity_score + 0.25 * aspect_score + 0.20 * valid_score +
+          0.10 * fill_score + 0.15 * area_score);
       } else {
         candidate.score =
           0.40 * aspect_score + 0.25 * fill_score + 0.20 * valid_score + 0.15 * area_score;
@@ -796,8 +1383,10 @@ private:
           0.30 * aspect_score + 0.20 * fill_score + 0.30 * valid_score + 0.20 * area_score);
       }
 
-      for (const cv::Point & pixel : candidate.pixels) {
-        outputs.filtered_debug_mask.at<uchar>(pixel) = 255;
+      if (debug_options.capture_filtered_mask) {
+        for (const cv::Point & pixel : candidate.pixels) {
+          outputs.filtered_debug_mask.at<uchar>(pixel) = 255;
+        }
       }
 
       if (!outputs.candidate.valid || candidate.score > outputs.candidate.score) {
@@ -809,13 +1398,16 @@ private:
     return outputs;
   }
 
-  DetectorOutputs runSearch(const cv::Mat & frame)
+  DetectorOutputs runSearch(
+    const cv::Mat & frame,
+    const DetectionDebugOptions & debug_options)
   {
     if (search_downsample_scale_ >= 0.999) {
       return detectCandidateInRoi(
         frame,
         cv::Rect(0, 0, frame.cols, frame.rows),
-        TrackingMode::Search);
+        TrackingMode::Search,
+        debug_options);
     }
 
     cv::Mat frame_small;
@@ -826,17 +1418,59 @@ private:
       search_downsample_scale_,
       search_downsample_scale_,
       cv::INTER_LINEAR);
+    cv::Mat search_mask_small;
+    if (debug_options.capture_search_debug) {
+      buildOrangeMask(frame_small, search_mask_small);
+    }
     const std::vector<CoarseCandidate> coarse_candidates = findCoarseCandidates(frame_small);
 
     DetectorOutputs fallback_outputs;
-    fallback_outputs.raw_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
-    fallback_outputs.filtered_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
-    buildOrangeMask(frame, fallback_outputs.raw_debug_mask);
+    if (debug_options.capture_threshold_mask || debug_options.capture_raw_mask) {
+      buildThresholdMask(frame, fallback_outputs.threshold_debug_mask);
+    }
+    if (debug_options.capture_morph_mask) {
+      if (fallback_outputs.threshold_debug_mask.empty()) {
+        buildThresholdMask(frame, fallback_outputs.threshold_debug_mask);
+      }
+      fallback_outputs.morph_debug_mask = fallback_outputs.threshold_debug_mask.clone();
+      applyMorphOpen(fallback_outputs.morph_debug_mask);
+    }
+    if (debug_options.capture_raw_mask) {
+      if (fallback_outputs.morph_debug_mask.empty()) {
+        if (fallback_outputs.threshold_debug_mask.empty()) {
+          buildThresholdMask(frame, fallback_outputs.threshold_debug_mask);
+        }
+        fallback_outputs.raw_debug_mask = fallback_outputs.threshold_debug_mask.clone();
+        applyMorphOpen(fallback_outputs.raw_debug_mask);
+      } else {
+        fallback_outputs.raw_debug_mask = fallback_outputs.morph_debug_mask;
+      }
+    }
+    if (debug_options.capture_search_debug) {
+      cv::Mat search_overlay = frame_small.clone();
+      if (search_overlay.channels() == 1) {
+        cv::cvtColor(search_overlay, search_overlay, cv::COLOR_GRAY2BGR);
+      }
+      if (!search_mask_small.empty()) {
+        for (const CoarseCandidate & coarse_candidate : coarse_candidates) {
+          cv::rectangle(search_overlay, coarse_candidate.bbox, cv::Scalar(0, 255, 255), 1);
+        }
+      }
+      cv::resize(
+        search_overlay,
+        fallback_outputs.search_debug_image,
+        frame.size(),
+        0.0,
+        0.0,
+        cv::INTER_NEAREST);
+    }
     if (coarse_candidates.empty()) {
       return fallback_outputs;
     }
 
     const double inv_scale = 1.0 / search_downsample_scale_;
+    DetectionDebugOptions roi_debug_options = debug_options;
+    roi_debug_options.capture_raw_mask = false;
     for (const CoarseCandidate & coarse_candidate : coarse_candidates) {
       const cv::Rect coarse_raw_bbox(
         static_cast<int>(std::floor(static_cast<double>(coarse_candidate.bbox.x) * inv_scale)),
@@ -849,10 +1483,24 @@ private:
           static_cast<int>(
             std::ceil(static_cast<double>(coarse_candidate.bbox.height) * inv_scale))));
       const cv::Rect refine_roi = scaleRectAroundCenter(coarse_raw_bbox, 1.6, frame.size());
-      DetectorOutputs trial_outputs = detectCandidateInRoi(frame, refine_roi, TrackingMode::Search);
+      DetectorOutputs trial_outputs = detectCandidateInRoi(
+        frame,
+        refine_roi,
+        TrackingMode::Search,
+        roi_debug_options);
+      trial_outputs.threshold_debug_mask = fallback_outputs.threshold_debug_mask;
+      trial_outputs.morph_debug_mask = fallback_outputs.morph_debug_mask;
       trial_outputs.raw_debug_mask = fallback_outputs.raw_debug_mask;
+      trial_outputs.search_debug_image = fallback_outputs.search_debug_image;
       fallback_outputs.roi = trial_outputs.roi;
-      fallback_outputs.filtered_debug_mask = std::move(trial_outputs.filtered_debug_mask);
+      fallback_outputs.filtered_debug_mask = trial_outputs.filtered_debug_mask;
+      fallback_outputs.area_debug_mask = trial_outputs.area_debug_mask;
+      fallback_outputs.aspect_debug_mask = trial_outputs.aspect_debug_mask;
+      fallback_outputs.edge_debug_mask = trial_outputs.edge_debug_mask;
+      fallback_outputs.fill_debug_mask = trial_outputs.fill_debug_mask;
+      fallback_outputs.lut_debug_mask = trial_outputs.lut_debug_mask;
+      fallback_outputs.top_band_debug_mask = trial_outputs.top_band_debug_mask;
+      fallback_outputs.roi_debug_mask = trial_outputs.roi_debug_mask;
       if (trial_outputs.candidate.valid) {
         return trial_outputs;
       }
@@ -928,100 +1576,222 @@ private:
     const sensor_msgs::msg::Image::ConstSharedPtr & msg,
     const cv::Mat & frame,
     const DetectorOutputs & outputs,
-    TrackingMode mode)
+    TrackingMode mode,
+    const DebugRequest & debug_request)
   {
-    const bool need_debug_mask =
-      debug_mask_pub_->get_subscription_count() > 0U || mask_window_created_;
-    const bool need_debug_mask_filtered =
-      debug_mask_filtered_pub_->get_subscription_count() > 0U;
-    const bool need_debug_image =
-      debug_image_pub_->get_subscription_count() > 0U || overlay_window_created_ || roi_window_created_;
-
-    cv::Mat debug_mask;
-    if (need_debug_mask) {
-      debug_mask = outputs.raw_debug_mask.empty() ?
-        cv::Mat::zeros(frame.size(), CV_8UC1) :
-        outputs.raw_debug_mask.clone();
-      debug_mask_pub_->publish(
-        *cv_bridge::CvImage(msg->header, "mono8", debug_mask).toImageMsg());
-    }
-
-    if (need_debug_mask_filtered) {
-      const cv::Mat debug_mask_filtered = outputs.filtered_debug_mask.empty() ?
-        cv::Mat::zeros(frame.size(), CV_8UC1) :
-        outputs.filtered_debug_mask;
-      debug_mask_filtered_pub_->publish(
-        *cv_bridge::CvImage(msg->header, "mono8", debug_mask_filtered).toImageMsg());
-    }
-
-    if (!need_debug_image) {
+    if (!debug_request.needAnyOutputs()) {
       return;
     }
 
-    cv::Mat overlay = frame.clone();
-    if (outputs.roi.width > 0 && outputs.roi.height > 0) {
-      cv::rectangle(overlay, outputs.roi, cv::Scalar(255, 255, 0), 1);
+    cv::Mat threshold_debug_mask;
+    if (debug_request.show_threshold_mask) {
+      threshold_debug_mask = outputs.threshold_debug_mask.empty() ?
+        cv::Mat::zeros(frame.size(), CV_8UC1) :
+        outputs.threshold_debug_mask;
     }
-    if (outputs.candidate.valid) {
-      cv::rectangle(overlay, outputs.candidate.bbox, cv::Scalar(0, 255, 255), 2);
-      for (const cv::Point & pixel : outputs.candidate.top_band_pixels) {
-        overlay.at<cv::Vec3b>(pixel) = cv::Vec3b(0, 255, 255);
+
+    cv::Mat morph_debug_mask;
+    if (debug_request.show_morph_mask || debug_request.show_roi_mask) {
+      morph_debug_mask = outputs.morph_debug_mask.empty() ?
+        cv::Mat::zeros(frame.size(), CV_8UC1) :
+        outputs.morph_debug_mask;
+    }
+
+    cv::Mat raw_debug_mask;
+    if (debug_request.publish_raw_mask) {
+      raw_debug_mask = outputs.raw_debug_mask.empty() ?
+        cv::Mat::zeros(frame.size(), CV_8UC1) :
+        outputs.raw_debug_mask;
+      debug_mask_pub_->publish(
+        *cv_bridge::CvImage(msg->header, "mono8", raw_debug_mask).toImageMsg());
+    }
+
+    cv::Mat filtered_debug_mask;
+    if (debug_request.publish_filtered_mask) {
+      filtered_debug_mask = outputs.filtered_debug_mask.empty() ?
+        cv::Mat::zeros(frame.size(), CV_8UC1) :
+        outputs.filtered_debug_mask;
+      debug_mask_filtered_pub_->publish(
+        *cv_bridge::CvImage(msg->header, "mono8", filtered_debug_mask).toImageMsg());
+    }
+
+    const auto maskOrZeros = [&frame](const cv::Mat & mask) {
+        return mask.empty() ? cv::Mat::zeros(frame.size(), CV_8UC1) : mask;
+      };
+
+    cv::Mat overlay;
+    if (debug_request.needOverlay()) {
+      overlay = frame.clone();
+      if (outputs.roi.width > 0 && outputs.roi.height > 0) {
+        cv::rectangle(overlay, outputs.roi, cv::Scalar(255, 255, 0), 1);
       }
-      cv::circle(
-        overlay,
-        cv::Point(
-          static_cast<int>(std::round(outputs.candidate.top_point_px.x)),
-          static_cast<int>(std::round(outputs.candidate.top_point_px.y))),
-        5,
-        cv::Scalar(0, 0, 255),
-        2);
-      cv::circle(
-        overlay,
-        cv::Point(
-          static_cast<int>(std::round(filtered_raw_center_px_.x)),
-          static_cast<int>(std::round(filtered_raw_center_px_.y))),
-        5,
-        cv::Scalar(255, 0, 0),
-        2);
-      std::ostringstream oss;
-      oss << trackingModeToString(mode) << " conf="
-          << std::fixed << std::setprecision(2) << outputs.candidate.confidence
-          << " lost=" << lost_frame_count_;
-      cv::putText(
-        overlay,
-        oss.str(),
-        cv::Point(10, 30),
-        cv::FONT_HERSHEY_SIMPLEX,
-        0.7,
-        cv::Scalar(0, 255, 0),
-        2);
-    } else {
-      const std::string label = trackingModeToString(mode) + " no detection";
-      cv::putText(
-        overlay,
-        label,
-        cv::Point(10, 30),
-        cv::FONT_HERSHEY_SIMPLEX,
-        0.7,
-        cv::Scalar(0, 0, 255),
-        2);
+      if (outputs.candidate.valid) {
+        cv::rectangle(overlay, outputs.candidate.bbox, cv::Scalar(0, 255, 255), 2);
+        for (const cv::Point & pixel : outputs.candidate.top_band_pixels) {
+          overlay.at<cv::Vec3b>(pixel) = cv::Vec3b(0, 255, 255);
+        }
+        cv::circle(
+          overlay,
+          cv::Point(
+            static_cast<int>(std::round(outputs.candidate.top_point_px.x)),
+            static_cast<int>(std::round(outputs.candidate.top_point_px.y))),
+          5,
+          cv::Scalar(0, 0, 255),
+          2);
+        cv::circle(
+          overlay,
+          cv::Point(
+            static_cast<int>(std::round(filtered_raw_center_px_.x)),
+            static_cast<int>(std::round(filtered_raw_center_px_.y))),
+          5,
+          cv::Scalar(255, 0, 0),
+          2);
+        std::ostringstream oss;
+        oss << trackingModeToString(mode) << " conf="
+            << std::fixed << std::setprecision(2) << outputs.candidate.confidence
+            << " lost=" << lost_frame_count_;
+        cv::putText(
+          overlay,
+          oss.str(),
+          cv::Point(10, 30),
+          cv::FONT_HERSHEY_SIMPLEX,
+          0.7,
+          cv::Scalar(0, 255, 0),
+          2);
+      } else {
+        const std::string label = trackingModeToString(mode) + " no detection";
+        cv::putText(
+          overlay,
+          label,
+          cv::Point(10, 30),
+          cv::FONT_HERSHEY_SIMPLEX,
+          0.7,
+          cv::Scalar(0, 0, 255),
+          2);
+      }
     }
 
-    debug_image_pub_->publish(
-      *cv_bridge::CvImage(msg->header, "bgr8", overlay).toImageMsg());
+    if (debug_request.publish_overlay) {
+      debug_image_pub_->publish(
+        *cv_bridge::CvImage(msg->header, "bgr8", overlay).toImageMsg());
+    }
 
-    if (overlay_window_created_) {
+    if (debug_request.show_input_image) {
+      cv::imshow(kInputWindowName, frame);
+      resizeWindowToFitImage(kInputWindowName, frame, display_max_width_, display_max_height_);
+    }
+    if (debug_request.show_threshold_mask) {
+      cv::imshow(kThresholdMaskWindowName, threshold_debug_mask);
+      resizeWindowToFitImage(
+        kThresholdMaskWindowName,
+        threshold_debug_mask,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_morph_mask) {
+      cv::imshow(kMorphMaskWindowName, morph_debug_mask);
+      resizeWindowToFitImage(
+        kMorphMaskWindowName,
+        morph_debug_mask,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_raw_mask) {
+      if (raw_debug_mask.empty()) {
+        raw_debug_mask = outputs.raw_debug_mask.empty() ?
+          cv::Mat::zeros(frame.size(), CV_8UC1) :
+          outputs.raw_debug_mask;
+      }
+      cv::imshow(kRawMaskWindowName, raw_debug_mask);
+      resizeWindowToFitImage(
+        kRawMaskWindowName,
+        raw_debug_mask,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_filtered_mask) {
+      if (filtered_debug_mask.empty()) {
+        filtered_debug_mask = outputs.filtered_debug_mask.empty() ?
+          cv::Mat::zeros(frame.size(), CV_8UC1) :
+          outputs.filtered_debug_mask;
+      }
+      cv::imshow(kFilteredMaskWindowName, filtered_debug_mask);
+      resizeWindowToFitImage(
+        kFilteredMaskWindowName,
+        filtered_debug_mask,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_area_filter) {
+      const cv::Mat area_debug_mask = maskOrZeros(outputs.area_debug_mask);
+      cv::imshow(kAreaFilterWindowName, area_debug_mask);
+      resizeWindowToFitImage(
+        kAreaFilterWindowName,
+        area_debug_mask,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_aspect_filter) {
+      const cv::Mat aspect_debug_mask = maskOrZeros(outputs.aspect_debug_mask);
+      cv::imshow(kAspectFilterWindowName, aspect_debug_mask);
+      resizeWindowToFitImage(
+        kAspectFilterWindowName,
+        aspect_debug_mask,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_edge_filter) {
+      const cv::Mat edge_debug_mask = maskOrZeros(outputs.edge_debug_mask);
+      cv::imshow(kEdgeFilterWindowName, edge_debug_mask);
+      resizeWindowToFitImage(
+        kEdgeFilterWindowName,
+        edge_debug_mask,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_fill_filter) {
+      const cv::Mat fill_debug_mask = maskOrZeros(outputs.fill_debug_mask);
+      cv::imshow(kFillFilterWindowName, fill_debug_mask);
+      resizeWindowToFitImage(
+        kFillFilterWindowName,
+        fill_debug_mask,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_lut_filter) {
+      const cv::Mat lut_debug_mask = maskOrZeros(outputs.lut_debug_mask);
+      cv::imshow(kLutFilterWindowName, lut_debug_mask);
+      resizeWindowToFitImage(
+        kLutFilterWindowName,
+        lut_debug_mask,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_top_band_filter) {
+      const cv::Mat top_band_debug_mask = maskOrZeros(outputs.top_band_debug_mask);
+      cv::imshow(kTopBandFilterWindowName, top_band_debug_mask);
+      resizeWindowToFitImage(
+        kTopBandFilterWindowName,
+        top_band_debug_mask,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_search_debug) {
+      const cv::Mat search_debug_image = outputs.search_debug_image.empty() ?
+        cv::Mat::zeros(frame.size(), CV_8UC3) :
+        outputs.search_debug_image;
+      cv::imshow(kSearchDebugWindowName, search_debug_image);
+      resizeWindowToFitImage(
+        kSearchDebugWindowName,
+        search_debug_image,
+        display_max_width_,
+        display_max_height_);
+    }
+    if (debug_request.show_overlay_image) {
       cv::imshow(kOverlayWindowName, overlay);
       resizeWindowToFitImage(kOverlayWindowName, overlay, display_max_width_, display_max_height_);
     }
-    if (mask_window_created_) {
-      const cv::Mat & mask_to_show = debug_mask.empty() ?
-        outputs.raw_debug_mask :
-        debug_mask;
-      cv::imshow(kMaskWindowName, mask_to_show);
-      resizeWindowToFitImage(kMaskWindowName, mask_to_show, display_max_width_, display_max_height_);
-    }
-    if (roi_window_created_) {
+    if (debug_request.show_roi_image) {
       cv::Mat roi_view;
       if (outputs.roi.width > 0 && outputs.roi.height > 0) {
         roi_view = frame(outputs.roi).clone();
@@ -1031,7 +1801,24 @@ private:
       cv::imshow(kRoiWindowName, roi_view);
       resizeWindowToFitImage(kRoiWindowName, roi_view, display_max_width_, display_max_height_);
     }
-    if (overlay_window_created_ || mask_window_created_ || roi_window_created_) {
+    if (debug_request.show_roi_mask) {
+      cv::Mat roi_mask_view;
+      if (!outputs.roi_debug_mask.empty()) {
+        roi_mask_view = outputs.roi_debug_mask;
+      } else if (outputs.roi.width > 0 && outputs.roi.height > 0) {
+        roi_mask_view = cv::Mat::zeros(outputs.roi.size(), CV_8UC1);
+      } else {
+        roi_mask_view = cv::Mat::zeros(frame.size(), CV_8UC1);
+      }
+      cv::imshow(kRoiMaskWindowName, roi_mask_view);
+      resizeWindowToFitImage(
+        kRoiMaskWindowName,
+        roi_mask_view,
+        display_max_width_,
+        display_max_height_);
+    }
+
+    if (debug_request.needAnyWindows()) {
       cv::waitKey(1);
     }
   }
@@ -1071,19 +1858,37 @@ private:
     }
 
     const TrackingMode mode =
-      (has_filtered_state_ && lost_frame_count_ < lost_frame_tolerance_) ?
+      (!force_search_mode_ && has_filtered_state_ && lost_frame_count_ < lost_frame_tolerance_) ?
       TrackingMode::Track :
       TrackingMode::Search;
+    const DebugRequest debug_request = buildDebugRequest();
+    DetectionDebugOptions debug_options;
+    debug_options.capture_threshold_mask = debug_request.show_threshold_mask;
+    debug_options.capture_morph_mask = debug_request.show_morph_mask;
+    debug_options.capture_raw_mask = debug_request.needRawMask();
+    debug_options.capture_filtered_mask = debug_request.needFilteredMask();
+    debug_options.capture_area_mask = debug_request.show_area_filter;
+    debug_options.capture_aspect_mask = debug_request.show_aspect_filter;
+    debug_options.capture_edge_mask = debug_request.show_edge_filter;
+    debug_options.capture_fill_mask = debug_request.show_fill_filter;
+    debug_options.capture_lut_mask = debug_request.show_lut_filter;
+    debug_options.capture_top_band_mask = debug_request.show_top_band_filter;
+    debug_options.capture_search_debug = debug_request.show_search_debug;
+    debug_options.capture_roi_mask = debug_request.show_roi_mask;
 
     DetectorOutputs outputs;
     if (mode == TrackingMode::Search) {
       stage_start = SteadyClock::now();
-      outputs = runSearch(frame);
+      outputs = runSearch(frame, debug_options);
       stage_us[static_cast<std::size_t>(TimingStage::Search)] =
         elapsedUs(stage_start, SteadyClock::now());
     } else {
       stage_start = SteadyClock::now();
-      outputs = detectCandidateInRoi(frame, buildTrackRoi(frame.size()), TrackingMode::Track);
+      outputs = detectCandidateInRoi(
+        frame,
+        buildTrackRoi(frame.size()),
+        TrackingMode::Track,
+        debug_options);
       stage_us[static_cast<std::size_t>(TimingStage::Track)] =
         elapsedUs(stage_start, SteadyClock::now());
     }
@@ -1118,7 +1923,7 @@ private:
       elapsedUs(stage_start, SteadyClock::now());
 
     stage_start = SteadyClock::now();
-    publishDebugImages(msg, frame, outputs, mode);
+    publishDebugImages(msg, frame, outputs, mode, debug_request);
     stage_us[static_cast<std::size_t>(TimingStage::Debug)] =
       elapsedUs(stage_start, SteadyClock::now());
 
@@ -1172,6 +1977,10 @@ private:
   double search_downsample_scale_ = 0.5;
   int min_blob_area_px_ = 20;
   int max_blob_area_px_ = 40000;
+  double area_prior_near_min_ratio_ = 0.75;
+  double area_prior_near_max_ratio_ = 1.25;
+  double area_prior_far_min_ratio_ = 0.50;
+  double area_prior_far_max_ratio_ = 2.00;
   double min_aspect_ratio_ = 0.35;
   double max_aspect_ratio_ = 2.8;
   double max_edge_touch_ratio_ = 0.35;
@@ -1181,11 +1990,27 @@ private:
   int roi_max_half_size_px_ = 140;
   int lost_frame_tolerance_ = 3;
   double ema_alpha_ = 0.6;
+  bool force_search_mode_ = false;
   bool enable_timing_log_ = true;
   int timing_log_interval_ = 30;
   bool publish_processing_time_ = true;
   std::string processing_time_topic_;
   bool enable_image_view_ = false;
+  bool show_input_image_ = true;
+  bool show_threshold_mask_ = false;
+  bool show_morph_mask_ = false;
+  bool show_raw_mask_ = true;
+  bool show_filtered_mask_ = true;
+  bool show_area_filter_ = false;
+  bool show_aspect_filter_ = false;
+  bool show_edge_filter_ = false;
+  bool show_fill_filter_ = false;
+  bool show_lut_filter_ = false;
+  bool show_top_band_filter_ = false;
+  bool show_search_debug_ = false;
+  bool show_overlay_image_ = true;
+  bool show_roi_image_ = true;
+  bool show_roi_mask_ = false;
   int display_max_width_ = 960;
   int display_max_height_ = 720;
 
@@ -1196,9 +2021,21 @@ private:
   cv::Point2d filtered_ground_center_m_;
   cv::Rect last_bbox_;
 
+  bool input_window_created_ = false;
+  bool threshold_mask_window_created_ = false;
+  bool morph_mask_window_created_ = false;
   bool overlay_window_created_ = false;
-  bool mask_window_created_ = false;
+  bool raw_mask_window_created_ = false;
+  bool filtered_mask_window_created_ = false;
+  bool area_filter_window_created_ = false;
+  bool aspect_filter_window_created_ = false;
+  bool edge_filter_window_created_ = false;
+  bool fill_filter_window_created_ = false;
+  bool lut_filter_window_created_ = false;
+  bool top_band_filter_window_created_ = false;
+  bool search_debug_window_created_ = false;
   bool roi_window_created_ = false;
+  bool roi_mask_window_created_ = false;
 
   std::size_t timing_frames_in_interval_ = 0;
   std::array<long long, kTimingStageCount> timing_interval_totals_us_{};

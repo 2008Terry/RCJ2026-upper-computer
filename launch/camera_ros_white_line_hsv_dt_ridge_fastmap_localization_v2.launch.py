@@ -208,7 +208,7 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="true"
+                "ridge_enable_image_view", default_value="false"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
             DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
