@@ -25,6 +25,7 @@ namespace {
 
 constexpr int kHueMax = 179;
 constexpr int kByteMax = 255;
+constexpr char kControlsWindowName[] = "HSV White Controls";
 constexpr char kInputWindowName[] = "HSV White Input";
 constexpr char kMaskWindowName[] = "HSV White Mask";
 constexpr char kGreenMaskWindowName[] = "HSV Green Mask";
@@ -209,6 +210,7 @@ public:
     declare_parameter("enable_timing_log", true);
     declare_parameter("timing_log_interval", 30);
     declare_parameter("enable_image_view", false);
+    declare_parameter("enable_controls_window", false);
     declare_parameter("show_input_image", true);
     declare_parameter("show_white_mask", true);
     declare_parameter("show_green_mask", false);
@@ -218,7 +220,8 @@ public:
     declare_parameter("display_max_width", 960);
     declare_parameter("display_max_height", 720);
 
-    loadParameters();
+    loadThresholdParameters();
+    loadRuntimeParameters();
     syncImageViewState();
 
     const auto input_topic = get_parameter("input_topic").as_string();
@@ -237,7 +240,7 @@ public:
       "white_line_hsv_white_node started. input_topic=%s, white_h_min=%d, white_h_max=%d, "
       "white_s_max=%d, white_v_min=%d, black_v_max=%d, green_h_min=%d, green_h_max=%d, "
       "green_s_min=%d, green_v_min=%d, enable_timing_log=%s, timing_log_interval=%d, "
-      "enable_image_view=%s",
+      "enable_image_view=%s, enable_controls_window=%s",
       input_topic.c_str(),
       white_h_min_,
       white_h_max_,
@@ -250,7 +253,8 @@ public:
       green_v_min_,
       enable_timing_log_ ? "true" : "false",
       timing_log_interval_,
-      enable_image_view_ ? "true" : "false");
+      enable_image_view_ ? "true" : "false",
+      enable_controls_window_ ? "true" : "false");
   }
 
   ~WhiteLineHsvWhiteNode() override
@@ -259,7 +263,7 @@ public:
   }
 
 private:
-  void loadParameters()
+  void loadThresholdParameters()
   {
     white_h_min_ = clampHue(static_cast<int>(get_parameter("white_h_min").as_int()));
     white_h_max_ = clampHue(static_cast<int>(get_parameter("white_h_max").as_int()));
@@ -270,9 +274,25 @@ private:
     green_h_max_ = clampHue(static_cast<int>(get_parameter("green_h_max").as_int()));
     green_s_min_ = clampByte(static_cast<int>(get_parameter("green_s_min").as_int()));
     green_v_min_ = clampByte(static_cast<int>(get_parameter("green_v_min").as_int()));
+  }
+
+  void loadRuntimeParameters()
+  {
     enable_timing_log_ = get_parameter("enable_timing_log").as_bool();
     timing_log_interval_ =
       std::max(1, static_cast<int>(get_parameter("timing_log_interval").as_int()));
+    enable_image_view_ = get_parameter("enable_image_view").as_bool();
+    enable_controls_window_ = get_parameter("enable_controls_window").as_bool();
+    show_input_image_ = get_parameter("show_input_image").as_bool();
+    show_white_mask_ = get_parameter("show_white_mask").as_bool();
+    show_green_mask_ = get_parameter("show_green_mask").as_bool();
+    show_black_mask_ = get_parameter("show_black_mask").as_bool();
+    show_noise_mask_ = get_parameter("show_noise_mask").as_bool();
+    show_overlay_image_ = get_parameter("show_overlay_image").as_bool();
+    display_max_width_ =
+      std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
+    display_max_height_ =
+      std::max(1, static_cast<int>(get_parameter("display_max_height").as_int()));
   }
 
   void syncWindow(const std::string & window_name, bool should_show, bool & created)
@@ -286,33 +306,99 @@ private:
     }
   }
 
+  void syncControlsWindow(bool should_show)
+  {
+    if (should_show && !controls_window_created_) {
+      cv::namedWindow(kControlsWindowName, cv::WINDOW_AUTOSIZE);
+      cv::createTrackbar("white_h_min", kControlsWindowName, nullptr, kHueMax);
+      cv::createTrackbar("white_h_max", kControlsWindowName, nullptr, kHueMax);
+      cv::createTrackbar("white_s_max", kControlsWindowName, nullptr, kByteMax);
+      cv::createTrackbar("white_v_min", kControlsWindowName, nullptr, kByteMax);
+      cv::createTrackbar("black_v_max", kControlsWindowName, nullptr, kByteMax);
+      cv::createTrackbar("green_h_min", kControlsWindowName, nullptr, kHueMax);
+      cv::createTrackbar("green_h_max", kControlsWindowName, nullptr, kHueMax);
+      cv::createTrackbar("green_s_min", kControlsWindowName, nullptr, kByteMax);
+      cv::createTrackbar("green_v_min", kControlsWindowName, nullptr, kByteMax);
+
+      controls_window_created_ = true;
+      controls_window_initialized_ = false;
+    } else if (!should_show && controls_window_created_) {
+      cv::destroyWindow(kControlsWindowName);
+      controls_window_created_ = false;
+      controls_window_initialized_ = false;
+    }
+
+    if (!controls_window_created_) {
+      return;
+    }
+
+    if (!controls_window_initialized_) {
+      cv::setTrackbarPos("white_h_min", kControlsWindowName, white_h_min_);
+      cv::setTrackbarPos("white_h_max", kControlsWindowName, white_h_max_);
+      cv::setTrackbarPos("white_s_max", kControlsWindowName, white_s_max_);
+      cv::setTrackbarPos("white_v_min", kControlsWindowName, white_v_min_);
+      cv::setTrackbarPos("black_v_max", kControlsWindowName, black_v_max_);
+      cv::setTrackbarPos("green_h_min", kControlsWindowName, green_h_min_);
+      cv::setTrackbarPos("green_h_max", kControlsWindowName, green_h_max_);
+      cv::setTrackbarPos("green_s_min", kControlsWindowName, green_s_min_);
+      cv::setTrackbarPos("green_v_min", kControlsWindowName, green_v_min_);
+      controls_window_initialized_ = true;
+    }
+  }
+
+  void updateThresholdsFromControls()
+  {
+    if (!controls_window_created_) {
+      return;
+    }
+
+    white_h_min_ = clampHue(cv::getTrackbarPos("white_h_min", kControlsWindowName));
+    white_h_max_ = clampHue(cv::getTrackbarPos("white_h_max", kControlsWindowName));
+    white_s_max_ = clampByte(cv::getTrackbarPos("white_s_max", kControlsWindowName));
+    white_v_min_ = clampByte(cv::getTrackbarPos("white_v_min", kControlsWindowName));
+    black_v_max_ = clampByte(cv::getTrackbarPos("black_v_max", kControlsWindowName));
+    green_h_min_ = clampHue(cv::getTrackbarPos("green_h_min", kControlsWindowName));
+    green_h_max_ = clampHue(cv::getTrackbarPos("green_h_max", kControlsWindowName));
+    green_s_min_ = clampByte(cv::getTrackbarPos("green_s_min", kControlsWindowName));
+    green_v_min_ = clampByte(cv::getTrackbarPos("green_v_min", kControlsWindowName));
+  }
+
+  void printCurrentParameters() const
+  {
+    RCLCPP_INFO(
+      get_logger(),
+      "white_h_min=%d, white_h_max=%d, white_s_max=%d, white_v_min=%d, "
+      "black_v_max=%d, green_h_min=%d, green_h_max=%d, green_s_min=%d, green_v_min=%d",
+      white_h_min_,
+      white_h_max_,
+      white_s_max_,
+      white_v_min_,
+      black_v_max_,
+      green_h_min_,
+      green_h_max_,
+      green_s_min_,
+      green_v_min_);
+  }
+
   void syncImageViewState()
   {
-    enable_image_view_ = get_parameter("enable_image_view").as_bool();
-    show_input_image_ = get_parameter("show_input_image").as_bool();
-    show_white_mask_ = get_parameter("show_white_mask").as_bool();
-    show_green_mask_ = get_parameter("show_green_mask").as_bool();
-    show_black_mask_ = get_parameter("show_black_mask").as_bool();
-    show_noise_mask_ = get_parameter("show_noise_mask").as_bool();
-    show_overlay_image_ = get_parameter("show_overlay_image").as_bool();
-    display_max_width_ =
-      std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
-    display_max_height_ =
-      std::max(1, static_cast<int>(get_parameter("display_max_height").as_int()));
+    const bool gui_requested = enable_image_view_ || enable_controls_window_;
 
     const bool display_available =
       std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr;
-    if (enable_image_view_ && !display_available) {
+    if (gui_requested && !display_available) {
       if (!headless_warned_) {
         RCLCPP_WARN(
           get_logger(),
-          "enable_image_view=true but no DISPLAY/WAYLAND_DISPLAY is available; "
-          "disabling OpenCV image view for this process.");
+          "GUI display was requested but no DISPLAY/WAYLAND_DISPLAY is available; "
+          "disabling OpenCV windows for this process.");
         headless_warned_ = true;
       }
       enable_image_view_ = false;
+      enable_controls_window_ = false;
     }
 
+    syncControlsWindow(enable_controls_window_);
     syncWindow(kInputWindowName, enable_image_view_ && show_input_image_, input_window_created_);
     syncWindow(kMaskWindowName, enable_image_view_ && show_white_mask_, mask_window_created_);
     syncWindow(
@@ -327,6 +413,7 @@ private:
 
   void destroyDebugWindows()
   {
+    syncControlsWindow(false);
     syncWindow(kInputWindowName, false, input_window_created_);
     syncWindow(kMaskWindowName, false, mask_window_created_);
     syncWindow(kGreenMaskWindowName, false, green_mask_window_created_);
@@ -379,13 +466,23 @@ private:
       resizeWindowToFitImage(
         kOverlayWindowName, overlay, display_max_width_, display_max_height_);
     }
+  }
 
+  bool processGuiEvents()
+  {
     if (
-      input_window_created_ || mask_window_created_ || green_mask_window_created_ ||
-      black_mask_window_created_ || noise_mask_window_created_ || overlay_window_created_)
+      !controls_window_created_ && !input_window_created_ && !mask_window_created_ &&
+      !green_mask_window_created_ && !black_mask_window_created_ && !noise_mask_window_created_ &&
+      !overlay_window_created_)
     {
-      cv::waitKey(1);
+      return false;
     }
+
+    const int key = cv::waitKey(1);
+    if (key == 'p' || key == 'P') {
+      printCurrentParameters();
+    }
+    return true;
   }
 
   void resetTimingSummary()
@@ -439,8 +536,13 @@ private:
   {
     const bool previous_timing_log = enable_timing_log_;
     const int previous_timing_log_interval = timing_log_interval_;
-    loadParameters();
+    loadRuntimeParameters();
     syncImageViewState();
+    if (controls_window_created_) {
+      updateThresholdsFromControls();
+    } else {
+      loadThresholdParameters();
+    }
 
     if (
       previous_timing_log != enable_timing_log_ ||
@@ -598,11 +700,13 @@ private:
     }
 
     const bool gui_enabled =
-      input_window_created_ || mask_window_created_ || green_mask_window_created_ ||
-      black_mask_window_created_ || noise_mask_window_created_ || overlay_window_created_;
+      controls_window_created_ || input_window_created_ || mask_window_created_ ||
+      green_mask_window_created_ || black_mask_window_created_ || noise_mask_window_created_ ||
+      overlay_window_created_;
     if (gui_enabled) {
       stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
       showDebugImages(frame, white_mask, green_mask, black_mask, noise_mask);
+      processGuiEvents();
       if (timing_enabled) {
         recordStageDuration(
           timing.stage_us,
@@ -646,6 +750,7 @@ private:
   bool enable_timing_log_{true};
   int timing_log_interval_{30};
   bool enable_image_view_{false};
+  bool enable_controls_window_{false};
   bool show_input_image_{true};
   bool show_white_mask_{true};
   bool show_green_mask_{false};
@@ -653,6 +758,8 @@ private:
   bool show_noise_mask_{false};
   bool show_overlay_image_{true};
   bool headless_warned_{false};
+  bool controls_window_created_{false};
+  bool controls_window_initialized_{false};
   bool input_window_created_{false};
   bool mask_window_created_{false};
   bool green_mask_window_created_{false};

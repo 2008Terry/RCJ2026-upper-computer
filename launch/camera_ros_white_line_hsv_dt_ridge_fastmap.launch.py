@@ -171,6 +171,9 @@ def build_nodes(context):
                     "enable_image_view": ParameterValue(
                         LaunchConfiguration("hsv_enable_image_view"), value_type=bool
                     ),  # Whether to show HSV debug windows
+                    "enable_controls_window": ParameterValue(
+                        LaunchConfiguration("hsv_enable_controls_window"), value_type=bool
+                    ),  # Whether to show HSV slider controls window
                     "show_input_image": ParameterValue(
                         LaunchConfiguration("hsv_show_input_image"), value_type=bool
                     ),  # Whether to show HSV input image
@@ -401,13 +404,13 @@ def generate_launch_description():
             ),  # Remap timing log frame interval
             DeclareLaunchArgument("white_h_min", default_value="0"),  # White HSV minimum H
             DeclareLaunchArgument("white_h_max", default_value="179"),  # White HSV maximum H
-            DeclareLaunchArgument("white_s_max", default_value="153"),  # White HSV maximum S
-            DeclareLaunchArgument("white_v_min", default_value="170"),  # White HSV minimum V
-            DeclareLaunchArgument("black_v_max", default_value="140"),  # Black HSV maximum V
+            DeclareLaunchArgument("white_s_max", default_value="118"),  # White HSV maximum S
+            DeclareLaunchArgument("white_v_min", default_value="197"),  # White HSV minimum V
+            DeclareLaunchArgument("black_v_max", default_value="124"),  # Black HSV maximum V
             DeclareLaunchArgument("green_h_min", default_value="35"),  # Green HSV minimum H
             DeclareLaunchArgument("green_h_max", default_value="100"),  # Green HSV maximum H
-            DeclareLaunchArgument("green_s_min", default_value="150"),  # Green HSV minimum S
-            DeclareLaunchArgument("green_v_min", default_value="100"),  # Green HSV minimum V
+            DeclareLaunchArgument("green_s_min", default_value="140"),  # Green HSV minimum S
+            DeclareLaunchArgument("green_v_min", default_value="80"),  # Green HSV minimum V
             DeclareLaunchArgument(
                 "hsv_enable_timing_log", default_value="true"
             ),  # Whether to log HSV timing
@@ -415,8 +418,11 @@ def generate_launch_description():
                 "hsv_timing_log_interval", default_value="15"
             ),  # HSV timing log frame interval
             DeclareLaunchArgument(
-                "hsv_enable_image_view", default_value="true"
+                "hsv_enable_image_view", default_value="false"
             ),  # Master switch for HSV debug windows; false means no window creation or GUI processing
+            DeclareLaunchArgument(
+                "hsv_enable_controls_window", default_value="false"
+            ),  # Whether to show HSV slider controls window
             DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Show the HSV input image window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Show the white-priority mask window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_show_green_mask", default_value="true"),  # Show the green-priority mask window when hsv_enable_image_view is true
@@ -445,10 +451,10 @@ def generate_launch_description():
                 "ridge_min_boundary_ratio", default_value="0.35"
             ),  # Minimum boundary support ratio
             DeclareLaunchArgument(
-                "ridge_enable_boundary_mode", default_value="true"
+                "ridge_enable_boundary_mode", default_value="false"
             ),  # Whether to allow green-boundary support
-            DeclareLaunchArgument("ridge_width_floor_px", default_value="2.0"),  # Minimum accepted local width
-            DeclareLaunchArgument("ridge_width_ceil_px", default_value="40.0"),  # Maximum accepted local width
+            DeclareLaunchArgument("ridge_width_floor_px", default_value="5.0"),  # Minimum accepted local width
+            DeclareLaunchArgument("ridge_width_ceil_px", default_value="18.0"),  # Maximum accepted local width
             DeclareLaunchArgument("ridge_width_mad_scale", default_value="2.5"),  # MAD scale for adaptive width range
             DeclareLaunchArgument("ridge_min_width_samples", default_value="25"),  # Minimum samples before adaptive width estimation
             DeclareLaunchArgument(
@@ -482,7 +488,7 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="false"
+                "ridge_enable_image_view", default_value="true"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
             DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
@@ -494,7 +500,7 @@ def generate_launch_description():
                 "ridge_show_candidate_prefilter_mask", default_value="false"
             ),  # Whether to show candidate-prefilter ridge mask
             DeclareLaunchArgument(
-                "ridge_show_orientation_valid_mask", default_value="false"
+                "ridge_show_orientation_valid_mask", default_value="true"
             ),  # Whether to show orientation-valid ridge mask
             DeclareLaunchArgument(
                 "ridge_show_side_support_mask", default_value="true"
@@ -511,7 +517,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ridge_show_white_final_mask", default_value="true"
             ),  # Whether to show final white mask
-            DeclareLaunchArgument("ridge_show_debug_image", default_value="false"),  # Whether to show composite debug image
+            DeclareLaunchArgument("ridge_show_debug_image", default_value="true"),  # Whether to show composite debug image
             DeclareLaunchArgument(
                 "ridge_enable_timing_debug", default_value="true"
             ),  # Whether to log ridge timing summary

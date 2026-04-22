@@ -124,16 +124,22 @@ def generate_launch_description():
             DeclareLaunchArgument("remap_timing_log_interval", default_value="30"),  # Remap timing log frame interval
             DeclareLaunchArgument("white_h_min", default_value="0"),  # White HSV minimum H
             DeclareLaunchArgument("white_h_max", default_value="179"),  # White HSV maximum H
-            DeclareLaunchArgument("white_s_max", default_value="107"),  # White HSV maximum S
-            DeclareLaunchArgument("white_v_min", default_value="192"),  # White HSV minimum V
+            DeclareLaunchArgument("white_s_max", default_value="118"),  # White HSV maximum S
+            DeclareLaunchArgument("white_v_min", default_value="197"),  # White HSV minimum V
+            DeclareLaunchArgument("black_v_max", default_value="124"),  # Black HSV maximum V
+            DeclareLaunchArgument("green_h_min", default_value="35"),  # Green HSV minimum H
+            DeclareLaunchArgument("green_h_max", default_value="100"),  # Green HSV maximum H
+            DeclareLaunchArgument("green_s_min", default_value="140"),  # Green HSV minimum S
+            DeclareLaunchArgument("green_v_min", default_value="80"),  # Green HSV minimum V
             DeclareLaunchArgument("hsv_enable_timing_log", default_value="true"),  # Whether to log HSV timing
             DeclareLaunchArgument("hsv_timing_log_interval", default_value="15"),  # HSV timing log frame interval
-            DeclareLaunchArgument("hsv_enable_image_view", default_value="false"),  # Master switch for HSV debug windows; false means no window creation or GUI processing
+            DeclareLaunchArgument("hsv_enable_image_view", default_value="true"),  # Master switch for HSV debug windows; false means no window creation or GUI processing
+            DeclareLaunchArgument("hsv_enable_controls_window", default_value="true"),  # Whether to show HSV slider controls window
             DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Show the HSV input image window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Show the white-priority mask window when hsv_enable_image_view is true
-            DeclareLaunchArgument("hsv_show_green_mask", default_value="false"),  # Show the green-priority mask window when hsv_enable_image_view is true
-            DeclareLaunchArgument("hsv_show_black_mask", default_value="false"),  # Show the black-priority mask window when hsv_enable_image_view is true
-            DeclareLaunchArgument("hsv_show_noise_mask", default_value="false"),  # Show the remaining noise mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_green_mask", default_value="true"),  # Show the green-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_black_mask", default_value="true"),  # Show the black-priority mask window when hsv_enable_image_view is true
+            DeclareLaunchArgument("hsv_show_noise_mask", default_value="true"),  # Show the remaining noise mask window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_show_overlay_image", default_value="true"),  # Show the HSV overlay window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_display_max_width", default_value="960"),  # HSV window max width
             DeclareLaunchArgument("hsv_display_max_height", default_value="720"),  # HSV window max height
@@ -234,6 +240,11 @@ def generate_launch_description():
                     "white_h_max": LaunchConfiguration("white_h_max"),
                     "white_s_max": LaunchConfiguration("white_s_max"),
                     "white_v_min": LaunchConfiguration("white_v_min"),
+                    "black_v_max": LaunchConfiguration("black_v_max"),
+                    "green_h_min": LaunchConfiguration("green_h_min"),
+                    "green_h_max": LaunchConfiguration("green_h_max"),
+                    "green_s_min": LaunchConfiguration("green_s_min"),
+                    "green_v_min": LaunchConfiguration("green_v_min"),
                     "hsv_enable_timing_log": LaunchConfiguration(
                         "hsv_enable_timing_log"
                     ),
@@ -242,6 +253,9 @@ def generate_launch_description():
                     ),
                     "hsv_enable_image_view": LaunchConfiguration(
                         "hsv_enable_image_view"
+                    ),
+                    "hsv_enable_controls_window": LaunchConfiguration(
+                        "hsv_enable_controls_window"
                     ),
                     "hsv_show_input_image": LaunchConfiguration(
                         "hsv_show_input_image"
