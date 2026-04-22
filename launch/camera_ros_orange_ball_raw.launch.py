@@ -50,6 +50,7 @@ def generate_launch_description():
             DeclareLaunchArgument("search_downsample_scale", default_value="0.5"),  # Downsample scale used during global search
             DeclareLaunchArgument("min_blob_area_px", default_value="30"),  # Minimum accepted blob area in pixels
             DeclareLaunchArgument("max_blob_area_px", default_value="1500"),  # Maximum accepted blob area in pixels
+            DeclareLaunchArgument("enable_distance_aware_area_prior", default_value="true"),  # Whether to enable the distance-aware ball-area prior optimization
             DeclareLaunchArgument("area_prior_near_min_ratio", default_value="0.75"),  # Minimum allowed area/expected-area ratio at the nearest LUT distance
             DeclareLaunchArgument("area_prior_near_max_ratio", default_value="1.25"),  # Maximum allowed area/expected-area ratio at the nearest LUT distance
             DeclareLaunchArgument("area_prior_far_min_ratio", default_value="0.50"),  # Minimum allowed area/expected-area ratio at the farthest LUT distance
@@ -74,7 +75,7 @@ def generate_launch_description():
                 "enable_image_view", default_value="true"
             ),  # Master switch for all OpenCV debug windows
             DeclareLaunchArgument(
-                "show_input_image", default_value="true"
+                "show_input_image", default_value="false"
             ),  # Show the full raw camera image when enable_image_view is true
             DeclareLaunchArgument(
                 "show_threshold_mask", default_value="false"
@@ -83,40 +84,49 @@ def generate_launch_description():
                 "show_morph_mask", default_value="false"
             ),  # Show the post-morph mask when enable_image_view is true
             DeclareLaunchArgument(
-                "show_raw_mask", default_value="true"
+                "show_raw_mask", default_value="false"
             ),  # Show the compatibility full-frame detector mask when enable_image_view is true
             DeclareLaunchArgument(
                 "show_area_filter", default_value="true"
             ),  # Show components that survive the area filter
             DeclareLaunchArgument(
-                "show_aspect_filter", default_value="true"
+                "show_area_prior_filter", default_value="true"
+            ),  # Show components that survive the distance-aware area-prior filter
+            DeclareLaunchArgument(
+                "show_area_prior_debug", default_value="true"
+            ),  # Show area-prior actual/expected/range/score annotations for ROI candidates
+            DeclareLaunchArgument(
+                "show_aspect_filter", default_value="false"
             ),  # Show components that survive the aspect-ratio filter
             DeclareLaunchArgument(
-                "show_edge_filter", default_value="true"
+                "show_edge_filter", default_value="false"
             ),  # Show components that survive the edge-touch filter
             DeclareLaunchArgument(
-                "show_fill_filter", default_value="true"
+                "show_fill_filter", default_value="false"
             ),  # Show components that survive the fill-ratio filter
             DeclareLaunchArgument(
-                "show_lut_filter", default_value="true"
+                "show_lut_filter", default_value="false"
             ),  # Show components that survive the LUT-validity filter
             DeclareLaunchArgument(
-                "show_top_band_filter", default_value="true"
+                "show_top_band_filter", default_value="false"
             ),  # Show components that survive the top-band validity filter
             DeclareLaunchArgument(
-                "show_filtered_mask", default_value="true"
+                "show_filtered_mask", default_value="false"
             ),  # Show the accepted connected-component mask when enable_image_view is true
             DeclareLaunchArgument(
-                "show_search_debug", default_value="true"
+                "show_search_debug", default_value="false"
             ),  # Show the coarse-search debug image in search mode
             DeclareLaunchArgument(
-                "show_overlay_image", default_value="true"
+                "show_search_area_prior", default_value="true"
+            ),  # Show coarse-search area-prior pass/fail annotations in search mode
+            DeclareLaunchArgument(
+                "show_overlay_image", default_value="false"
             ),  # Show the annotated overlay image when enable_image_view is true
             DeclareLaunchArgument(
-                "show_roi_image", default_value="true"
+                "show_roi_image", default_value="false"
             ),  # Show the current search/track ROI crop when enable_image_view is true
             DeclareLaunchArgument(
-                "show_roi_mask", default_value="true"
+                "show_roi_mask", default_value="false"
             ),  # Show the orange mask inside the current ROI when enable_image_view is true
             DeclareLaunchArgument("display_max_width", default_value="960"),  # Maximum debug window width
             DeclareLaunchArgument("display_max_height", default_value="720"),  # Maximum debug window height
@@ -181,6 +191,10 @@ def generate_launch_description():
                         ),
                         "max_blob_area_px": ParameterValue(
                             LaunchConfiguration("max_blob_area_px"), value_type=int
+                        ),
+                        "enable_distance_aware_area_prior": ParameterValue(
+                            LaunchConfiguration("enable_distance_aware_area_prior"),
+                            value_type=bool,
                         ),
                         "area_prior_near_min_ratio": ParameterValue(
                             LaunchConfiguration("area_prior_near_min_ratio"), value_type=float
@@ -255,6 +269,12 @@ def generate_launch_description():
                         "show_area_filter": ParameterValue(
                             LaunchConfiguration("show_area_filter"), value_type=bool
                         ),
+                        "show_area_prior_filter": ParameterValue(
+                            LaunchConfiguration("show_area_prior_filter"), value_type=bool
+                        ),
+                        "show_area_prior_debug": ParameterValue(
+                            LaunchConfiguration("show_area_prior_debug"), value_type=bool
+                        ),
                         "show_aspect_filter": ParameterValue(
                             LaunchConfiguration("show_aspect_filter"), value_type=bool
                         ),
@@ -272,6 +292,9 @@ def generate_launch_description():
                         ),
                         "show_search_debug": ParameterValue(
                             LaunchConfiguration("show_search_debug"), value_type=bool
+                        ),
+                        "show_search_area_prior": ParameterValue(
+                            LaunchConfiguration("show_search_area_prior"), value_type=bool
                         ),
                         "show_overlay_image": ParameterValue(
                             LaunchConfiguration("show_overlay_image"), value_type=bool
