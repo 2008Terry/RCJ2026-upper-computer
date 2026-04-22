@@ -325,6 +325,25 @@ target_link_libraries(topdown_pf_localization_node_v2
   OpenMP::OpenMP_CXX
 )
 
+add_executable(amcl_fusion
+  src/amcl_fusion.cpp
+  src/particle_filter_amcl_fusion.cpp
+)
+ament_target_dependencies(amcl_fusion
+  rclcpp
+  rcl_interfaces
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+  nav_msgs
+  tf2_ros
+  cv_bridge
+)
+target_link_libraries(amcl_fusion
+  ${OpenCV_LIBRARIES}
+  OpenMP::OpenMP_CXX
+)
+
 add_executable(white_line_probability_node src/white_line_probability_node.cpp)
 ament_target_dependencies(white_line_probability_node
   rclcpp
@@ -390,6 +409,7 @@ install(TARGETS
   pf_localization_node
   topdown_pf_localization_node
   topdown_pf_localization_node_v2
+  amcl_fusion
   white_line_probability_node
   black_feature_detector_node
   orange_ball_detector_node
