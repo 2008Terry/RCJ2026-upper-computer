@@ -849,28 +849,73 @@ private:
     return evaluation;
   }
 
-  std::string formatAreaPriorDebugLabel(
+  std::vector<std::string> formatAreaPriorDebugLines(
     double actual_area_px,
     const AreaPriorEvaluation & evaluation) const
   {
-    std::ostringstream oss;
+    std::vector<std::string> lines;
     if (!enable_distance_aware_area_prior_) {
-      oss << "area prior disabled";
-      return oss.str();
+      lines.emplace_back("area prior disabled");
+      return lines;
     }
 
     if (!evaluation.valid) {
-      oss << "A=" << std::fixed << std::setprecision(0) << actual_area_px << " invalid";
-      return oss.str();
+      std::ostringstream oss;
+      oss << "A=" << std::fixed << std::setprecision(0) << actual_area_px;
+      lines.push_back(oss.str());
+      lines.emplace_back("invalid");
+      return lines;
     }
 
-    oss << "A=" << std::fixed << std::setprecision(0) << actual_area_px
-        << " E=" << evaluation.expected_area_px
-        << " R=[" << std::setprecision(0) << evaluation.min_area_px
-        << "," << evaluation.max_area_px << "]"
-        << " S=" << std::setprecision(2) << evaluation.area_score
-        << " D=" << std::setprecision(2) << evaluation.distance_m;
-    return oss.str();
+    std::ostringstream area_line;
+    area_line << "A=" << std::fixed << std::setprecision(0) << actual_area_px;
+    lines.push_back(area_line.str());
+
+    std::ostringstream expected_line;
+    expected_line << "E=" << std::fixed << std::setprecision(0) << evaluation.expected_area_px;
+    lines.push_back(expected_line.str());
+
+    std::ostringstream range_line;
+    range_line << "R=[" << std::fixed << std::setprecision(0) << evaluation.min_area_px
+               << ", " << evaluation.max_area_px << "]";
+    lines.push_back(range_line.str());
+
+    std::ostringstream score_line;
+    score_line << "S=" << std::fixed << std::setprecision(2) << evaluation.area_score
+               << " D=" << std::setprecision(2) << evaluation.distance_m;
+    lines.push_back(score_line.str());
+    return lines;
+  }
+
+  void drawMultilineText(
+    cv::Mat & image,
+    const std::vector<std::string> & lines,
+    const cv::Point & origin,
+    double font_scale,
+    const cv::Scalar & color,
+    int thickness) const
+  {
+    int baseline = 0;
+    const cv::Size sample_size = cv::getTextSize(
+      "Ag",
+      cv::FONT_HERSHEY_SIMPLEX,
+      font_scale,
+      thickness,
+      &baseline);
+    const int line_step = std::max(sample_size.height + baseline + 2, 12);
+    int y = origin.y;
+    for (const std::string & line : lines) {
+      cv::putText(
+        image,
+        line,
+        cv::Point(origin.x, y),
+        cv::FONT_HERSHEY_SIMPLEX,
+        font_scale,
+        color,
+        thickness,
+        cv::LINE_AA);
+      y += line_step;
+    }
   }
 
   void drawAreaPriorAnnotation(
@@ -878,26 +923,21 @@ private:
     const cv::Rect & bbox,
     double actual_area_px,
     const AreaPriorEvaluation & evaluation,
-    const cv::Scalar & color) const
+    const cv::Scalar & color,
+    double font_scale = 0.45,
+    int thickness = 1) const
   {
     if (image.empty()) {
       return;
     }
 
     cv::rectangle(image, bbox, color, 2);
-    const std::string label = formatAreaPriorDebugLabel(actual_area_px, evaluation);
+    const std::vector<std::string> lines =
+      formatAreaPriorDebugLines(actual_area_px, evaluation);
     const cv::Point text_origin(
       std::max(4, bbox.x),
       std::max(18, bbox.y - 6));
-    cv::putText(
-      image,
-      label,
-      text_origin,
-      cv::FONT_HERSHEY_SIMPLEX,
-      0.45,
-      color,
-      1,
-      cv::LINE_AA);
+    drawMultilineText(image, lines, text_origin, font_scale, color, thickness);
   }
 
   void syncWindow(const std::string & window_name, bool should_show, bool & created)
@@ -1223,7 +1263,9 @@ private:
             bbox,
             static_cast<double>(area),
             area_prior,
-            area_prior_passed ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255));
+            area_prior_passed ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255),
+            0.30,
+            1);
           cv::circle(
             *search_area_prior_debug_image,
             farthest_pixels[static_cast<std::size_t>(label)],
@@ -1241,7 +1283,9 @@ private:
           bbox,
           static_cast<double>(area),
           area_prior,
-          cv::Scalar(0, 255, 255));
+          cv::Scalar(0, 255, 255),
+          0.30,
+          1);
       }
       const double score = 0.45 * aspect_score + 0.30 * fill_score + 0.25 * area_score;
 
@@ -1868,15 +1912,13 @@ private:
           cv::Scalar(0, 255, 0),
           2);
         if (enable_distance_aware_area_prior_) {
-          cv::putText(
+          drawMultilineText(
             overlay,
-            formatAreaPriorDebugLabel(outputs.candidate.area_px, outputs.candidate.area_prior),
+            formatAreaPriorDebugLines(outputs.candidate.area_px, outputs.candidate.area_prior),
             cv::Point(10, 58),
-            cv::FONT_HERSHEY_SIMPLEX,
             0.5,
             cv::Scalar(0, 255, 255),
-            1,
-            cv::LINE_AA);
+            1);
         }
       } else {
         const std::string label = trackingModeToString(mode) + " no detection";

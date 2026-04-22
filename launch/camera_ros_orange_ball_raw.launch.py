@@ -10,7 +10,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     package_share = Path(get_package_share_directory("rcj_localization"))
-    default_lut = package_share / "config" / "raw_ball_top_lut_20260421_180347.xml"
+    default_lut = package_share / "config" / "raw_ball_top_lut_20260422_104020.xml"
 
     camera_index = LaunchConfiguration("camera_index")
     role = LaunchConfiguration("role")
@@ -72,7 +72,7 @@ def generate_launch_description():
                 "processing_time_topic", default_value="/orange_ball_detector/processing_time_ms"
             ),  # Topic for published processing time in milliseconds
             DeclareLaunchArgument(
-                "enable_image_view", default_value="true"
+                "enable_image_view", default_value="false"
             ),  # Master switch for all OpenCV debug windows
             DeclareLaunchArgument(
                 "show_input_image", default_value="false"

@@ -196,7 +196,13 @@ if numel(validDistances) < 2
     error('Cannot build area prior because the LUT valid region does not contain enough positive distances.');
 end
 
-distanceSamplesM = linspace(min(validDistances), max(validDistances), 256).';
+areaPriorMinDistanceM = 0.05;
+areaPriorMaxDistanceM = 3.0;
+if areaPriorMaxDistanceM <= areaPriorMinDistanceM
+    error('Area-prior sampling range must satisfy max > min.');
+end
+
+distanceSamplesM = linspace(areaPriorMinDistanceM, areaPriorMaxDistanceM, 256).';
 ballCenterZ = centerRaySign * (cameraHeightM - ballRadiusM);
 [thetaSamples, rhoSamples] = buildThetaRhoLookup(ocamModel);
 
