@@ -64,7 +64,7 @@ def generate_launch_description():
             DeclareLaunchArgument("roi_max_half_size_px", default_value="140"),  # Maximum ROI half-size in pixels
             DeclareLaunchArgument("lost_frame_tolerance", default_value="3"),  # Number of missed frames allowed before reset
             DeclareLaunchArgument("ema_alpha", default_value="0.5"),  # EMA smoothing factor for tracked outputs
-            DeclareLaunchArgument("force_search_mode", default_value="true"),  # Force the detector to stay in search mode for debugging
+            DeclareLaunchArgument("force_search_mode", default_value="false"),  # Force the detector to stay in search mode for debugging
             DeclareLaunchArgument("enable_timing_log", default_value="true"),  # Whether to print timing summaries
             DeclareLaunchArgument("timing_log_interval", default_value="30"),  # Frame interval between timing log summaries
             DeclareLaunchArgument("publish_processing_time", default_value="true"),  # Whether to publish end-to-end processing time
@@ -72,7 +72,7 @@ def generate_launch_description():
                 "processing_time_topic", default_value="/orange_ball_detector/processing_time_ms"
             ),  # Topic for published processing time in milliseconds
             DeclareLaunchArgument(
-                "enable_image_view", default_value="false"
+                "enable_image_view", default_value="true"
             ),  # Master switch for all OpenCV debug windows
             DeclareLaunchArgument(
                 "show_input_image", default_value="false"

@@ -180,10 +180,10 @@ def generate_launch_description():
                 "ridge_min_boundary_ratio", default_value="0.35"
             ),  # Minimum boundary support ratio
             DeclareLaunchArgument(
-                "ridge_enable_boundary_mode", default_value="true"
+                "ridge_enable_boundary_mode", default_value="false"
             ),  # Whether to allow green-boundary support
-            DeclareLaunchArgument("ridge_width_floor_px", default_value="2.0"),  # Minimum accepted local width
-            DeclareLaunchArgument("ridge_width_ceil_px", default_value="40.0"),  # Maximum accepted local width
+            DeclareLaunchArgument("ridge_width_floor_px", default_value="5.0"),  # Minimum accepted local width
+            DeclareLaunchArgument("ridge_width_ceil_px", default_value="18.0"),  # Maximum accepted local width
             DeclareLaunchArgument("ridge_width_mad_scale", default_value="2.5"),  # MAD scale for adaptive width range
             DeclareLaunchArgument("ridge_min_width_samples", default_value="25"),  # Minimum samples before adaptive width estimation
             DeclareLaunchArgument(
@@ -211,7 +211,7 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="false"
+                "ridge_enable_image_view", default_value="true"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
             DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
@@ -223,7 +223,7 @@ def generate_launch_description():
                 "ridge_show_candidate_prefilter_mask", default_value="false"
             ),  # Whether to show candidate-prefilter ridge mask
             DeclareLaunchArgument(
-                "ridge_show_orientation_valid_mask", default_value="false"
+                "ridge_show_orientation_valid_mask", default_value="true"
             ),  # Whether to show orientation-valid seed mask
             DeclareLaunchArgument(
                 "ridge_show_side_support_seed_mask", default_value="false"
@@ -243,7 +243,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ridge_show_white_final_mask", default_value="true"
             ),  # Whether to show final white mask
-            DeclareLaunchArgument("ridge_show_debug_image", default_value="false"),  # Whether to show composite debug image
+            DeclareLaunchArgument("ridge_show_debug_image", default_value="true"),  # Whether to show composite debug image
             DeclareLaunchArgument(
                 "ridge_enable_timing_debug", default_value="true"
             ),  # Whether to log ridge timing summary
