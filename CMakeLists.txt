@@ -128,6 +128,7 @@ install(TARGETS
 # --- Install Python Scripts ---
 install(PROGRAMS
   "scripts/yaw_publisher.py"
+  "src/camera_fixed_exposure_debug.py"
   "src/image_publisher.py"
   DESTINATION lib/${PROJECT_NAME}
 )
