@@ -1,0 +1,121 @@
+# Skeleton Fastmap + 多节点 Localization 工作流
+
+## Summary
+- 新增一个总入口 launch，完整启动现有 `white_line_lab_skeleton_fastmap` 视觉链，并接入地图、yaw 和新的多节点定位链。
+- `nav2_map_server` 和 `nav2_lifecycle_manager` 放进新 launch，负责提供并激活 `/map`；它们不是粒子滤波算法本体，但属于定位工作流必需配套。
+- 保留旧 `localization.launch.py`、`main_node.cpp`、`particle_filter.*` 原样不动；新的定位链全部写新代码。
+- 新定位链拆成两个新节点：
+  - `topdown_mask_points_node`：把最终白线 mask 转成机器人坐标系下的 2D 点
+  - `pf_localization_node`：复用现有 `ParticleFilter` 做 map + yaw + 点集观测定位
+- 新观测几何不使用旧 `VisionProcessor` 的 IPM；按“垂直向下相机 + remap 后俯视图”处理，采用显式的线性像素到米换算。
+- 另增一个 MATLAB 可复用函数，只负责根据 `ocam_model.mat` 和 Scaramuzza undistort 平面定义计算 undistort 后图像的全局 `meters_per_pixel`。
+
+## Implementation Changes
+- 在 [src/white_line_skeleton_filter_node.cpp](/home/terry/RCJ/localization_ws/src/rcj_localization/src/white_line_skeleton_filter_node.cpp) 中把当前最终白线结果 `white_mask` 全面改名为 `white_final_mask`。
+- 改名范围包括：
+  - 局部变量和函数参数
+  - publisher 成员名
+  - debug window 名称与显示文案
+  - launch 参数命名
+  - ROS 主输出 topic
+- 兼容策略：
+  - 新主 topic：`~/white_final_mask`
+  - 旧 topic：`~/white_mask` 继续发布同一份数据，并打 deprecated 日志
+- `white_final_mask` 的语义固定为当前实现：
+  - `white_final_mask = reconstructed_mask AND morph_mask`
+- 调整 skeleton debug composite：
+  - 继续使用当前“合成底图”模式，不改成叠到彩色 remap 图上
+  - 最终 overlay 只叠加 `green_mask`、`black_mask`、`white_final_mask`
+  - 不再把 `orientation_valid`、`side_support`、`width_supported`、`length_filtered` 叠进最终效果图
+  - 白色层必须只来自 `white_final_mask`
+- 新增 `topdown_mask_points_node`
+  - 订阅：`/white_line_skeleton_filter_node/white_final_mask`
+  - 输出：`geometry_msgs/msg/PoseArray`，topic 设为 `/field_line_observations`
+  - `header.frame_id = base_link`
+  - 每个点只使用 `pose.position.x/y`，`z=0`，orientation 置默认值
+  - 只对 mask 非零像素生成点；超过阈值时做均匀抽样，默认最大 `5000`
+- 线性像素转米规则在 `topdown_mask_points_node` 中固定为：
+  - 输入参数：
+    - `meters_per_pixel`
+    - `forward_axis`，枚举：`u+` / `u-` / `v+` / `v-`
+    - `left_axis`，枚举：`u+` / `u-` / `v+` / `v-`
+  - 计算：
+    - `robot_origin_u_px = (image_width - 1) / 2`
+    - `robot_origin_v_px = (image_height - 1) / 2`
+    - `du = (u - robot_origin_u_px) * meters_per_pixel`
+    - `dv = (v - robot_origin_v_px) * meters_per_pixel`
+    - `forward_m` 和 `left_m` 由 `forward_axis` / `left_axis` 从 `du`、`dv` 取值和符号
+  - `forward_axis` 与 `left_axis` 必须正交且不能重复；节点启动时校验
+  - `robot_origin_*` 不再作为显式输入，统一由图像连续零基几何中心自动推导；例如 `(800, 600)` 对应 `(399.5, 299.5)`
+- 新增 MATLAB 函数 `estimateUndistortMetersPerPixel.m`
+  - 接口：`result = estimateUndistortMetersPerPixel(ocamModel, cameraHeightM, fc, outputSize)`
+  - 输入为已加载好的 `ocam_model` 结构体
+  - 固定沿用 Scaramuzza undistort 平面定义：
+    - `planeZ = -outputWidth / fc`
+    - `meters_per_pixel = cameraHeightM / abs(planeZ)`
+    - 等价为 `meters_per_pixel = cameraHeightM * fc / outputWidth`
+  - 输出只保留像素米换算相关字段，不输出任何 `raw_base_link_*` / `undistort_base_link_*` 坐标
+- 新增 `pf_localization_node`
+  - 订阅：
+    - `/map`
+    - `/robot/yaw`
+    - `/field_line_observations`
+  - 复用现有 `ParticleFilter` 类和地图/预测/更新/重采样逻辑，不修改原实现
+  - 输出保持兼容：
+    - `/amcl_pose`
+    - `/particlecloud`
+    - `map -> base_link` TF
+- 新增总 launch，例如 `white_line_lab_skeleton_fastmap_localization.launch.py`
+  - 启动：
+    - `image_publisher.py`
+    - `fastmap_remap_node`
+    - `white_line_lab_morph_node`
+    - `white_line_skeleton_filter_node`
+    - `nav2_map_server`
+    - `nav2_lifecycle_manager`
+    - `topdown_mask_points_node`
+    - `pf_localization_node`
+  - 提供 `use_fake_yaw` 开关
+    - `true` 时启动现有 `yaw_publisher.py`
+    - `false` 时等待外部真实 IMU 发布 `/robot/yaw`
+
+## Public Interfaces
+- 新主输出：
+  - `/white_line_skeleton_filter_node/white_final_mask`
+- 兼容保留：
+  - `/white_line_skeleton_filter_node/white_mask`
+- 新观测输出：
+  - `/field_line_observations`，`geometry_msgs/msg/PoseArray`
+- 新几何参数：
+  - `meters_per_pixel`
+  - `forward_axis`
+  - `left_axis`
+- 图像原点约定：
+  - `u_center = (width - 1) / 2`
+  - `v_center = (height - 1) / 2`
+- MATLAB 主函数：
+  - `estimateUndistortMetersPerPixel(ocamModel, cameraHeightM, fc, outputSize)`
+- 新 launch 开关：
+  - `use_fake_yaw`
+  - `yaw_topic`，默认 `/robot/yaw`
+  - `mask_topic`，默认 `/white_line_skeleton_filter_node/white_final_mask`
+
+## Test Plan
+- 编译通过，新增节点和 launch 可被 `ros2 run` / `ros2 launch` 找到。
+- `white_line_skeleton_filter_node` 同时发布 `white_final_mask` 和兼容 `white_mask`，内容一致。
+- skeleton debug window / debug image 只显示 `green_mask`、`black_mask`、`white_final_mask` 三层效果。
+- 新 launch 启动后，`map_server` 被 `lifecycle_manager` 正常激活，`/map` 可被定位节点接收。
+- `use_fake_yaw=true` 时，`yaw_publisher.py` 自动提供 `/robot/yaw`；`false` 时不启动 fake yaw。
+- `topdown_mask_points_node` 在提供比例和轴向映射后，输出稳定的局部 2D 点，点方向与 RViz 中机器人前/左一致。
+- 对 `800x600` 输入图，`topdown_mask_points_node` 内部原点按 `(399.5, 299.5)` 计算。
+- MATLAB 函数能正确读取实际 `ocam_model.mat` / `Omni_Calib_Results.mat`，在 `fc = 10`、`outputWidth = 800` 时满足 `meters_per_pixel = cameraHeightM / 80`。
+- `pf_localization_node` 正常发布 `/amcl_pose`、`/particlecloud` 和 `map -> base_link` TF。
+- 旧 `localization.launch.py` 和旧 `main_node` 工作流继续可用。
+
+## Assumptions
+- 新 launch 采用“一条 launch 全启动”的模式。
+- 最终用于定位的 mask 固定为 `white_final_mask`。
+- 相机已完成去畸变并可视为俯视平面图；新节点不再使用旧 IPM。
+- 只要提供 `meters_per_pixel + axis mapping`，新观测几何链就不再依赖额外 ocamcalib 运行时信息。
+- 工作流中把输出图像中心当作 `base_link` 像素原点代理。
+- `/robot/yaw` 继续沿用角度制 `std_msgs/msg/Float32`，与现有 fake yaw 和旧定位逻辑兼容。
