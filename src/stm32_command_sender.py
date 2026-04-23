@@ -11,7 +11,7 @@ except ModuleNotFoundError:  # pragma: no cover - depends on runtime environment
 
 
 class Stm32CommandSender:
-    """Send ASCII motion commands with CRC16 to the STM32."""
+    """Send ASCII motion commands with CRC16-CCITT-FALSE to the STM32."""
 
     def __init__(
         self,
@@ -66,20 +66,20 @@ class Stm32CommandSender:
         serial_port.flush()
 
     def _format_command(self, name: str, *values: float) -> str:
-        return f"{name} {' '.join(str(value) for value in values)} "
+        return f"{name} {' '.join(str(value) for value in values)}"
 
     def _build_packet(self, command_text: str) -> bytes:
         command_bytes = command_text.encode("ascii")
-        crc = self._crc16_modbus(command_bytes)
-        return command_bytes + f"*{crc:04X}\r\n".encode("ascii")
+        crc = self._crc16_ccitt_false(command_bytes)
+        return command_bytes + f" *{crc:04X}\r\n".encode("ascii")
 
-    def _crc16_modbus(self, data: bytes) -> int:
+    def _crc16_ccitt_false(self, data: bytes) -> int:
         crc = 0xFFFF
         for byte in data:
-            crc ^= byte
+            crc ^= byte << 8
             for _ in range(8):
-                if crc & 0x0001:
-                    crc = (crc >> 1) ^ 0xA001
+                if crc & 0x8000:
+                    crc = ((crc << 1) ^ 0x1021) & 0xFFFF
                 else:
-                    crc >>= 1
+                    crc = (crc << 1) & 0xFFFF
         return crc & 0xFFFF

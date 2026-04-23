@@ -14,18 +14,21 @@ except ModuleNotFoundError as exc:
     ) from exc
 
 
-HARDCODED_COMMANDS = [
-    "cmd_dis 100 -100 *CB12",
-    "cmd_turn 90 *ADD5",
-    "cmd_dis 50 0 *AABC",
-]
+# HARDCODED_COMMANDS = [
+#     "cmd_dis 100 -100 *7841",
+#     "cmd_turn 90 *1935",
+#     "cmd_dis 50 0 *798F",
+# ]
 
+HARDCODED_COMMANDS = [
+     "cmd_dis 100 -100 *7841",
+]
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Send a fixed sequence of hardcoded STM32 move commands."
     )
-    parser.add_argument("--port", default="/dev/ttyACM0")
+    parser.add_argument("--port", default="/dev/ttyUSB0")
     parser.add_argument("--baudrate", type=int, default=115200)
     parser.add_argument("--timeout-sec", type=float, default=1.0)
     parser.add_argument(
