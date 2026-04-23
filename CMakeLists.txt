@@ -115,6 +115,14 @@ target_link_libraries(fastmap_remap_node
   ${OpenCV_LIBRARIES}
 )
 
+add_executable(stm32_behavior_node
+  src/stm32_behavior_node.cpp
+)
+
+ament_target_dependencies(stm32_behavior_node
+  "rclcpp"
+)
+
 
 # --- Installation Rules ---
 # This tells colcon where to put the files so `ros2 run` can find them.
@@ -122,13 +130,20 @@ install(TARGETS
   localization_node
   vision_processor_node
   fastmap_remap_node
+  stm32_behavior_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
 # --- Install Python Scripts ---
 install(PROGRAMS
   "scripts/yaw_publisher.py"
+  "scripts/stm32_command_demo.py"
   "src/image_publisher.py"
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(FILES
+  "src/stm32_command_sender.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 
