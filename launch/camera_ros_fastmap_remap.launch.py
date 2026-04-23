@@ -139,7 +139,7 @@ def generate_launch_description():
             DeclareLaunchArgument("fastmap_file", default_value=""),  # Specific fastmap XML path
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
             DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
-            DeclareLaunchArgument("remap_enable_image_view", default_value="false"),  # Show remap debug windows
+            DeclareLaunchArgument("remap_enable_image_view", default_value="true"),  # Show remap debug windows
             DeclareLaunchArgument("remap_show_input_image", default_value="true"),  # Show the remap input image
             DeclareLaunchArgument("remap_show_output_image", default_value="true"),  # Show the remap output image
             OpaqueFunction(function=build_nodes),
