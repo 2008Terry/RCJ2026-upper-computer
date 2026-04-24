@@ -287,7 +287,7 @@ def generate_launch_description():
                 default_value="/field_line_observations_debug",
             ),  # Debug point cloud topic
             DeclareLaunchArgument("num_particles", default_value="1000"),  # Number of particles
-            DeclareLaunchArgument("sigma_hit", defaulst_value="0.10"),  # Likelihood-field sigma
+            DeclareLaunchArgument("sigma_hit", default_value="0.10"),  # Likelihood-field sigma
             DeclareLaunchArgument("noise_xy", default_value="0.05"),  # XY motion noise
             DeclareLaunchArgument("noise_theta", default_value="0.10"),  # Heading motion noise
             DeclareLaunchArgument("alpha_fast_rate", default_value="0.1"),  # Fast weight adaptation rate
