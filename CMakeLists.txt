@@ -10,6 +10,7 @@ endif()
 # Find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -24,6 +25,11 @@ find_package(OpenMP REQUIRED)
 # Crucially, find the OpenCV package that cv_bridge depends on
 find_package(OpenCV REQUIRED)
 include_directories(include)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "srv/Stm32Command.srv"
+)
+ament_export_dependencies(rosidl_default_runtime)
 
 # Vision processor reusable library
 add_library(vision_processor
@@ -123,6 +129,22 @@ ament_target_dependencies(stm32_behavior_node
   "rclcpp"
 )
 
+add_executable(stm32_serial_gateway_node
+  src/stm32_serial_gateway_node.cpp
+)
+
+ament_target_dependencies(stm32_serial_gateway_node
+  "rclcpp"
+)
+
+rosidl_get_typesupport_target(cpp_typesupport_target
+  ${PROJECT_NAME}
+  "rosidl_typesupport_cpp"
+)
+target_link_libraries(stm32_serial_gateway_node
+  "${cpp_typesupport_target}"
+)
+
 
 # --- Installation Rules ---
 # This tells colcon where to put the files so `ros2 run` can find them.
@@ -131,6 +153,7 @@ install(TARGETS
   vision_processor_node
   fastmap_remap_node
   stm32_behavior_node
+  stm32_serial_gateway_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

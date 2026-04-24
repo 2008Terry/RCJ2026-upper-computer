@@ -116,6 +116,62 @@ namespace
     return stream.str();
   }
 
+  Command parseCommandSpec(const std::string &spec)
+  {
+    std::istringstream tokens(spec);
+    std::string command_name;
+    if (!(tokens >> command_name))
+    {
+      throw std::runtime_error("Empty STM32 command in 'commands' parameter.");
+    }
+
+    Command command{};
+    std::string extra_token;
+    if (command_name == "cmd_dis")
+    {
+      command.kind = CommandKind::Distance;
+      if (!(tokens >> command.primary_value >> command.secondary_value) ||
+          (tokens >> extra_token))
+      {
+        throw std::runtime_error(
+            "Invalid cmd_dis command '" + spec + "'. Expected: cmd_dis <primary> <secondary>");
+      }
+      return command;
+    }
+
+    if (command_name == "cmd_turn")
+    {
+      command.kind = CommandKind::Turn;
+      if (!(tokens >> command.primary_value) || (tokens >> extra_token))
+      {
+        throw std::runtime_error(
+            "Invalid cmd_turn command '" + spec + "'. Expected: cmd_turn <degrees>");
+      }
+      command.secondary_value = 0.0;
+      return command;
+    }
+
+    throw std::runtime_error(
+        "Unsupported STM32 command '" + command_name + "' in '" + spec +
+        "'. Supported commands: cmd_dis, cmd_turn");
+  }
+
+  std::vector<Command> parseCommandSequence(const std::vector<std::string> &command_specs)
+  {
+    if (command_specs.empty())
+    {
+      throw std::runtime_error("'commands' parameter must contain at least one command.");
+    }
+
+    std::vector<Command> commands;
+    commands.reserve(command_specs.size());
+    for (const auto &spec : command_specs)
+    {
+      commands.push_back(parseCommandSpec(spec));
+    }
+    return commands;
+  }
+
   std::string buildPacket(const Command &command)
   {
     const std::string command_text = buildCommandText(command);
@@ -231,13 +287,14 @@ class Stm32BehaviorNode : public rclcpp::Node
 {
 public:
   Stm32BehaviorNode()
-      : Node("stm32_behavior_node"),
-        command_sequence_{
-            {CommandKind::Distance, 100.0, -100.0},
-            {CommandKind::Turn, 90.0, 0.0},
-            {CommandKind::Distance, 50.0, 0.0},
-        }
+      : Node("stm32_behavior_node")
   {
+    const std::vector<std::string> default_commands{
+        "cmd_dis 100 -100",
+        "cmd_turn 90",
+        "cmd_dis 50 0",
+    };
+
     this->declare_parameter<std::string>("port", "/dev/ttyUSB0");
     this->declare_parameter("baudrate", 115200);
     this->declare_parameter("timeout_sec", 0.05);
@@ -245,6 +302,7 @@ public:
     this->declare_parameter("tick_period_ms", 20);
     this->declare_parameter("enable_serial_log", true);
     this->declare_parameter("enable_raw_reply_log", false);
+    this->declare_parameter<std::vector<std::string>>("commands", default_commands);
 
     port_ = this->get_parameter("port").as_string();
     baudrate_ = static_cast<int>(this->get_parameter("baudrate").as_int());
@@ -255,6 +313,7 @@ public:
         std::max(1, static_cast<int>(this->get_parameter("tick_period_ms").as_int()));
     enable_serial_log_ = this->get_parameter("enable_serial_log").as_bool();
     enable_raw_reply_log_ = this->get_parameter("enable_raw_reply_log").as_bool();
+    command_sequence_ = parseCommandSequence(this->get_parameter("commands").as_string_array());
 
     openAndConfigureSerial();
 
@@ -265,12 +324,13 @@ public:
     RCLCPP_INFO(
         this->get_logger(),
         "stm32_behavior_node started. port='%s', baudrate=%d, timeout_sec=%.3f, "
-        "resend_period_ms=%d, tick_period_ms=%d, enable_raw_reply_log=%s",
+        "resend_period_ms=%d, tick_period_ms=%d, command_count=%zu, enable_raw_reply_log=%s",
         port_.c_str(),
         baudrate_,
         timeout_sec_,
         resend_period_ms_,
         tick_period_ms_,
+        command_sequence_.size(),
         enable_raw_reply_log_ ? "true" : "false");
   }
 
