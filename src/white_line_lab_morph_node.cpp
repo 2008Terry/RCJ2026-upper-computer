@@ -399,6 +399,7 @@ class WhiteLineLabMorphNode : public rclcpp::Node {
 public:
     WhiteLineLabMorphNode() : Node("white_line_lab_morph_node") {
         this->declare_parameter<std::string>("input_topic", "/camera/image_raw");
+        this->declare_parameter<std::string>("robot_mask_topic", "");
         rcj_loc::vision::white_line::declarePreprocessParameters(*this);
 
         this->declare_parameter("white_enhanced_min", 170);
@@ -430,10 +431,18 @@ public:
         loadProcessingParameters();
 
         const auto topic = this->get_parameter("input_topic").as_string();
+        const auto robot_mask_topic = this->get_parameter("robot_mask_topic").as_string();
+        robot_mask_enabled_ = !robot_mask_topic.empty();
         image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
             topic,
             rclcpp::SensorDataQoS(),
             std::bind(&WhiteLineLabMorphNode::imageCallback, this, std::placeholders::_1));
+        if (robot_mask_enabled_) {
+            robot_mask_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
+                robot_mask_topic,
+                rclcpp::QoS(1).reliable().transient_local(),
+                std::bind(&WhiteLineLabMorphNode::robotMaskCallback, this, std::placeholders::_1));
+        }
 
         white_candidate_mask_pub_ =
             this->create_publisher<sensor_msgs::msg::Image>("~/white_candidate_mask", 10);
@@ -448,7 +457,9 @@ public:
 
         RCLCPP_INFO(
             this->get_logger(),
-            "white_line_lab_morph_node started. enable_image_view=%s, enable_timing_debug=%s, publish_debug_image=%s",
+            "white_line_lab_morph_node started. robot_mask_topic=%s, enable_image_view=%s, "
+            "enable_timing_debug=%s, publish_debug_image=%s",
+            robot_mask_topic.empty() ? "<disabled>" : robot_mask_topic.c_str(),
             enable_image_view_ ? "true" : "false",
             enable_timing_debug_ ? "true" : "false",
             publish_debug_image_ ? "true" : "false");
@@ -459,7 +470,58 @@ public:
     }
 
 private:
+    void robotMaskCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg) {
+        try {
+            robot_allowed_mask_ = cv_bridge::toCvCopy(msg, "mono8")->image;
+            robot_mask_received_ = true;
+            robot_mask_validated_ = false;
+        } catch (const cv_bridge::Exception &e) {
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(),
+                *this->get_clock(),
+                2000,
+                "cv_bridge failed while reading robot mask: %s",
+                e.what());
+        }
+    }
+
+    bool validateRobotMaskForFrame(const cv::Mat &frame) {
+        if (!robot_mask_enabled_) {
+            return true;
+        }
+
+        if (!robot_mask_received_) {
+            RCLCPP_WARN_THROTTLE(
+                this->get_logger(),
+                *this->get_clock(),
+                2000,
+                "robot_mask_topic is configured but no robot mask has been received yet; dropping frame.");
+            return false;
+        }
+
+        if (robot_mask_validated_) {
+            return true;
+        }
+
+        if (robot_allowed_mask_.size() != frame.size()) {
+            RCLCPP_FATAL(
+                this->get_logger(),
+                "Robot mask size mismatch: mask=%dx%d image=%dx%d. Stopping node.",
+                robot_allowed_mask_.cols,
+                robot_allowed_mask_.rows,
+                frame.cols,
+                frame.rows);
+            image_sub_.reset();
+            rclcpp::shutdown();
+            return false;
+        }
+
+        robot_mask_validated_ = true;
+        return true;
+    }
+
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr robot_mask_sub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr white_candidate_mask_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr white_morph_mask_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr green_mask_pub_;
@@ -499,6 +561,10 @@ private:
     bool overlay_window_created_ = false;
     int display_max_width_ = 960;
     int display_max_height_ = 720;
+    bool robot_mask_enabled_ = false;
+    bool robot_mask_received_ = false;
+    bool robot_mask_validated_ = false;
+    cv::Mat robot_allowed_mask_;
     unsigned long long frame_count_ = 0;
     std::size_t timing_frames_in_interval_ = 0;
     unsigned long long timing_interval_start_frame_ = 0;
@@ -796,6 +862,10 @@ private:
             return;
         }
 
+        if (!validateRobotMaskForFrame(frame)) {
+            return;
+        }
+
         const unsigned long long current_frame_index = ++frame_count_;
         const auto preprocess_params = rcj_loc::vision::white_line::getPreprocessParams(*this);
         rcj_loc::vision::white_line::PreprocessTiming *preprocess_timing_ptr =
@@ -868,7 +938,10 @@ private:
         }
 
         stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
-        cv::Mat remaining(frame.size(), CV_8UC1, cv::Scalar(255));
+        cv::Mat remaining =
+            robot_mask_enabled_
+                ? robot_allowed_mask_.clone()
+                : cv::Mat(frame.size(), CV_8UC1, cv::Scalar(255));
         const cv::Mat green_mask = takeFromRemaining(green_candidate, remaining);
         const cv::Mat raw_white_mask = takeFromRemaining(white_candidate, remaining);
         const cv::Mat black_mask = takeFromRemaining(black_candidate, remaining);

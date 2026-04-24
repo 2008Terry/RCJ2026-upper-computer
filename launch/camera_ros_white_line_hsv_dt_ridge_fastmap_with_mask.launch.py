@@ -50,9 +50,6 @@ def resolve_fastmap_file(context):
 def build_nodes(context):
     selected_fastmap_file = resolve_fastmap_file(context)
     default_width, default_height = read_fastmap_source_size(selected_fastmap_file)
-    apply_mask = (
-        LaunchConfiguration("apply_mask").perform(context).strip().lower() == "true"
-    )
     width_value = int(
         LaunchConfiguration("width").perform(context).strip() or str(default_width)
     )
@@ -75,10 +72,6 @@ def build_nodes(context):
     robot_mask_path = LaunchConfiguration("robot_mask_path")
     input_transport = LaunchConfiguration("input_transport")
     interpolation = LaunchConfiguration("interpolation")
-    remap_robot_mask_path = robot_mask_path if apply_mask else ""
-    hsv_robot_mask_topic = (
-        "/white_line_hsv_input_remap_node/robot_mask" if apply_mask else ""
-    )
 
     hsv_node_name = "white_line_hsv_white_node"
 
@@ -117,7 +110,7 @@ def build_nodes(context):
             parameters=[
                 {
                     "fastmap_file": str(selected_fastmap_file),  # Fastmap XML path
-                    "robot_mask_path": remap_robot_mask_path,  # Optional remapped-space robot mask image path
+                    "robot_mask_path": robot_mask_path,  # Remap-stage robot mask image path
                     "input_topic": input_topic,  # Remap input image topic
                     "output_topic": remap_topic,  # Remap output image topic
                     "input_transport": input_transport,  # Remap input transport
@@ -135,7 +128,7 @@ def build_nodes(context):
         ),
         Node(
             package="rcj_localization",
-            executable="white_line_hsv_white_node",
+            executable="white_line_hsv_white_mask_node",
             name=hsv_node_name,
             output="screen",
             arguments=["--ros-args", "--log-level", "info"],
@@ -143,7 +136,7 @@ def build_nodes(context):
             parameters=[
                 {
                     "input_topic": remap_topic,  # HSV input image topic
-                    "robot_mask_topic": hsv_robot_mask_topic,  # Remap-stage robot mask topic
+                    "robot_mask_topic": f"/white_line_hsv_input_remap_node/robot_mask",  # Remap-stage robot mask topic
                     "white_h_min": ParameterValue(
                         LaunchConfiguration("white_h_min"), value_type=int
                     ),  # White HSV minimum H
@@ -397,9 +390,6 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "white_mask_topic", default_value="/camera/white_mask"
             ),  # White mask topic
-            DeclareLaunchArgument(
-                "apply_mask", default_value="true"
-            ),  # Whether to enable remap-stage robot masking
             DeclareLaunchArgument(
                 "robot_mask_path", default_value="/home/rcj/Documents/calibration_images/remapped_mask.png"
             ),  # Optional remapped-space robot mask image path

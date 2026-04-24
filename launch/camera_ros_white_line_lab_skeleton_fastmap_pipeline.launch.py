@@ -94,6 +94,7 @@ def build_nodes(context):
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
     output_topic = LaunchConfiguration("output_topic")
+    robot_mask_path = LaunchConfiguration("robot_mask_path")
     input_transport = LaunchConfiguration("input_transport")
     interpolation = LaunchConfiguration("interpolation")
 
@@ -143,6 +144,7 @@ def build_nodes(context):
                 parameters=[
                     {
                         "fastmap_file": str(selected_fastmap_file),
+                        "robot_mask_path": robot_mask_path,
                         "input_topic": input_topic,
                         "output_topic": output_topic,
                         "input_transport": input_transport,
@@ -161,6 +163,7 @@ def build_nodes(context):
                 parameters=[
                     {
                         "input_topic": output_topic,
+                        "robot_mask_topic": "/white_line_lab_input_remap_node/robot_mask",
                         "green_a_max": 117,
                         "enable_image_view": LaunchConfiguration("morph_enable_image_view"),
                         "show_input_image": LaunchConfiguration("morph_show_input_image"),
@@ -245,6 +248,7 @@ def generate_launch_description():
         DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # Camera info topic
         DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
         DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),  # Remapped image topic
+        DeclareLaunchArgument("robot_mask_path", default_value="/home/rcj/Documents/calibration_images/remapped_mask.png"),  # Optional remapped-space robot mask image path
         DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Auto-select the latest fastmap XML
         DeclareLaunchArgument("fastmap_file", default_value=""),  # Specific fastmap XML path
         DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport

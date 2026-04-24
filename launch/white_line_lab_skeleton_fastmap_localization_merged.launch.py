@@ -78,6 +78,7 @@ def generate_launch_description():
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
     output_topic = LaunchConfiguration("output_topic")
+    robot_mask_path = LaunchConfiguration("robot_mask_path")
     fastmap_file = LaunchConfiguration("fastmap_file")
     input_transport = LaunchConfiguration("input_transport")
     interpolation = LaunchConfiguration("interpolation")
@@ -101,6 +102,7 @@ def generate_launch_description():
         DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # Camera info topic
         DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw input image topic
         DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),  # Remapped output image topic
+        DeclareLaunchArgument("robot_mask_path", default_value="/home/rcj/Documents/calibration_images/remapped_mask.png"),  # Optional remapped-space robot mask image path
         DeclareLaunchArgument("use_latest_fastmap", default_value="true"),  # Auto-select the newest fastmap file
         DeclareLaunchArgument("fastmap_file", default_value=""),  # Fastmap XML path when auto-select is off
         DeclareLaunchArgument("input_transport", default_value="raw"),  # Input transport for the remap node
@@ -215,6 +217,7 @@ def generate_launch_description():
                 parameters=[
                     {
                         "fastmap_file": selected_fastmap_file,
+                        "robot_mask_path": robot_mask_path,
                         "input_topic": input_topic,
                         "output_topic": output_topic,
                         "input_transport": input_transport,
@@ -234,6 +237,7 @@ def generate_launch_description():
                 parameters=[
                     {
                         "input_topic": output_topic,
+                        "robot_mask_topic": "/white_line_lab_input_remap_node/robot_mask",
                         "green_a_max": 117,
                         "enable_image_view": LaunchConfiguration("morph_enable_image_view"),
                         "show_input_image": LaunchConfiguration("morph_show_input_image"),

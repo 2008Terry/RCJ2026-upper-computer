@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 #if __has_include(<cv_bridge/cv_bridge.hpp>)
@@ -191,10 +192,10 @@ void resizeWindowToFitImage(
 
 }  // namespace
 
-class WhiteLineHsvWhiteNode : public rclcpp::Node
+class WhiteLineHsvWhiteMaskNode : public rclcpp::Node
 {
 public:
-  WhiteLineHsvWhiteNode()
+  WhiteLineHsvWhiteMaskNode()
   : Node("white_line_hsv_white_node")
   {
     declare_parameter<std::string>("input_topic", "/camera/image_remapped");
@@ -220,6 +221,8 @@ public:
     declare_parameter("show_overlay_image", true);
     declare_parameter("display_max_width", 960);
     declare_parameter("display_max_height", 720);
+    declare_parameter<std::string>(
+      "robot_mask_path", "/home/rcj/Documents/calibration_images/remapped_mask.png");
 
     loadThresholdParameters();
     loadRuntimeParameters();
@@ -227,16 +230,22 @@ public:
 
     const auto input_topic = get_parameter("input_topic").as_string();
     const auto robot_mask_topic = get_parameter("robot_mask_topic").as_string();
+    const auto robot_mask_path = get_parameter("robot_mask_path").as_string();
     robot_mask_enabled_ = !robot_mask_topic.empty();
     image_sub_ = create_subscription<sensor_msgs::msg::Image>(
       input_topic,
       rclcpp::SensorDataQoS(),
-      std::bind(&WhiteLineHsvWhiteNode::imageCallback, this, std::placeholders::_1));
-    if (!robot_mask_topic.empty()) {
+      std::bind(&WhiteLineHsvWhiteMaskNode::imageCallback, this, std::placeholders::_1));
+    if (robot_mask_enabled_) {
       robot_mask_sub_ = create_subscription<sensor_msgs::msg::Image>(
         robot_mask_topic,
         rclcpp::QoS(1).reliable().transient_local(),
-        std::bind(&WhiteLineHsvWhiteNode::robotMaskCallback, this, std::placeholders::_1));
+        std::bind(&WhiteLineHsvWhiteMaskNode::robotMaskCallback, this, std::placeholders::_1));
+    } else if (!robot_mask_path.empty()) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Parameter 'robot_mask_path' is deprecated and ignored by white_line_hsv_white_mask_node; "
+        "configure remap-stage masking and pass 'robot_mask_topic' instead.");
     }
 
     white_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/white_mask", 10);
@@ -268,7 +277,7 @@ public:
       enable_controls_window_ ? "true" : "false");
   }
 
-  ~WhiteLineHsvWhiteNode() override
+  ~WhiteLineHsvWhiteMaskNode() override
   {
     destroyDebugWindows();
   }
@@ -288,6 +297,38 @@ private:
         "cv_bridge failed while reading robot mask: %s",
         e.what());
     }
+  }
+
+  void loadThresholdParameters()
+  {
+    white_h_min_ = clampHue(static_cast<int>(get_parameter("white_h_min").as_int()));
+    white_h_max_ = clampHue(static_cast<int>(get_parameter("white_h_max").as_int()));
+    white_s_max_ = clampByte(static_cast<int>(get_parameter("white_s_max").as_int()));
+    white_v_min_ = clampByte(static_cast<int>(get_parameter("white_v_min").as_int()));
+    black_v_max_ = clampByte(static_cast<int>(get_parameter("black_v_max").as_int()));
+    green_h_min_ = clampHue(static_cast<int>(get_parameter("green_h_min").as_int()));
+    green_h_max_ = clampHue(static_cast<int>(get_parameter("green_h_max").as_int()));
+    green_s_min_ = clampByte(static_cast<int>(get_parameter("green_s_min").as_int()));
+    green_v_min_ = clampByte(static_cast<int>(get_parameter("green_v_min").as_int()));
+  }
+
+  void loadRuntimeParameters()
+  {
+    enable_timing_log_ = get_parameter("enable_timing_log").as_bool();
+    timing_log_interval_ =
+      std::max(1, static_cast<int>(get_parameter("timing_log_interval").as_int()));
+    enable_image_view_ = get_parameter("enable_image_view").as_bool();
+    enable_controls_window_ = get_parameter("enable_controls_window").as_bool();
+    show_input_image_ = get_parameter("show_input_image").as_bool();
+    show_white_mask_ = get_parameter("show_white_mask").as_bool();
+    show_green_mask_ = get_parameter("show_green_mask").as_bool();
+    show_black_mask_ = get_parameter("show_black_mask").as_bool();
+    show_noise_mask_ = get_parameter("show_noise_mask").as_bool();
+    show_overlay_image_ = get_parameter("show_overlay_image").as_bool();
+    display_max_width_ =
+      std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
+    display_max_height_ =
+      std::max(1, static_cast<int>(get_parameter("display_max_height").as_int()));
   }
 
   bool validateRobotMaskForFrame(const cv::Mat & frame)
@@ -324,38 +365,6 @@ private:
 
     robot_mask_validated_ = true;
     return true;
-  }
-
-  void loadThresholdParameters()
-  {
-    white_h_min_ = clampHue(static_cast<int>(get_parameter("white_h_min").as_int()));
-    white_h_max_ = clampHue(static_cast<int>(get_parameter("white_h_max").as_int()));
-    white_s_max_ = clampByte(static_cast<int>(get_parameter("white_s_max").as_int()));
-    white_v_min_ = clampByte(static_cast<int>(get_parameter("white_v_min").as_int()));
-    black_v_max_ = clampByte(static_cast<int>(get_parameter("black_v_max").as_int()));
-    green_h_min_ = clampHue(static_cast<int>(get_parameter("green_h_min").as_int()));
-    green_h_max_ = clampHue(static_cast<int>(get_parameter("green_h_max").as_int()));
-    green_s_min_ = clampByte(static_cast<int>(get_parameter("green_s_min").as_int()));
-    green_v_min_ = clampByte(static_cast<int>(get_parameter("green_v_min").as_int()));
-  }
-
-  void loadRuntimeParameters()
-  {
-    enable_timing_log_ = get_parameter("enable_timing_log").as_bool();
-    timing_log_interval_ =
-      std::max(1, static_cast<int>(get_parameter("timing_log_interval").as_int()));
-    enable_image_view_ = get_parameter("enable_image_view").as_bool();
-    enable_controls_window_ = get_parameter("enable_controls_window").as_bool();
-    show_input_image_ = get_parameter("show_input_image").as_bool();
-    show_white_mask_ = get_parameter("show_white_mask").as_bool();
-    show_green_mask_ = get_parameter("show_green_mask").as_bool();
-    show_black_mask_ = get_parameter("show_black_mask").as_bool();
-    show_noise_mask_ = get_parameter("show_noise_mask").as_bool();
-    show_overlay_image_ = get_parameter("show_overlay_image").as_bool();
-    display_max_width_ =
-      std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
-    display_max_height_ =
-      std::max(1, static_cast<int>(get_parameter("display_max_height").as_int()));
   }
 
   void syncWindow(const std::string & window_name, bool should_show, bool & created)
@@ -852,7 +861,12 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<WhiteLineHsvWhiteNode>());
+  try {
+    rclcpp::spin(std::make_shared<WhiteLineHsvWhiteMaskNode>());
+  } catch (const std::exception &) {
+    rclcpp::shutdown();
+    return 1;
+  }
   rclcpp::shutdown();
   return 0;
 }

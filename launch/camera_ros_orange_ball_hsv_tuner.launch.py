@@ -18,6 +18,7 @@ def generate_launch_description():
     use_node_time = LaunchConfiguration("use_node_time")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
+    robot_mask_path = LaunchConfiguration("robot_mask_path")
 
     return LaunchDescription(
         [
@@ -33,6 +34,10 @@ def generate_launch_description():
             DeclareLaunchArgument("use_node_time", default_value="false"),
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),
+            DeclareLaunchArgument(
+                "robot_mask_path",
+                default_value="/home/rcj/Documents/calibration_images/mask.png",
+            ),
             DeclareLaunchArgument("orange_h_min", default_value="5"),
             DeclareLaunchArgument("orange_h_max", default_value="30"),
             DeclareLaunchArgument("orange_s_min", default_value="100"),
@@ -73,6 +78,7 @@ def generate_launch_description():
                 parameters=[
                     {
                         "input_topic": input_topic,
+                        "robot_mask_path": robot_mask_path,
                         "orange_h_min": ParameterValue(
                             LaunchConfiguration("orange_h_min"), value_type=int
                         ),

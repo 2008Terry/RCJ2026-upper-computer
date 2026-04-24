@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <functional>
 #include <iomanip>
 #include <limits>
@@ -30,6 +31,7 @@
 #include <std_msgs/msg/float32.hpp>
 
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 namespace {
@@ -220,6 +222,37 @@ cv::Point clampPointToImage(const cv::Point & point, const cv::Size & image_size
     std::clamp(point.y, 0, std::max(0, image_size.height - 1)));
 }
 
+std::filesystem::path resolvePath(const std::string & raw_path)
+{
+  if (raw_path.empty()) {
+    return {};
+  }
+
+  std::filesystem::path resolved_path;
+  if (raw_path.front() == '~') {
+    const char * home = std::getenv("HOME");
+    if (home == nullptr || std::string(home).empty()) {
+      throw std::runtime_error("HOME is not set; cannot resolve '~' in robot_mask_path");
+    }
+
+    if (raw_path.size() == 1) {
+      resolved_path = std::filesystem::path(home);
+    } else if (raw_path[1] == '/') {
+      resolved_path = std::filesystem::path(home) / raw_path.substr(2);
+    } else {
+      throw std::runtime_error("Only '~' and '~/' are supported in robot_mask_path");
+    }
+  } else {
+    resolved_path = std::filesystem::path(raw_path);
+  }
+
+  if (resolved_path.is_relative()) {
+    resolved_path = std::filesystem::absolute(resolved_path);
+  }
+
+  return resolved_path.lexically_normal();
+}
+
 struct LutData
 {
   cv::Mat ground_x_m;
@@ -398,6 +431,7 @@ public:
   {
     declareParameters();
     loadParameters();
+    loadRobotMask();
     loadLutFile();
     syncImageViewState();
 
@@ -427,7 +461,7 @@ public:
       get_logger(),
       "orange_ball_detector_node started. input_topic=%s, lut_file=%s, search_scale=%.2f, "
       "roi_scale=%.2f, lost_frame_tolerance=%d, ema_alpha=%.2f, force_search_mode=%s, "
-      "image_view=%s, timing_log=%s",
+      "robot_mask_path=%s, image_view=%s, timing_log=%s",
       input_topic_.c_str(),
       lut_file_.c_str(),
       search_downsample_scale_,
@@ -435,6 +469,7 @@ public:
       lost_frame_tolerance_,
       ema_alpha_,
       force_search_mode_ ? "true" : "false",
+      robot_mask_enabled_ ? robot_mask_path_.c_str() : "<disabled>",
       enable_image_view_ ? "true" : "false",
       enable_timing_log_ ? "true" : "false");
   }
@@ -449,6 +484,8 @@ private:
   {
     declare_parameter<std::string>("input_topic", "/camera/image_raw");
     declare_parameter<std::string>("lut_file", "");
+    declare_parameter<std::string>(
+      "robot_mask_path", "/home/rcj/Documents/calibration_images/mask.png");
     declare_parameter("orange_h_min", 5);
     declare_parameter("orange_h_max", 30);
     declare_parameter("orange_s_min", 100);
@@ -504,6 +541,7 @@ private:
   {
     input_topic_ = get_parameter("input_topic").as_string();
     lut_file_ = get_parameter("lut_file").as_string();
+    robot_mask_path_ = get_parameter("robot_mask_path").as_string();
     orange_h_min_ = clampHue(static_cast<int>(get_parameter("orange_h_min").as_int()));
     orange_h_max_ = clampHue(static_cast<int>(get_parameter("orange_h_max").as_int()));
     orange_s_min_ = clampToByte(static_cast<int>(get_parameter("orange_s_min").as_int()));
@@ -605,6 +643,86 @@ private:
     if (lut_file_.empty()) {
       throw std::runtime_error("Parameter 'lut_file' must not be empty.");
     }
+  }
+
+  void loadRobotMask()
+  {
+    robot_mask_enabled_ = false;
+    robot_mask_validated_ = false;
+    robot_allowed_mask_.release();
+    resized_robot_allowed_mask_.release();
+    resized_robot_allowed_mask_size_ = cv::Size();
+
+    if (robot_mask_path_.empty()) {
+      return;
+    }
+
+    const std::filesystem::path resolved_path = resolvePath(robot_mask_path_);
+    const cv::Mat loaded_mask =
+      cv::imread(resolved_path.string(), cv::IMREAD_GRAYSCALE);
+    if (loaded_mask.empty()) {
+      throw std::runtime_error("Cannot open robot mask image: " + resolved_path.string());
+    }
+
+    cv::compare(loaded_mask, 0, robot_allowed_mask_, cv::CMP_GT);
+    robot_mask_enabled_ = true;
+  }
+
+  bool validateRobotMaskForFrame(const cv::Mat & frame)
+  {
+    if (!robot_mask_enabled_ || robot_mask_validated_) {
+      return true;
+    }
+
+    if (robot_allowed_mask_.size() != frame.size()) {
+      RCLCPP_FATAL(
+        get_logger(),
+        "Robot mask size %dx%d does not match raw frame size %dx%d. Shutting down.",
+        robot_allowed_mask_.cols,
+        robot_allowed_mask_.rows,
+        frame.cols,
+        frame.rows);
+      image_sub_.reset();
+      rclcpp::shutdown();
+      return false;
+    }
+
+    robot_mask_validated_ = true;
+    return true;
+  }
+
+  const cv::Mat & getRobotMaskForSize(const cv::Size & target_size)
+  {
+    if (!robot_mask_enabled_ || target_size == robot_allowed_mask_.size()) {
+      return robot_allowed_mask_;
+    }
+
+    if (resized_robot_allowed_mask_.empty() || resized_robot_allowed_mask_size_ != target_size) {
+      cv::resize(
+        robot_allowed_mask_,
+        resized_robot_allowed_mask_,
+        target_size,
+        0.0,
+        0.0,
+        cv::INTER_NEAREST);
+      resized_robot_allowed_mask_size_ = target_size;
+    }
+
+    return resized_robot_allowed_mask_;
+  }
+
+  void applyRobotMask(cv::Mat & mask, const cv::Rect * roi = nullptr)
+  {
+    if (!robot_mask_enabled_ || mask.empty()) {
+      return;
+    }
+
+    if (roi != nullptr) {
+      cv::bitwise_and(mask, robot_allowed_mask_(*roi), mask);
+      return;
+    }
+
+    cv::bitwise_and(mask, getRobotMaskForSize(mask.size()), mask);
   }
 
   void loadLutFile()
@@ -1113,7 +1231,7 @@ private:
     timing_interval_totals_us_.fill(0);
   }
 
-  void buildThresholdMask(const cv::Mat & bgr, cv::Mat & mask) const
+  void buildThresholdMask(const cv::Mat & bgr, cv::Mat & mask, const cv::Rect * roi = nullptr)
   {
     cv::Mat hsv;
     cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
@@ -1139,6 +1257,8 @@ private:
         high_mask);
       cv::bitwise_or(low_mask, high_mask, mask);
     }
+
+    applyRobotMask(mask, roi);
   }
 
   void applyMorphOpen(cv::Mat & mask) const
@@ -1151,9 +1271,9 @@ private:
     }
   }
 
-  void buildOrangeMask(const cv::Mat & bgr, cv::Mat & mask) const
+  void buildOrangeMask(const cv::Mat & bgr, cv::Mat & mask, const cv::Rect * roi = nullptr)
   {
-    buildThresholdMask(bgr, mask);
+    buildThresholdMask(bgr, mask, roi);
     applyMorphOpen(mask);
   }
 
@@ -1323,7 +1443,7 @@ private:
 
     const cv::Mat frame_roi = frame(roi);
     cv::Mat threshold_roi_mask;
-    buildThresholdMask(frame_roi, threshold_roi_mask);
+    buildThresholdMask(frame_roi, threshold_roi_mask, &roi);
     if (debug_options.capture_threshold_mask || debug_options.capture_raw_mask) {
       outputs.threshold_debug_mask = cv::Mat::zeros(frame.size(), CV_8UC1);
       threshold_roi_mask.copyTo(outputs.threshold_debug_mask(roi));
@@ -2150,6 +2270,10 @@ private:
       return;
     }
 
+    if (!validateRobotMaskForFrame(frame)) {
+      return;
+    }
+
     const TrackingMode mode =
       (!force_search_mode_ && has_filtered_state_ && lost_frame_count_ < lost_frame_tolerance_) ?
       TrackingMode::Track :
@@ -2264,6 +2388,7 @@ private:
 
   std::string input_topic_;
   std::string lut_file_;
+  std::string robot_mask_path_;
   int orange_h_min_ = 5;
   int orange_h_max_ = 30;
   int orange_s_min_ = 100;
@@ -2315,6 +2440,11 @@ private:
   int display_max_height_ = 720;
 
   LutData lut_;
+  bool robot_mask_enabled_ = false;
+  bool robot_mask_validated_ = false;
+  cv::Mat robot_allowed_mask_;
+  cv::Mat resized_robot_allowed_mask_;
+  cv::Size resized_robot_allowed_mask_size_;
   bool has_filtered_state_ = false;
   int lost_frame_count_ = 0;
   cv::Point2d filtered_raw_center_px_;

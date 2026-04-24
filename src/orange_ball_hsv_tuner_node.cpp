@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <functional>
+#include <stdexcept>
 #include <string>
 
 #if __has_include(<cv_bridge/cv_bridge.hpp>)
@@ -15,6 +17,7 @@
 #include <sensor_msgs/msg/image.hpp>
 
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 namespace {
@@ -36,6 +39,37 @@ int clampByte(int value)
   return std::clamp(value, 0, kByteMax);
 }
 
+std::filesystem::path resolvePath(const std::string & raw_path)
+{
+  if (raw_path.empty()) {
+    return {};
+  }
+
+  std::filesystem::path resolved_path;
+  if (raw_path.front() == '~') {
+    const char * home = std::getenv("HOME");
+    if (home == nullptr || std::string(home).empty()) {
+      throw std::runtime_error("HOME is not set; cannot resolve '~' in robot_mask_path");
+    }
+
+    if (raw_path.size() == 1) {
+      resolved_path = std::filesystem::path(home);
+    } else if (raw_path[1] == '/') {
+      resolved_path = std::filesystem::path(home) / raw_path.substr(2);
+    } else {
+      throw std::runtime_error("Only '~' and '~/' are supported in robot_mask_path");
+    }
+  } else {
+    resolved_path = std::filesystem::path(raw_path);
+  }
+
+  if (resolved_path.is_relative()) {
+    resolved_path = std::filesystem::absolute(resolved_path);
+  }
+
+  return resolved_path.lexically_normal();
+}
+
 }  // namespace
 
 class OrangeBallHsvTunerNode : public rclcpp::Node
@@ -45,6 +79,8 @@ public:
   : Node("orange_ball_hsv_tuner_node")
   {
     declare_parameter<std::string>("input_topic", "/camera/image_raw");
+    declare_parameter<std::string>(
+      "robot_mask_path", "/home/rcj/Documents/calibration_images/mask.png");
     declare_parameter("orange_h_min", 5);
     declare_parameter("orange_h_max", 30);
     declare_parameter("orange_s_min", 100);
@@ -53,6 +89,7 @@ public:
     declare_parameter("morph_kernel_size", 3);
 
     input_topic_ = get_parameter("input_topic").as_string();
+    robot_mask_path_ = get_parameter("robot_mask_path").as_string();
     orange_h_min_ = clampHue(static_cast<int>(get_parameter("orange_h_min").as_int()));
     orange_h_max_ = clampHue(static_cast<int>(get_parameter("orange_h_max").as_int()));
     orange_s_min_ = clampByte(static_cast<int>(get_parameter("orange_s_min").as_int()));
@@ -61,6 +98,7 @@ public:
     morph_open_trackbar_ = enable_morph_open_ ? 1 : 0;
     morph_kernel_size_ =
       std::max(1, static_cast<int>(get_parameter("morph_kernel_size").as_int()));
+    loadRobotMask();
 
     const bool display_available =
       std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr;
@@ -88,9 +126,10 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "orange_ball_hsv_tuner_node started. input_topic=%s; press 'p' in any OpenCV window "
-      "to print the current parameter values.",
-      input_topic_.c_str());
+      "orange_ball_hsv_tuner_node started. input_topic=%s, robot_mask_path=%s; press 'p' in any "
+      "OpenCV window to print the current parameter values.",
+      input_topic_.c_str(),
+      robot_mask_enabled_ ? robot_mask_path_.c_str() : "<disabled>");
   }
 
   ~OrangeBallHsvTunerNode() override
@@ -102,6 +141,59 @@ public:
   }
 
 private:
+  void loadRobotMask()
+  {
+    robot_mask_enabled_ = false;
+    robot_mask_validated_ = false;
+    robot_allowed_mask_.release();
+
+    if (robot_mask_path_.empty()) {
+      return;
+    }
+
+    const std::filesystem::path resolved_path = resolvePath(robot_mask_path_);
+    const cv::Mat loaded_mask =
+      cv::imread(resolved_path.string(), cv::IMREAD_GRAYSCALE);
+    if (loaded_mask.empty()) {
+      throw std::runtime_error("Cannot open robot mask image: " + resolved_path.string());
+    }
+
+    cv::compare(loaded_mask, 0, robot_allowed_mask_, cv::CMP_GT);
+    robot_mask_enabled_ = true;
+  }
+
+  bool validateRobotMaskForFrame(const cv::Mat & frame)
+  {
+    if (!robot_mask_enabled_ || robot_mask_validated_) {
+      return true;
+    }
+
+    if (robot_allowed_mask_.size() != frame.size()) {
+      RCLCPP_FATAL(
+        get_logger(),
+        "Robot mask size %dx%d does not match raw frame size %dx%d. Shutting down.",
+        robot_allowed_mask_.cols,
+        robot_allowed_mask_.rows,
+        frame.cols,
+        frame.rows);
+      image_sub_.reset();
+      rclcpp::shutdown();
+      return false;
+    }
+
+    robot_mask_validated_ = true;
+    return true;
+  }
+
+  void applyRobotMask(cv::Mat & mask) const
+  {
+    if (!robot_mask_enabled_ || mask.empty()) {
+      return;
+    }
+
+    cv::bitwise_and(mask, robot_allowed_mask_, mask);
+  }
+
   void printCurrentParameters() const
   {
     RCLCPP_INFO(
@@ -143,6 +235,8 @@ private:
       cv::bitwise_or(low_mask, high_mask, mask);
     }
 
+    applyRobotMask(mask);
+
     if (enable_morph_open_ && morph_kernel_size_ > 1) {
       const int kernel_size = std::max(1, morph_kernel_size_ | 1);
       const cv::Mat kernel = cv::getStructuringElement(
@@ -164,6 +258,10 @@ private:
         2000,
         "cv_bridge failed: %s",
         e.what());
+      return;
+    }
+
+    if (!validateRobotMaskForFrame(frame)) {
       return;
     }
 
@@ -192,6 +290,7 @@ private:
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   std::string input_topic_;
+  std::string robot_mask_path_;
   int orange_h_min_ = 5;
   int orange_h_max_ = 30;
   int orange_s_min_ = 100;
@@ -199,6 +298,9 @@ private:
   bool enable_morph_open_ = true;
   int morph_open_trackbar_ = 1;
   int morph_kernel_size_ = 3;
+  bool robot_mask_enabled_ = false;
+  bool robot_mask_validated_ = false;
+  cv::Mat robot_allowed_mask_;
 };
 
 int main(int argc, char ** argv)
