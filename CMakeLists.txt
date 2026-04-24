@@ -159,6 +159,8 @@ install(TARGETS
 
 # --- Install Python Scripts ---
 install(PROGRAMS
+  "scripts/create_robot_mask.py"
+  "scripts/test_robot_mask.py"
   "scripts/yaw_publisher.py"
   "src/camera_fixed_exposure_debug.py"
   "scripts/stm32_command_demo.py"
@@ -248,6 +250,16 @@ ament_target_dependencies(white_line_hsv_white_node
   cv_bridge
 )
 target_link_libraries(white_line_hsv_white_node
+  ${OpenCV_LIBRARIES}
+)
+
+add_executable(white_line_hsv_white_mask_node src/white_line_hsv_white_mask_node.cpp)
+ament_target_dependencies(white_line_hsv_white_mask_node
+  rclcpp
+  sensor_msgs
+  cv_bridge
+)
+target_link_libraries(white_line_hsv_white_mask_node
   ${OpenCV_LIBRARIES}
 )
 
@@ -440,6 +452,7 @@ install(TARGETS
   white_line_cluster_node
   white_line_hsv_cluster_node
   white_line_hsv_white_node
+  white_line_hsv_white_mask_node
   white_line_lab_cluster_node
   white_line_lab_morph_node
   white_line_skeleton_filter_node

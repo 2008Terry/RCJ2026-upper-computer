@@ -1,8 +1,9 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <functional>
-#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -17,9 +18,11 @@
 #include <image_transport/image_transport.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <std_msgs/msg/header.hpp>
 
 namespace {
 
@@ -55,6 +58,37 @@ void resizeWindowToFitImage(
     cv::resizeWindow(window_name, fitted_size.width, fitted_size.height);
 }
 
+std::filesystem::path resolvePath(const std::string& raw_path)
+{
+    if (raw_path.empty()) {
+        return {};
+    }
+
+    std::filesystem::path resolved_path;
+    if (raw_path.front() == '~') {
+        const char* home = std::getenv("HOME");
+        if (home == nullptr || std::string(home).empty()) {
+            throw std::runtime_error("HOME is not set; cannot resolve '~' in robot_mask_path");
+        }
+
+        if (raw_path.size() == 1) {
+            resolved_path = std::filesystem::path(home);
+        } else if (raw_path[1] == '/') {
+            resolved_path = std::filesystem::path(home) / raw_path.substr(2);
+        } else {
+            throw std::runtime_error("Only '~' and '~/' are supported in robot_mask_path");
+        }
+    } else {
+        resolved_path = std::filesystem::path(raw_path);
+    }
+
+    if (resolved_path.is_relative()) {
+        resolved_path = std::filesystem::absolute(resolved_path);
+    }
+
+    return resolved_path.lexically_normal();
+}
+
 }  // namespace
 
 class FastMapRemapNode : public rclcpp::Node
@@ -68,6 +102,8 @@ public:
         const auto outputTopic = declare_parameter<std::string>("output_topic", "/image_remapped");
         const auto inputTransport = declare_parameter<std::string>("input_transport", "raw");
         const auto interpolation = declare_parameter<std::string>("interpolation", "linear");
+        const auto robotMaskPath = declare_parameter<std::string>(
+            "robot_mask_path", "/home/rcj/Documents/calibration_images/remapped_mask.png");
         declare_parameter("enable_image_view", false);
         declare_parameter("show_input_image", true);
         declare_parameter("show_output_image", true);
@@ -78,6 +114,7 @@ public:
 
         loadFastMaps(fastMapPath);
         interpolationMode_ = parseInterpolation(interpolation);
+        loadRobotMask(robotMaskPath);
         syncImageViewState();
         enableTimingLog_ = get_parameter("enable_timing_log").as_bool();
         timingLogInterval_ =
@@ -87,6 +124,9 @@ public:
             this,
             outputTopic,
             rmw_qos_profile_sensor_data);
+        robotMaskPublisher_ = create_publisher<sensor_msgs::msg::Image>(
+            "~/robot_mask",
+            rclcpp::QoS(1).reliable().transient_local());
 
         subscription_ = image_transport::create_subscription(
             this,
@@ -107,6 +147,16 @@ public:
         RCLCPP_INFO(get_logger(), "Publishing to: %s", outputTopic.c_str());
         RCLCPP_INFO(get_logger(), "Input transport: %s", inputTransport.c_str());
         RCLCPP_INFO(get_logger(), "Interpolation: %s", interpolation.c_str());
+        if (robotMaskEnabled_) {
+            publishRobotMask();
+            RCLCPP_INFO(
+                get_logger(),
+                "Robot mask enabled from '%s'; publishing on %s/robot_mask",
+                robotMaskPath_.c_str(),
+                get_fully_qualified_name());
+        } else {
+            RCLCPP_INFO(get_logger(), "Robot mask disabled.");
+        }
         RCLCPP_INFO(get_logger(), "Image view enabled: %s", enableImageView_ ? "true" : "false");
         RCLCPP_INFO(
             get_logger(),
@@ -231,6 +281,47 @@ private:
         }
     }
 
+    void loadRobotMask(const std::string& robotMaskPath)
+    {
+        if (robotMaskPath.empty()) {
+            robotMaskEnabled_ = false;
+            robotMaskPath_.clear();
+            robotAllowedMask_.release();
+            return;
+        }
+
+        const std::filesystem::path resolved_path = resolvePath(robotMaskPath);
+        cv::Mat loaded_mask = cv::imread(resolved_path.string(), cv::IMREAD_GRAYSCALE);
+        if (loaded_mask.empty()) {
+            throw std::runtime_error(
+                "Failed to load robot mask from '" + robotMaskPath + "' (resolved path: '" +
+                resolved_path.string() + "')");
+        }
+
+        if (loaded_mask.cols != outputWidth_ || loaded_mask.rows != outputHeight_) {
+            throw std::runtime_error(
+                "Robot mask size mismatch: mask=" + std::to_string(loaded_mask.cols) + "x" +
+                std::to_string(loaded_mask.rows) + " remap_output=" +
+                std::to_string(outputWidth_) + "x" + std::to_string(outputHeight_));
+        }
+
+        cv::compare(loaded_mask, 0, robotAllowedMask_, cv::CMP_GT);
+        robotMaskEnabled_ = true;
+        robotMaskPath_ = resolved_path.string();
+    }
+
+    void publishRobotMask()
+    {
+        if (!robotMaskEnabled_ || robotMaskPublisher_ == nullptr) {
+            return;
+        }
+
+        std_msgs::msg::Header header;
+        header.stamp = now();
+        robotMaskPublisher_->publish(
+            *cv_bridge::CvImage(header, "mono8", robotAllowedMask_).toImageMsg());
+    }
+
     void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
     {
         try {
@@ -270,6 +361,9 @@ private:
 
             auto outputMsg = cv_bridge::CvImage(msg->header, msg->encoding, remappedImage_).toImageMsg();
             publisher_.publish(*outputMsg);
+            if (robotMaskEnabled_) {
+                publishRobotMask();
+            }
             showDebugImages(cvInput->image, remappedImage_);
 
             if (enableTimingLog_ &&
@@ -301,14 +395,18 @@ private:
 
     image_transport::Subscriber subscription_;
     image_transport::Publisher publisher_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr robotMaskPublisher_;
     cv::Mat fastMap1_;
     cv::Mat fastMap2_;
     cv::Mat remappedImage_;
+    cv::Mat robotAllowedMask_;
     int sourceWidth_ = 0;
     int sourceHeight_ = 0;
     int outputWidth_ = 0;
     int outputHeight_ = 0;
     int interpolationMode_ = cv::INTER_LINEAR;
+    bool robotMaskEnabled_ = false;
+    std::string robotMaskPath_;
     bool enableImageView_ = false;
     bool showInputImage_ = true;
     bool showOutputImage_ = true;

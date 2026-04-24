@@ -25,6 +25,7 @@ def generate_launch_description():
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
     lut_file = LaunchConfiguration("lut_file")
+    robot_mask_path = LaunchConfiguration("robot_mask_path")
 
     return LaunchDescription(
         [
@@ -41,6 +42,10 @@ def generate_launch_description():
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # CameraInfo topic name
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic name
             DeclareLaunchArgument("lut_file", default_value=str(default_lut)),  # LUT XML file for pixel-to-ground projection
+            DeclareLaunchArgument(
+                "robot_mask_path",
+                default_value="/home/rcj/Documents/calibration_images/mask.png",
+            ),  # Raw-space robot allow-mask image path
             DeclareLaunchArgument("orange_h_min", default_value="5"),  # Minimum orange hue threshold
             DeclareLaunchArgument("orange_h_max", default_value="30"),  # Maximum orange hue threshold
             DeclareLaunchArgument("orange_s_min", default_value="100"),  # Minimum orange saturation threshold
@@ -165,6 +170,7 @@ def generate_launch_description():
                     {
                         "input_topic": input_topic,
                         "lut_file": lut_file,
+                        "robot_mask_path": robot_mask_path,
                         "orange_h_min": ParameterValue(
                             LaunchConfiguration("orange_h_min"), value_type=int
                         ),

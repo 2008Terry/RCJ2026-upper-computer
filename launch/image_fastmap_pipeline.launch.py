@@ -42,6 +42,7 @@ def generate_launch_description():
             DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),  # Remapped output image topic
             DeclareLaunchArgument("use_latest_fastmap", default_value="true"),  # Auto-select the newest fastmap file
             DeclareLaunchArgument("fastmap_file", default_value=""),  # Fastmap XML path when auto-select is off
+            DeclareLaunchArgument("robot_mask_path", default_value="/home/rcj/Documents/calibration_images/remapped_mask.png"),  # Optional remapped-space robot mask image path
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Input transport for the remap node
             DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
             DeclareLaunchArgument("remap_enable_image_view", default_value="true"),  # Show remap debug windows
@@ -71,6 +72,7 @@ def generate_launch_description():
                 parameters=[
                     {
                         "fastmap_file": selected_fastmap_file,
+                        "robot_mask_path": LaunchConfiguration("robot_mask_path"),
                         "input_topic": LaunchConfiguration("input_topic"),
                         "output_topic": LaunchConfiguration("output_topic"),
                         "input_transport": LaunchConfiguration("input_transport"),

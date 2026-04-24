@@ -71,6 +71,7 @@ def build_nodes(context):
     input_topic = LaunchConfiguration("input_topic")
     remap_topic = LaunchConfiguration("remap_topic")
     white_mask_topic = LaunchConfiguration("white_mask_topic")
+    robot_mask_path = LaunchConfiguration("robot_mask_path")
     fastmap_file = LaunchConfiguration("fastmap_file")
     input_transport = LaunchConfiguration("input_transport")
     interpolation = LaunchConfiguration("interpolation")
@@ -110,6 +111,7 @@ def build_nodes(context):
                 parameters=[
                     {
                         "fastmap_file": str(selected_fastmap_file),  # Fastmap XML path
+                        "robot_mask_path": robot_mask_path,  # Optional remapped-space robot mask image path
                         "input_topic": input_topic,  # Remap input image topic
                         "output_topic": remap_topic,  # Remap output image topic
                         "input_transport": input_transport,  # Remap input transport
@@ -135,6 +137,7 @@ def build_nodes(context):
                 parameters=[
                     {
                         "input_topic": remap_topic,  # HSV input image topic
+                        "robot_mask_topic": "/white_line_hsv_input_remap_node/robot_mask",  # Remap-stage robot mask topic
                         "white_h_min": ParameterValue(
                             LaunchConfiguration("white_h_min"), value_type=int
                         ),  # White HSV minimum H
@@ -222,6 +225,7 @@ def generate_launch_description():
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
             DeclareLaunchArgument("remap_topic", default_value="/camera/image_remapped"),  # Remapped image topic
             DeclareLaunchArgument("white_mask_topic", default_value="/camera/white_mask"),  # White mask topic
+            DeclareLaunchArgument("robot_mask_path", default_value="/home/rcj/Documents/calibration_images/remapped_mask.png"),  # Optional remapped-space robot mask image path
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument("fastmap_file", default_value=""),  # Specific Fastmap XML path when auto-select is disabled
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
