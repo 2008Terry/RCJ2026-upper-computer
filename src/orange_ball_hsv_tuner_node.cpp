@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #if __has_include(<cv_bridge/cv_bridge.hpp>)
 #include <cv_bridge/cv_bridge.hpp>
 #elif __has_include(<cv_bridge/cv_bridge.h>)
@@ -70,6 +71,14 @@ std::filesystem::path resolvePath(const std::string & raw_path)
   return resolved_path.lexically_normal();
 }
 
+std::string packageConfigPath(const std::string & filename)
+{
+  return (std::filesystem::path(
+            ament_index_cpp::get_package_share_directory("rcj_localization")) /
+          "config" / filename)
+    .string();
+}
+
 }  // namespace
 
 class OrangeBallHsvTunerNode : public rclcpp::Node
@@ -80,7 +89,7 @@ public:
   {
     declare_parameter<std::string>("input_topic", "/camera/image_raw");
     declare_parameter<std::string>(
-      "robot_mask_path", "/home/rcj/Documents/calibration_images/mask.png");
+      "robot_mask_path", packageConfigPath("mask.png"));
     declare_parameter("orange_h_min", 5);
     declare_parameter("orange_h_max", 30);
     declare_parameter("orange_s_min", 100);

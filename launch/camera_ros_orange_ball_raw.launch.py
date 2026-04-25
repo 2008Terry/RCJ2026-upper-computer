@@ -44,7 +44,7 @@ def generate_launch_description():
             DeclareLaunchArgument("lut_file", default_value=str(default_lut)),  # LUT XML file for pixel-to-ground projection
             DeclareLaunchArgument(
                 "robot_mask_path",
-                default_value="/home/rcj/Documents/calibration_images/mask.png",
+                default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "mask.png"),
             ),  # Raw-space robot allow-mask image path
             DeclareLaunchArgument("orange_h_min", default_value="5"),  # Minimum orange hue threshold
             DeclareLaunchArgument("orange_h_max", default_value="30"),  # Maximum orange hue threshold

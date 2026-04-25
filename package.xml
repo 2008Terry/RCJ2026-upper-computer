@@ -11,6 +11,7 @@
   <buildtool_depend>rosidl_default_generators</buildtool_depend>
 
   <depend>rclpy</depend>
+  <depend>ament_index_cpp</depend>
   <depend>rclcpp</depend>
   <depend>image_transport</depend>
   <depend>message_filters</depend>

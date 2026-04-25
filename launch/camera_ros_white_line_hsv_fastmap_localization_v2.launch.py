@@ -116,7 +116,7 @@ def generate_launch_description():
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
             DeclareLaunchArgument("remap_topic", default_value="/camera/image_remapped"),  # Remapped image topic
             DeclareLaunchArgument("white_mask_topic", default_value="/camera/white_mask"),  # White mask topic
-            DeclareLaunchArgument("robot_mask_path", default_value="/home/rcj/Documents/calibration_images/remapped_mask.png"),  # Optional remapped-space robot mask image path
+            DeclareLaunchArgument("robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")),  # Optional remapped-space robot mask image path
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument("fastmap_file", default_value=""),  # Specific Fastmap XML path when auto-select is disabled
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport

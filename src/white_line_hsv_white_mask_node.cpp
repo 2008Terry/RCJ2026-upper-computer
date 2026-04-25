@@ -3,12 +3,14 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #if __has_include(<cv_bridge/cv_bridge.hpp>)
 #include <cv_bridge/cv_bridge.hpp>
 #elif __has_include(<cv_bridge/cv_bridge.h>)
@@ -33,6 +35,14 @@ constexpr char kGreenMaskWindowName[] = "HSV Green Mask";
 constexpr char kBlackMaskWindowName[] = "HSV Black Mask";
 constexpr char kNoiseMaskWindowName[] = "HSV Noise Mask";
 constexpr char kOverlayWindowName[] = "HSV White Overlay";
+
+std::string packageConfigPath(const std::string & filename)
+{
+  return (std::filesystem::path(
+            ament_index_cpp::get_package_share_directory("rcj_localization")) /
+          "config" / filename)
+    .string();
+}
 
 using SteadyClock = std::chrono::steady_clock;
 using TimePoint = SteadyClock::time_point;
@@ -222,7 +232,7 @@ public:
     declare_parameter("display_max_width", 960);
     declare_parameter("display_max_height", 720);
     declare_parameter<std::string>(
-      "robot_mask_path", "/home/rcj/Documents/calibration_images/remapped_mask.png");
+      "robot_mask_path", packageConfigPath("remapped_mask.png"));
 
     loadThresholdParameters();
     loadRuntimeParameters();

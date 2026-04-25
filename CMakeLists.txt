@@ -9,6 +9,7 @@ endif()
 
 # Find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(image_transport REQUIRED)
@@ -111,6 +112,7 @@ add_executable(fastmap_remap_node
 )
 
 ament_target_dependencies(fastmap_remap_node
+  "ament_index_cpp"
   "rclcpp"
   "sensor_msgs"
   "cv_bridge"
@@ -255,6 +257,7 @@ target_link_libraries(white_line_hsv_white_node
 
 add_executable(white_line_hsv_white_mask_node src/white_line_hsv_white_mask_node.cpp)
 ament_target_dependencies(white_line_hsv_white_mask_node
+  ament_index_cpp
   rclcpp
   sensor_msgs
   cv_bridge
@@ -420,6 +423,7 @@ target_link_libraries(black_feature_detector_node
 
 add_executable(orange_ball_detector_node src/orange_ball_detector_node.cpp)
 ament_target_dependencies(orange_ball_detector_node
+  ament_index_cpp
   rclcpp
   std_msgs
   sensor_msgs
@@ -432,6 +436,7 @@ target_link_libraries(orange_ball_detector_node
 
 add_executable(orange_ball_hsv_tuner_node src/orange_ball_hsv_tuner_node.cpp)
 ament_target_dependencies(orange_ball_hsv_tuner_node
+  ament_index_cpp
   rclcpp
   sensor_msgs
   cv_bridge
