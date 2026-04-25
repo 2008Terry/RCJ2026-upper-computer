@@ -27,7 +27,12 @@ find_package(OpenCV REQUIRED)
 include_directories(include)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/BlackFeatureDetection.msg"
+  "msg/BlackFeatureDetectionArray.msg"
   "srv/Stm32Command.srv"
+  DEPENDENCIES
+    geometry_msgs
+    std_msgs
 )
 ament_export_dependencies(rosidl_default_runtime)
 
@@ -407,13 +412,17 @@ target_link_libraries(white_line_probability_node
   ${OpenCV_LIBRARIES}
 )
 
-add_executable(black_feature_detector_node src/black_feature_detector_node.cpp)
+add_executable(black_feature_detector_node src/black_feature_detector_node_v2.cpp)
 ament_target_dependencies(black_feature_detector_node
   rclcpp
+  message_filters
+  std_msgs
   sensor_msgs
+  geometry_msgs
   cv_bridge
 )
 target_link_libraries(black_feature_detector_node
+  "${cpp_typesupport_target}"
   ${OpenCV_LIBRARIES}
 )
 
