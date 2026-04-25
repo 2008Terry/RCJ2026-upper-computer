@@ -26,6 +26,7 @@ enum class CommandKind
 {
   Distance,
   Turn,
+  Request,
 };
 
 enum class ReplyStatus
@@ -45,6 +46,9 @@ struct ParsedReply
 {
   std::string command_name;
   ReplyStatus status;
+  double dx = 0.0;
+  double dy = 0.0;
+  double dtheta = 0.0;
 };
 
 speed_t baudrateToSpeed(int baudrate)
@@ -91,7 +95,16 @@ std::uint16_t crc16CcittFalse(const std::string &data)
 
 std::string commandName(CommandKind kind)
 {
-  return kind == CommandKind::Distance ? "cmd_dis" : "cmd_turn";
+  switch (kind)
+  {
+  case CommandKind::Distance:
+    return "cmd_dis";
+  case CommandKind::Turn:
+    return "cmd_turn";
+  case CommandKind::Request:
+    return "cmd_request";
+  }
+  throw std::runtime_error("Unknown STM32 command kind.");
 }
 
 std::string formatNumber(double value)
@@ -110,7 +123,7 @@ std::string buildCommandText(const Command &command)
     stream << ' ' << formatNumber(command.primary_value)
            << ' ' << formatNumber(command.secondary_value);
   }
-  else
+  else if (command.kind == CommandKind::Turn)
   {
     stream << ' ' << formatNumber(command.primary_value);
   }
@@ -152,9 +165,22 @@ Command parseCommandSpec(const std::string &spec)
     return command;
   }
 
+  if (command_name == "cmd_request")
+  {
+    command.kind = CommandKind::Request;
+    if (tokens >> extra_token)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_request command '" + spec + "'. Expected: cmd_request");
+    }
+    command.primary_value = 0.0;
+    command.secondary_value = 0.0;
+    return command;
+  }
+
   throw std::runtime_error(
       "Unsupported STM32 command '" + command_name +
-      "'. Supported commands: cmd_dis, cmd_turn");
+      "'. Supported commands: cmd_dis, cmd_turn, cmd_request");
 }
 
 std::string buildPacket(const Command &command)
@@ -245,9 +271,34 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
 
   std::istringstream tokens(command_text);
   ParsedReply reply;
+  if (!(tokens >> reply.command_name))
+  {
+    return std::nullopt;
+  }
+
   std::string status_text;
   std::string extra_token;
-  if (!(tokens >> reply.command_name >> status_text) || (tokens >> extra_token))
+  if (reply.command_name == "cmd_request")
+  {
+    if (tokens >> reply.dx >> reply.dy >> reply.dtheta && !(tokens >> extra_token))
+    {
+      reply.status = ReplyStatus::Ok;
+      return reply;
+    }
+
+    tokens.clear();
+    tokens.str(command_text);
+    if ((tokens >> reply.command_name >> status_text) && !(tokens >> extra_token) &&
+        status_text == "eror")
+    {
+      reply.status = ReplyStatus::Eror;
+      return reply;
+    }
+
+    return std::nullopt;
+  }
+
+  if (!(tokens >> status_text) || (tokens >> extra_token))
   {
     return std::nullopt;
   }
@@ -685,13 +736,43 @@ private:
     {
       if (enable_serial_log_)
       {
-        RCLCPP_INFO(
-            get_logger(),
-            "STM32 acknowledged command '%s' with ok.",
-            parsed_reply->command_name.c_str());
+        if (active_command_->command.kind == CommandKind::Request)
+        {
+          RCLCPP_INFO(
+              get_logger(),
+              "STM32 replied to '%s' with dx=%.6f, dy=%.6f, dtheta=%.6f.",
+              parsed_reply->command_name.c_str(),
+              parsed_reply->dx,
+              parsed_reply->dy,
+              parsed_reply->dtheta);
+        }
+        else
+        {
+          RCLCPP_INFO(
+              get_logger(),
+              "STM32 acknowledged command '%s' with ok.",
+              parsed_reply->command_name.c_str());
+        }
       }
 
-      finishActiveCommand(true, "ok", "STM32 command acknowledged.");
+      if (active_command_->command.kind == CommandKind::Request)
+      {
+        std::ostringstream message;
+        message << "STM32 request data received: dx=" << formatNumber(parsed_reply->dx)
+                << ", dy=" << formatNumber(parsed_reply->dy)
+                << ", dtheta=" << formatNumber(parsed_reply->dtheta) << ".";
+        finishActiveCommand(
+            true,
+            "ok",
+            message.str(),
+            parsed_reply->dx,
+            parsed_reply->dy,
+            parsed_reply->dtheta);
+      }
+      else
+      {
+        finishActiveCommand(true, "ok", "STM32 command acknowledged.");
+      }
       return;
     }
 
@@ -708,7 +789,10 @@ private:
   void finishActiveCommand(
       bool success,
       const std::string &status,
-      const std::string &message)
+      const std::string &message,
+      double dx = 0.0,
+      double dy = 0.0,
+      double dtheta = 0.0)
   {
     if (!active_command_.has_value())
     {
@@ -718,7 +802,7 @@ private:
     const auto service = active_command_->service;
     const auto request_header = active_command_->request_header;
     const std::uint32_t attempts = active_command_->attempts;
-    sendResponse(service, request_header, success, status, message, attempts);
+    sendResponse(service, request_header, success, status, message, attempts, dx, dy, dtheta);
     active_command_.reset();
   }
 
@@ -728,13 +812,19 @@ private:
       bool success,
       const std::string &status,
       const std::string &message,
-      std::uint32_t attempts)
+      std::uint32_t attempts,
+      double dx = 0.0,
+      double dy = 0.0,
+      double dtheta = 0.0)
   {
     Stm32Command::Response response;
     response.success = success;
     response.status = status;
     response.message = message;
     response.attempts = attempts;
+    response.dx = dx;
+    response.dy = dy;
+    response.dtheta = dtheta;
     service->send_response(*request_header, response);
   }
 

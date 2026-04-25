@@ -401,7 +401,7 @@ def generate_launch_description():
                 "apply_mask", default_value="true"
             ),  # Whether to enable remap-stage robot masking
             DeclareLaunchArgument(
-                "robot_mask_path", default_value="/home/rcj/Documents/calibration_images/remapped_mask.png"
+                "robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")
             ),  # Optional remapped-space robot mask image path
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument(

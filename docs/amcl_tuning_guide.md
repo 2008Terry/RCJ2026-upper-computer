@@ -1,6 +1,12 @@
 # AMCL 调参手册（Topdown PF V2）
 
-这份手册只讨论 `topdown_pf_localization_node_v2` 和 `particle_filter_v2` 里**真实存在**的 PF 参数，不扩展到标准激光 AMCL 的参数体系。
+这份手册主要讨论 `topdown_pf_localization_node_v2` 和 `particle_filter_v2` 里**真实存在**的 PF 参数，不扩展到标准激光 AMCL 的参数体系。
+
+补充说明：
+
+- `amcl_fusion` 现在支持通过 STM32 gateway 的 `cmd_request` 获取异步里程计增量。
+- 当 `amcl_fusion` 开启 `use_stm32_gateway_odometry=true` 时，`noise_xy` / `noise_theta` 只用于“没有可用 odom 时的随机扩散 fallback”。
+- 此时成功 odom 分支使用的是 `odom_noise_*` 12 参数各向异性噪声模型，见下面新增的小节。
 
 ## 1. 调参顺序
 
@@ -70,6 +76,73 @@
   - 每轮预测时朝向随机游走标准差，单位弧度
   - 更大：允许对 yaw 的误差更宽容
   - 更小：更信任 yaw 输入
+
+对 `amcl_fusion + STM32 gateway odometry` 这条链路：
+
+- `noise_xy`
+  - 只在 service 未就绪、callback 未返回、回包失败、或本地 watchdog 超时时生效
+  - 它不再描述“成功 odom 更新时的主运动噪声”
+
+- `noise_theta`
+  - 同样只作用于 fallback 扩散分支
+  - 它不再是成功 odom 分支里的主 heading 方差
+
+### 2.3.1 Gateway Odom 各向异性噪声参数（`amcl_fusion`）
+
+`amcl_fusion` 的成功 odom 分支把 STM32 返回的全局增量先转成机体系增量：
+
+- `dx_b`
+- `dy_b`
+- `dtheta`
+
+然后按下面的方差模型采样：
+
+- `σx² = ax1*dx_b² + ax2*dy_b² + ax3*dtheta² + ax0`
+- `σy² = ay1*dx_b² + ay2*dy_b² + ay3*dtheta² + ay0`
+- `σθ² = aθ1*dx_b² + aθ2*dy_b² + aθ3*dtheta² + aθ0`
+
+参数映射如下：
+
+- `odom_noise_x_from_x` = `ax1`
+- `odom_noise_x_from_y` = `ax2`
+- `odom_noise_x_from_theta` = `ax3`
+- `odom_noise_x_bias` = `ax0`
+- `odom_noise_y_from_x` = `ay1`
+- `odom_noise_y_from_y` = `ay2`
+- `odom_noise_y_from_theta` = `ay3`
+- `odom_noise_y_bias` = `ay0`
+- `odom_noise_theta_from_x` = `aθ1`
+- `odom_noise_theta_from_y` = `aθ2`
+- `odom_noise_theta_from_theta` = `aθ3`
+- `odom_noise_theta_bias` = `aθ0`
+
+STM32 `cmd_request` 返回值的约定：
+
+- `dx`、`dy`：厘米，map 全局系
+- `dtheta`：角度，节点内部会转成弧度并归一化
+
+推荐起手值：
+
+- `odom_noise_x_from_x=0.08`
+- `odom_noise_x_from_y=0.02`
+- `odom_noise_x_from_theta=0.0025`
+- `odom_noise_x_bias=0.000064`
+- `odom_noise_y_from_x=0.02`
+- `odom_noise_y_from_y=0.16`
+- `odom_noise_y_from_theta=0.0049`
+- `odom_noise_y_bias=0.000144`
+- `odom_noise_theta_from_x=0.30`
+- `odom_noise_theta_from_y=0.60`
+- `odom_noise_theta_from_theta=0.09`
+- `odom_noise_theta_bias=0.000304617`
+
+调参直觉：
+
+- 前进时位置太乐观，增大 `odom_noise_x_from_x`
+- 侧移时明显更飘，优先增大 `odom_noise_y_from_y`
+- 原地转会把位置带乱，增大 `odom_noise_x_from_theta` / `odom_noise_y_from_theta`
+- 平移时朝向也容易歪，增大 `odom_noise_theta_from_x` / `odom_noise_theta_from_y`
+- 静止也要有少量底噪，调 `*_bias`
 
 ### 2.4 恢复参数
 
@@ -211,6 +284,18 @@ V2 支持运行时改大部分 PF 相关参数，但不是所有参数都会立�
   - `sigma_hit`
   - `noise_xy`
   - `noise_theta`
+  - `odom_noise_x_from_x`
+  - `odom_noise_x_from_y`
+  - `odom_noise_x_from_theta`
+  - `odom_noise_x_bias`
+  - `odom_noise_y_from_x`
+  - `odom_noise_y_from_y`
+  - `odom_noise_y_from_theta`
+  - `odom_noise_y_bias`
+  - `odom_noise_theta_from_x`
+  - `odom_noise_theta_from_y`
+  - `odom_noise_theta_from_theta`
+  - `odom_noise_theta_bias`
   - `alpha_fast_rate`
   - `alpha_slow_rate`
   - `random_injection_max_ratio`

@@ -15,6 +15,9 @@ def generate_launch_description():
     base_launch_file = (
         package_share / "launch" / "camera_ros_white_line_hsv_dt_ridge_fastmap.launch.py"
     )
+    stm32_gateway_launch_file = (
+        package_share / "launch" / "stm32_serial_gateway.launch.py"
+    )
     map_yaml_default = package_share / "maps" / "rcj_map.yaml"
 
     camera_index = LaunchConfiguration("camera_index")
@@ -48,6 +51,17 @@ def generate_launch_description():
         "enable_topdown_pf_localization_node_v2"
     )
     odom_topic = LaunchConfiguration("odom_topic")
+    use_stm32_gateway_odometry = LaunchConfiguration("use_stm32_gateway_odometry")
+    stm32_command_service = LaunchConfiguration("stm32_command_service")
+    stm32_request_timeout_ms = LaunchConfiguration("stm32_request_timeout_ms")
+    stm32_port = LaunchConfiguration("stm32_port")
+    stm32_baudrate = LaunchConfiguration("stm32_baudrate")
+    stm32_tick_period_ms = LaunchConfiguration("stm32_tick_period_ms")
+    stm32_resend_period_ms = LaunchConfiguration("stm32_resend_period_ms")
+    stm32_command_timeout_ms = LaunchConfiguration("stm32_command_timeout_ms")
+    stm32_max_queue_size = LaunchConfiguration("stm32_max_queue_size")
+    stm32_enable_serial_log = LaunchConfiguration("stm32_enable_serial_log")
+    stm32_enable_raw_reply_log = LaunchConfiguration("stm32_enable_raw_reply_log")
     meters_per_pixel = LaunchConfiguration("meters_per_pixel")
     forward_axis = LaunchConfiguration("forward_axis")
     left_axis = LaunchConfiguration("left_axis")
@@ -66,6 +80,18 @@ def generate_launch_description():
     distance_transform_mask_size = LaunchConfiguration("distance_transform_mask_size")
     init_field_width = LaunchConfiguration("init_field_width")
     init_field_height = LaunchConfiguration("init_field_height")
+    odom_noise_x_from_x = LaunchConfiguration("odom_noise_x_from_x")
+    odom_noise_x_from_y = LaunchConfiguration("odom_noise_x_from_y")
+    odom_noise_x_from_theta = LaunchConfiguration("odom_noise_x_from_theta")
+    odom_noise_x_bias = LaunchConfiguration("odom_noise_x_bias")
+    odom_noise_y_from_x = LaunchConfiguration("odom_noise_y_from_x")
+    odom_noise_y_from_y = LaunchConfiguration("odom_noise_y_from_y")
+    odom_noise_y_from_theta = LaunchConfiguration("odom_noise_y_from_theta")
+    odom_noise_y_bias = LaunchConfiguration("odom_noise_y_bias")
+    odom_noise_theta_from_x = LaunchConfiguration("odom_noise_theta_from_x")
+    odom_noise_theta_from_y = LaunchConfiguration("odom_noise_theta_from_y")
+    odom_noise_theta_from_theta = LaunchConfiguration("odom_noise_theta_from_theta")
+    odom_noise_theta_bias = LaunchConfiguration("odom_noise_theta_bias")
     filter_period_ms = LaunchConfiguration("filter_period_ms")
     topdown_pf_publish_processing_time = LaunchConfiguration(
         "topdown_pf_publish_processing_time"
@@ -113,7 +139,7 @@ def generate_launch_description():
                 "white_mask_topic", default_value="/camera/white_mask"
             ),  # White mask topic
             DeclareLaunchArgument(
-                "robot_mask_path", default_value="/home/rcj/Documents/calibration_images/remapped_mask.png"
+                "robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")
             ),  # Optional remapped-space robot mask image path
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument(
@@ -262,6 +288,35 @@ def generate_launch_description():
             DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Robot yaw topic
             DeclareLaunchArgument("odom_topic", default_value="/wheel_odometry"),  # Wheel odometry topic
             DeclareLaunchArgument(
+                "use_stm32_gateway_odometry", default_value="true"
+            ),  # Whether AMCL requests odometry from the STM32 gateway
+            DeclareLaunchArgument(
+                "stm32_command_service", default_value="/stm32/send_command"
+            ),  # STM32 gateway service name
+            DeclareLaunchArgument(
+                "stm32_request_timeout_ms", default_value="200"
+            ),  # Local timeout for one async STM32 odometry request
+            DeclareLaunchArgument("stm32_port", default_value="/dev/ttyUSB0"),  # STM32 serial port
+            DeclareLaunchArgument("stm32_baudrate", default_value="115200"),  # STM32 serial baudrate
+            DeclareLaunchArgument(
+                "stm32_tick_period_ms", default_value="10"
+            ),  # STM32 gateway tick period
+            DeclareLaunchArgument(
+                "stm32_resend_period_ms", default_value="20"
+            ),  # STM32 gateway resend period
+            DeclareLaunchArgument(
+                "stm32_command_timeout_ms", default_value="50"
+            ),  # STM32 gateway command timeout
+            DeclareLaunchArgument(
+                "stm32_max_queue_size", default_value="32"
+            ),  # STM32 gateway queue capacity
+            DeclareLaunchArgument(
+                "stm32_enable_serial_log", default_value="true"
+            ),  # Whether the STM32 gateway logs command summaries
+            DeclareLaunchArgument(
+                "stm32_enable_raw_reply_log", default_value="false"
+            ),  # Whether the STM32 gateway logs raw serial replies
+            DeclareLaunchArgument(
                 "yaw_enable_publish_log", default_value="false"
             ),  # Whether to log yaw publisher output
             DeclareLaunchArgument("map_topic", default_value="/map"),  # Occupancy grid topic
@@ -308,6 +363,18 @@ def generate_launch_description():
             ),  # Distance transform mask size
             DeclareLaunchArgument("init_field_width", default_value="2.0"),  # Initial particle field width
             DeclareLaunchArgument("init_field_height", default_value="3.0"),  # Initial particle field height
+            DeclareLaunchArgument("odom_noise_x_from_x", default_value="0.08"),  # Forward motion contribution to x variance
+            DeclareLaunchArgument("odom_noise_x_from_y", default_value="0.02"),  # Lateral motion contribution to x variance
+            DeclareLaunchArgument("odom_noise_x_from_theta", default_value="0.0025"),  # Rotation contribution to x variance
+            DeclareLaunchArgument("odom_noise_x_bias", default_value="0.000064"),  # Constant x variance term
+            DeclareLaunchArgument("odom_noise_y_from_x", default_value="0.02"),  # Forward motion contribution to y variance
+            DeclareLaunchArgument("odom_noise_y_from_y", default_value="0.16"),  # Lateral motion contribution to y variance
+            DeclareLaunchArgument("odom_noise_y_from_theta", default_value="0.0049"),  # Rotation contribution to y variance
+            DeclareLaunchArgument("odom_noise_y_bias", default_value="0.000144"),  # Constant y variance term
+            DeclareLaunchArgument("odom_noise_theta_from_x", default_value="0.30"),  # Forward motion contribution to heading variance
+            DeclareLaunchArgument("odom_noise_theta_from_y", default_value="0.60"),  # Lateral motion contribution to heading variance
+            DeclareLaunchArgument("odom_noise_theta_from_theta", default_value="0.09"),  # Rotation contribution to heading variance
+            DeclareLaunchArgument("odom_noise_theta_bias", default_value="0.000304617"),  # Constant heading variance term
             DeclareLaunchArgument("filter_period_ms", default_value="80"),  # PF update period in milliseconds
             DeclareLaunchArgument(
                 "topdown_pf_publish_processing_time", default_value="true"
@@ -322,6 +389,20 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "topdown_pf_timing_log_interval", default_value="10"
             ),  # PF timing log frame interval
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(str(stm32_gateway_launch_file)),
+                condition=IfCondition(use_stm32_gateway_odometry),
+                launch_arguments={
+                    "port": stm32_port,
+                    "baudrate": stm32_baudrate,
+                    "tick_period_ms": stm32_tick_period_ms,
+                    "resend_period_ms": stm32_resend_period_ms,
+                    "command_timeout_ms": stm32_command_timeout_ms,
+                    "max_queue_size": stm32_max_queue_size,
+                    "enable_serial_log": stm32_enable_serial_log,
+                    "enable_raw_reply_log": stm32_enable_raw_reply_log,
+                }.items(),
+            ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(str(base_launch_file)),
                 launch_arguments={
@@ -550,6 +631,13 @@ def generate_launch_description():
                         "map_topic": map_topic,
                         "yaw_topic": yaw_topic,
                         "odom_topic": odom_topic,
+                        "use_stm32_gateway_odometry": ParameterValue(
+                            use_stm32_gateway_odometry, value_type=bool
+                        ),
+                        "stm32_command_service": stm32_command_service,
+                        "stm32_request_timeout_ms": ParameterValue(
+                            stm32_request_timeout_ms, value_type=int
+                        ),
                         "sigma_hit": ParameterValue(
                             sigma_hit, value_type=float
                         ),
@@ -582,6 +670,42 @@ def generate_launch_description():
                         ),
                         "init_field_height": ParameterValue(
                             init_field_height, value_type=float
+                        ),
+                        "odom_noise_x_from_x": ParameterValue(
+                            odom_noise_x_from_x, value_type=float
+                        ),
+                        "odom_noise_x_from_y": ParameterValue(
+                            odom_noise_x_from_y, value_type=float
+                        ),
+                        "odom_noise_x_from_theta": ParameterValue(
+                            odom_noise_x_from_theta, value_type=float
+                        ),
+                        "odom_noise_x_bias": ParameterValue(
+                            odom_noise_x_bias, value_type=float
+                        ),
+                        "odom_noise_y_from_x": ParameterValue(
+                            odom_noise_y_from_x, value_type=float
+                        ),
+                        "odom_noise_y_from_y": ParameterValue(
+                            odom_noise_y_from_y, value_type=float
+                        ),
+                        "odom_noise_y_from_theta": ParameterValue(
+                            odom_noise_y_from_theta, value_type=float
+                        ),
+                        "odom_noise_y_bias": ParameterValue(
+                            odom_noise_y_bias, value_type=float
+                        ),
+                        "odom_noise_theta_from_x": ParameterValue(
+                            odom_noise_theta_from_x, value_type=float
+                        ),
+                        "odom_noise_theta_from_y": ParameterValue(
+                            odom_noise_theta_from_y, value_type=float
+                        ),
+                        "odom_noise_theta_from_theta": ParameterValue(
+                            odom_noise_theta_from_theta, value_type=float
+                        ),
+                        "odom_noise_theta_bias": ParameterValue(
+                            odom_noise_theta_bias, value_type=float
                         ),
                         "filter_period_ms": ParameterValue(
                             filter_period_ms, value_type=int

@@ -1,3 +1,6 @@
+from pathlib import Path
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -36,7 +39,7 @@ def generate_launch_description():
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),
             DeclareLaunchArgument(
                 "robot_mask_path",
-                default_value="/home/rcj/Documents/calibration_images/mask.png",
+                default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "mask.png"),
             ),
             DeclareLaunchArgument("orange_h_min", default_value="5"),
             DeclareLaunchArgument("orange_h_max", default_value="30"),

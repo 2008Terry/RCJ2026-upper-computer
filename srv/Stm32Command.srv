@@ -4,3 +4,6 @@ bool success
 string status
 string message
 uint32 attempts
+float64 dx
+float64 dy
+float64 dtheta

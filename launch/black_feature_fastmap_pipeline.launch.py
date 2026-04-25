@@ -420,7 +420,11 @@ def generate_launch_description():
             # Path to the remapped robot mask image used by fastmap_remap_node.
             DeclareLaunchArgument(
                 "robot_mask_path",
-                default_value="/home/rcj/Documents/calibration_images/remapped_mask.png",
+                default_value=str(
+                    Path(get_package_share_directory("rcj_localization"))
+                    / "config"
+                    / "remapped_mask.png"
+                ),
             ),
             # Image transport used by fastmap_remap_node for the input topic.
             DeclareLaunchArgument("input_transport", default_value="raw"),
