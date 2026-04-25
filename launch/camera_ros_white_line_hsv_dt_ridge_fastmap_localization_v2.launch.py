@@ -5,7 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -39,11 +39,11 @@ def generate_launch_description():
     map_yaml_file = LaunchConfiguration("map_yaml_file")
     use_fake_yaw = LaunchConfiguration("use_fake_yaw")
     yaw_topic = LaunchConfiguration("yaw_topic")
+    fake_yaw_degrees = LaunchConfiguration("fake_yaw_degrees")
     map_topic = LaunchConfiguration("map_topic")
     enable_localization = LaunchConfiguration("enable_localization")
     enable_map_server = LaunchConfiguration("enable_map_server")
     enable_lifecycle_manager = LaunchConfiguration("enable_lifecycle_manager")
-    enable_yaw_publisher = LaunchConfiguration("enable_yaw_publisher")
     enable_topdown_pf_localization_node_v2 = LaunchConfiguration(
         "enable_topdown_pf_localization_node_v2"
     )
@@ -75,18 +75,6 @@ def generate_launch_description():
     topdown_pf_enable_timing_log = LaunchConfiguration("topdown_pf_enable_timing_log")
     topdown_pf_timing_log_interval = LaunchConfiguration(
         "topdown_pf_timing_log_interval"
-    )
-
-    fake_yaw_condition = IfCondition(
-        PythonExpression(
-            [
-                "'",
-                enable_yaw_publisher,
-                "' == 'true' and '",
-                use_fake_yaw,
-                "' == 'true'",
-            ]
-        )
     )
 
     return LaunchDescription(
@@ -260,8 +248,11 @@ def generate_launch_description():
             DeclareLaunchArgument("use_fake_yaw", default_value="false"),  # Whether to use synthetic yaw
             DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Robot yaw topic
             DeclareLaunchArgument(
+                "fake_yaw_degrees", default_value="0.0"
+            ),  # Fixed yaw angle used when use_fake_yaw is true
+            DeclareLaunchArgument(
                 "yaw_enable_publish_log", default_value="false"
-            ),  # Whether to log yaw publisher output
+            ),  # Deprecated: fake yaw is handled inside the localization node
             DeclareLaunchArgument("map_topic", default_value="/map"),  # Occupancy grid topic
             DeclareLaunchArgument(
                 "enable_localization", default_value="true"
@@ -274,7 +265,7 @@ def generate_launch_description():
             ),  # Whether to start Nav2 lifecycle manager
             DeclareLaunchArgument(
                 "enable_yaw_publisher", default_value=enable_localization
-            ),  # Whether to start yaw publisher
+            ),  # Deprecated: fake yaw is handled inside the localization node
             DeclareLaunchArgument(
                 "enable_topdown_pf_localization_node_v2",
                 default_value="true",
@@ -541,22 +532,6 @@ def generate_launch_description():
             ),
             Node(
                 package="rcj_localization",
-                executable="yaw_publisher.py",
-                name="yaw_publisher",
-                output="screen",
-                condition=fake_yaw_condition,
-                parameters=[
-                    {
-                        "enable_publish_log": ParameterValue(
-                            LaunchConfiguration("yaw_enable_publish_log"),
-                            value_type=bool,
-                        ),  # Whether to log yaw publisher output
-                    }
-                ],
-                remappings=[("/robot/yaw", yaw_topic)],
-            ),
-            Node(
-                package="rcj_localization",
                 executable="topdown_pf_localization_node_v2",
                 name="topdown_pf_localization_node_v2",
                 output="screen",
@@ -584,6 +559,12 @@ def generate_launch_description():
                         ),  # Number of particles
                         "map_topic": map_topic,  # Occupancy grid topic
                         "yaw_topic": yaw_topic,  # Robot yaw topic
+                        "use_fake_yaw": ParameterValue(
+                            use_fake_yaw, value_type=bool
+                        ),  # Whether to use fixed yaw instead of yaw topic
+                        "fake_yaw_degrees": ParameterValue(
+                            fake_yaw_degrees, value_type=float
+                        ),  # Fixed yaw angle when use_fake_yaw is true
                         "sigma_hit": ParameterValue(
                             sigma_hit, value_type=float
                         ),  # Likelihood-field sigma

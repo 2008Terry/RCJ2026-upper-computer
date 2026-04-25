@@ -115,10 +115,25 @@ public:
         if (enable_localization_) {
             pf_ = std::make_unique<rcj_loc::ParticleFilterV2>(filter_config_);
 
-            yaw_sub_ = this->create_subscription<std_msgs::msg::Float32>(
-                yaw_topic_,
-                10,
-                std::bind(&TopdownPfLocalizationNodeV2::yawCallback, this, std::placeholders::_1));
+            if (use_fake_yaw_) {
+                current_yaw_rad_ = fake_yaw_degrees_ * (M_PI / 180.0);
+                fake_yaw_pub_ =
+                    this->create_publisher<std_msgs::msg::Float32>(yaw_topic_, 10);
+                fake_yaw_timer_ = this->create_wall_timer(
+                    std::chrono::milliseconds(50),
+                    std::bind(&TopdownPfLocalizationNodeV2::publishFakeYaw, this));
+                publishFakeYaw();
+                RCLCPP_INFO(
+                    this->get_logger(),
+                    "Using fixed fake yaw: %.3f degrees on '%s'.",
+                    fake_yaw_degrees_,
+                    yaw_topic_.c_str());
+            } else {
+                yaw_sub_ = this->create_subscription<std_msgs::msg::Float32>(
+                    yaw_topic_,
+                    10,
+                    std::bind(&TopdownPfLocalizationNodeV2::yawCallback, this, std::placeholders::_1));
+            }
             map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
                 map_topic_,
                 rclcpp::QoS(rclcpp::KeepLast(1)).transient_local(),
@@ -177,6 +192,8 @@ private:
         this->declare_parameter("num_particles", 1000);
         this->declare_parameter<std::string>("map_topic", "/map");
         this->declare_parameter<std::string>("yaw_topic", "/robot/yaw");
+        this->declare_parameter("use_fake_yaw", false);
+        this->declare_parameter("fake_yaw_degrees", 0.0);
 
         this->declare_parameter("sigma_hit", 0.10);
         this->declare_parameter("noise_xy", 0.05);
@@ -207,6 +224,12 @@ private:
         debug_pointcloud_topic_ = this->get_parameter("debug_pointcloud_topic").as_string();
         map_topic_ = this->get_parameter("map_topic").as_string();
         yaw_topic_ = this->get_parameter("yaw_topic").as_string();
+        use_fake_yaw_ = this->get_parameter("use_fake_yaw").as_bool();
+        fake_yaw_degrees_ = this->get_parameter("fake_yaw_degrees").as_double();
+        if (!std::isfinite(fake_yaw_degrees_)) {
+            throw std::runtime_error(
+                "Parameter 'fake_yaw_degrees' must be a finite number.");
+        }
 
         filter_config_.num_particles =
             static_cast<int>(this->get_parameter("num_particles").as_int());
@@ -398,6 +421,7 @@ private:
                 name == "mask_topic" || name == "enable_localization" ||
                 name == "publish_debug_pointcloud" || name == "debug_pointcloud_topic" ||
                 name == "map_topic" || name == "yaw_topic" ||
+                name == "use_fake_yaw" || name == "fake_yaw_degrees" ||
                 name == "publish_processing_time" || name == "processing_time_topic") {
                 result.successful = false;
                 result.reason = "Parameter '" + name + "' requires restarting the node.";
@@ -468,6 +492,12 @@ private:
 
     void yawCallback(const std_msgs::msg::Float32::SharedPtr msg) {
         current_yaw_rad_ = static_cast<double>(msg->data) * (M_PI / 180.0);
+    }
+
+    void publishFakeYaw() {
+        std_msgs::msg::Float32 msg;
+        msg.data = static_cast<float>(fake_yaw_degrees_);
+        fake_yaw_pub_->publish(msg);
     }
 
     void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
@@ -667,12 +697,14 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr mask_sub_;
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr yaw_sub_;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
+    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr fake_yaw_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr debug_pointcloud_pub_;
     rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr processing_time_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr particle_pub_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::TimerBase::SharedPtr fake_yaw_timer_;
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
 
     std::mutex obs_mutex_;
@@ -691,6 +723,8 @@ private:
     std::string debug_pointcloud_topic_;
     std::string map_topic_;
     std::string yaw_topic_;
+    bool use_fake_yaw_ = false;
+    double fake_yaw_degrees_ = 0.0;
     double current_yaw_rad_ = 0.0;
     bool map_received_ = false;
     int filter_period_ms_ = 100;

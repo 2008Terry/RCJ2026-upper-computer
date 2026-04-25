@@ -145,9 +145,24 @@ public:
     if (enable_localization_) {
       pf_ = std::make_unique<rcj_loc::ParticleFilterAmclFusion>(filter_config_);
 
-      yaw_sub_ = this->create_subscription<std_msgs::msg::Float32>(
-          yaw_topic_, 10,
-          std::bind(&AmclFusionNode::yawCallback, this, std::placeholders::_1));
+      if (use_fake_yaw_) {
+        current_yaw_rad_ = normalizeAngle(degreesToRadians(fake_yaw_degrees_));
+        yaw_initialized_ = true;
+        fake_yaw_pub_ =
+            this->create_publisher<std_msgs::msg::Float32>(yaw_topic_, 10);
+        fake_yaw_timer_ = this->create_wall_timer(
+            std::chrono::milliseconds(50),
+            std::bind(&AmclFusionNode::publishFakeYaw, this));
+        publishFakeYaw();
+        RCLCPP_INFO(this->get_logger(),
+                    "Using fixed fake yaw: %.3f degrees on '%s'.",
+                    fake_yaw_degrees_, yaw_topic_.c_str());
+      } else {
+        yaw_sub_ = this->create_subscription<std_msgs::msg::Float32>(
+            yaw_topic_, 10,
+            std::bind(&AmclFusionNode::yawCallback, this,
+                      std::placeholders::_1));
+      }
       map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
           map_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).transient_local(),
           std::bind(&AmclFusionNode::mapCallback, this, std::placeholders::_1));
@@ -177,6 +192,7 @@ public:
     RCLCPP_INFO(
         this->get_logger(),
         "amcl_fusion started. mask_topic='%s', yaw_topic='%s', "
+        "use_fake_yaw=%s, fake_yaw_degrees=%.3f, "
         "odom_topic='%s', "
         "use_stm32_gateway_odometry=%s, stm32_command_service='%s', "
         "stm32_request_timeout_ms=%d, meters_per_pixel=%.6f, "
@@ -185,7 +201,9 @@ public:
         "noise_xy=%.3f, noise_theta=%.3f, filter_period_ms=%d, "
         "publish_processing_time=%s, processing_time_topic='%s', "
         "enable_timing_log=%s, timing_log_interval=%d",
-        mask_topic_.c_str(), yaw_topic_.c_str(), odom_topic_.c_str(),
+        mask_topic_.c_str(), yaw_topic_.c_str(),
+        use_fake_yaw_ ? "true" : "false", fake_yaw_degrees_,
+        odom_topic_.c_str(),
         use_stm32_gateway_odometry_ ? "true" : "false",
         stm32_command_service_.c_str(), stm32_request_timeout_ms_,
         meters_per_pixel_, forward_axis_name_.c_str(), left_axis_name_.c_str(),
@@ -222,6 +240,8 @@ private:
     this->declare_parameter("num_particles", 1000);
     this->declare_parameter<std::string>("map_topic", "/map");
     this->declare_parameter<std::string>("yaw_topic", "/robot/yaw");
+    this->declare_parameter("use_fake_yaw", false);
+    this->declare_parameter("fake_yaw_degrees", 0.0);
     this->declare_parameter<std::string>("odom_topic", "/wheel_odometry");
     this->declare_parameter("use_stm32_gateway_odometry", false);
     this->declare_parameter<std::string>("stm32_command_service",
@@ -273,6 +293,12 @@ private:
         this->get_parameter("debug_pointcloud_topic").as_string();
     map_topic_ = this->get_parameter("map_topic").as_string();
     yaw_topic_ = this->get_parameter("yaw_topic").as_string();
+    use_fake_yaw_ = this->get_parameter("use_fake_yaw").as_bool();
+    fake_yaw_degrees_ = this->get_parameter("fake_yaw_degrees").as_double();
+    if (!std::isfinite(fake_yaw_degrees_)) {
+      throw std::runtime_error(
+          "Parameter 'fake_yaw_degrees' must be a finite number.");
+    }
     odom_topic_ = this->get_parameter("odom_topic").as_string();
     use_stm32_gateway_odometry_ =
         this->get_parameter("use_stm32_gateway_odometry").as_bool();
@@ -549,7 +575,8 @@ private:
       } else if (name == "mask_topic" || name == "enable_localization" ||
                  name == "publish_debug_pointcloud" ||
                  name == "debug_pointcloud_topic" || name == "map_topic" ||
-                 name == "yaw_topic" || name == "odom_topic" ||
+                 name == "yaw_topic" || name == "use_fake_yaw" ||
+                 name == "fake_yaw_degrees" || name == "odom_topic" ||
                  name == "use_stm32_gateway_odometry" ||
                  name == "stm32_command_service" ||
                  name == "publish_processing_time" ||
@@ -621,6 +648,12 @@ private:
     current_yaw_rad_ =
         normalizeAngle(degreesToRadians(static_cast<double>(msg->data)));
     yaw_initialized_ = true;
+  }
+
+  void publishFakeYaw() {
+    std_msgs::msg::Float32 msg;
+    msg.data = static_cast<float>(fake_yaw_degrees_);
+    fake_yaw_pub_->publish(msg);
   }
 
   void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
@@ -1053,6 +1086,7 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
       odom_sub_;
   rclcpp::Client<Stm32Command>::SharedPtr stm32_command_client_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr fake_yaw_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
       debug_pointcloud_pub_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr processing_time_pub_;
@@ -1061,6 +1095,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr particle_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::TimerBase::SharedPtr fake_yaw_timer_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
       parameter_callback_handle_;
 
@@ -1082,6 +1117,8 @@ private:
   std::string debug_pointcloud_topic_;
   std::string map_topic_;
   std::string yaw_topic_;
+  bool use_fake_yaw_ = false;
+  double fake_yaw_degrees_ = 0.0;
   std::string odom_topic_;
   bool use_stm32_gateway_odometry_ = false;
   std::string stm32_command_service_;

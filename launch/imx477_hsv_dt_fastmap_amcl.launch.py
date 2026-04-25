@@ -5,7 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -42,11 +42,11 @@ def generate_launch_description():
     map_yaml_file = LaunchConfiguration("map_yaml_file")
     use_fake_yaw = LaunchConfiguration("use_fake_yaw")
     yaw_topic = LaunchConfiguration("yaw_topic")
+    fake_yaw_degrees = LaunchConfiguration("fake_yaw_degrees")
     map_topic = LaunchConfiguration("map_topic")
     enable_localization = LaunchConfiguration("enable_localization")
     enable_map_server = LaunchConfiguration("enable_map_server")
     enable_lifecycle_manager = LaunchConfiguration("enable_lifecycle_manager")
-    enable_yaw_publisher = LaunchConfiguration("enable_yaw_publisher")
     enable_topdown_pf_localization_node_v2 = LaunchConfiguration(
         "enable_topdown_pf_localization_node_v2"
     )
@@ -104,18 +104,6 @@ def generate_launch_description():
         "topdown_pf_timing_log_interval"
     )
 
-    fake_yaw_condition = IfCondition(
-        PythonExpression(
-            [
-                "'",
-                enable_yaw_publisher,
-                "' == 'true' and '",
-                use_fake_yaw,
-                "' == 'true'",
-            ]
-        )
-    )
-
     return LaunchDescription(
         [
             DeclareLaunchArgument("camera_index", default_value="0"),  # Camera index
@@ -151,7 +139,7 @@ def generate_launch_description():
                 "remap_enable_image_view", default_value="false"
             ),  # Whether to show remap windows
             DeclareLaunchArgument(
-                "remap_enable_timing_log", default_value="true"
+                "remap_enable_timing_log", default_value="false"
             ),  # Whether to log remap timing
             DeclareLaunchArgument(
                 "remap_timing_log_interval", default_value="30"
@@ -166,16 +154,16 @@ def generate_launch_description():
             DeclareLaunchArgument("green_s_min", default_value="140"),  # Green HSV minimum S
             DeclareLaunchArgument("green_v_min", default_value="80"),  # Green HSV minimum V
             DeclareLaunchArgument(
-                "hsv_enable_timing_log", default_value="true"
+                "hsv_enable_timing_log", default_value="false"
             ),  # Whether to log HSV timing
             DeclareLaunchArgument(
                 "hsv_timing_log_interval", default_value="15"
             ),  # HSV timing log frame interval
             DeclareLaunchArgument(
-                "hsv_enable_image_view", default_value="true"
+                "hsv_enable_image_view", default_value="false"
             ),  # Master switch for HSV debug windows; false means no window creation or GUI processing
             DeclareLaunchArgument(
-                "hsv_enable_controls_window", default_value="true"
+                "hsv_enable_controls_window", default_value="false"
             ),  # Whether to show HSV slider controls window
             DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Show the HSV input image window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Show the white-priority mask window when hsv_enable_image_view is true
@@ -242,7 +230,7 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="true"
+                "ridge_enable_image_view", default_value="false"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
             DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
@@ -286,6 +274,9 @@ def generate_launch_description():
             ),  # Nav2 map YAML path
             DeclareLaunchArgument("use_fake_yaw", default_value="false"),  # Whether to use synthetic yaw
             DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Robot yaw topic
+            DeclareLaunchArgument(
+                "fake_yaw_degrees", default_value="0.0"
+            ),  # Fixed yaw angle used when use_fake_yaw is true
             DeclareLaunchArgument("odom_topic", default_value="/wheel_odometry"),  # Wheel odometry topic
             DeclareLaunchArgument(
                 "use_stm32_gateway_odometry", default_value="true"
@@ -318,7 +309,7 @@ def generate_launch_description():
             ),  # Whether the STM32 gateway logs raw serial replies
             DeclareLaunchArgument(
                 "yaw_enable_publish_log", default_value="false"
-            ),  # Whether to log yaw publisher output
+            ),  # Deprecated: fake yaw is handled inside the localization node
             DeclareLaunchArgument("map_topic", default_value="/map"),  # Occupancy grid topic
             DeclareLaunchArgument(
                 "enable_localization", default_value="true"
@@ -331,7 +322,7 @@ def generate_launch_description():
             ),  # Whether to start Nav2 lifecycle manager
             DeclareLaunchArgument(
                 "enable_yaw_publisher", default_value=enable_localization
-            ),  # Whether to start yaw publisher
+            ),  # Deprecated: fake yaw is handled inside the localization node
             DeclareLaunchArgument(
                 "enable_topdown_pf_localization_node_v2",
                 default_value="true",
@@ -384,7 +375,7 @@ def generate_launch_description():
                 default_value="~/processing_time_ms",
             ),  # PF processing time topic
             DeclareLaunchArgument(
-                "topdown_pf_enable_timing_log", default_value="true"
+                "topdown_pf_enable_timing_log", default_value="false"
             ),  # Whether to log PF timing
             DeclareLaunchArgument(
                 "topdown_pf_timing_log_interval", default_value="10"
@@ -630,6 +621,12 @@ def generate_launch_description():
                         ),
                         "map_topic": map_topic,
                         "yaw_topic": yaw_topic,
+                        "use_fake_yaw": ParameterValue(
+                            use_fake_yaw, value_type=bool
+                        ),
+                        "fake_yaw_degrees": ParameterValue(
+                            fake_yaw_degrees, value_type=float
+                        ),
                         "odom_topic": odom_topic,
                         "use_stm32_gateway_odometry": ParameterValue(
                             use_stm32_gateway_odometry, value_type=bool
