@@ -392,6 +392,7 @@ ament_target_dependencies(amcl_fusion
 )
 target_link_libraries(amcl_fusion
   ${OpenCV_LIBRARIES}
+  "${cpp_typesupport_target}"
   OpenMP::OpenMP_CXX
 )
 
