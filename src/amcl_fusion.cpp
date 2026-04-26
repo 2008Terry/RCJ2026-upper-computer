@@ -195,7 +195,8 @@ public:
         "use_fake_yaw=%s, fake_yaw_degrees=%.3f, "
         "odom_topic='%s', "
         "use_stm32_gateway_odometry=%s, stm32_command_service='%s', "
-        "stm32_request_timeout_ms=%d, meters_per_pixel=%.6f, "
+        "stm32_request_timeout_ms=%d, stm32_enable_odometry_log=%s, "
+        "meters_per_pixel=%.6f, "
         "forward_axis='%s', "
         "left_axis='%s', max_points=%d, num_particles=%d, sigma_hit=%.3f, "
         "noise_xy=%.3f, noise_theta=%.3f, filter_period_ms=%d, "
@@ -206,6 +207,7 @@ public:
         odom_topic_.c_str(),
         use_stm32_gateway_odometry_ ? "true" : "false",
         stm32_command_service_.c_str(), stm32_request_timeout_ms_,
+        stm32_enable_odometry_log_ ? "true" : "false",
         meters_per_pixel_, forward_axis_name_.c_str(), left_axis_name_.c_str(),
         max_points_, filter_config_.num_particles, filter_config_.sigma_hit,
         filter_config_.noise_xy, filter_config_.noise_theta, filter_period_ms_,
@@ -247,6 +249,7 @@ private:
     this->declare_parameter<std::string>("stm32_command_service",
                                          "/stm32/send_command");
     this->declare_parameter("stm32_request_timeout_ms", 200);
+    this->declare_parameter("stm32_enable_odometry_log", false);
 
     this->declare_parameter("sigma_hit", 0.10);
     this->declare_parameter("noise_xy", 0.05);
@@ -306,6 +309,8 @@ private:
         this->get_parameter("stm32_command_service").as_string();
     stm32_request_timeout_ms_ = static_cast<int>(
         this->get_parameter("stm32_request_timeout_ms").as_int());
+    stm32_enable_odometry_log_ =
+        this->get_parameter("stm32_enable_odometry_log").as_bool();
     if (use_stm32_gateway_odometry_ && stm32_command_service_.empty()) {
       throw std::runtime_error(
           "Parameter 'stm32_command_service' must not be empty when "
@@ -485,6 +490,7 @@ private:
     rcj_loc::ParticleFilterAmclFusionConfig candidate_filter_config =
         filter_config_;
     int candidate_stm32_request_timeout_ms = stm32_request_timeout_ms_;
+    bool candidate_stm32_enable_odometry_log = stm32_enable_odometry_log_;
     int candidate_filter_period_ms = filter_period_ms_;
     bool candidate_enable_timing_log = enable_timing_log_;
     int candidate_timing_log_interval = timing_log_interval_;
@@ -565,6 +571,8 @@ private:
       } else if (name == "stm32_request_timeout_ms") {
         candidate_stm32_request_timeout_ms =
             static_cast<int>(parameter.as_int());
+      } else if (name == "stm32_enable_odometry_log") {
+        candidate_stm32_enable_odometry_log = parameter.as_bool();
       } else if (name == "filter_period_ms") {
         candidate_filter_period_ms = static_cast<int>(parameter.as_int());
         recreate_timer = true;
@@ -607,6 +615,7 @@ private:
     max_points_ = candidate_max_points;
     filter_config_ = candidate_filter_config;
     stm32_request_timeout_ms_ = candidate_stm32_request_timeout_ms;
+    stm32_enable_odometry_log_ = candidate_stm32_enable_odometry_log;
     filter_period_ms_ = candidate_filter_period_ms;
     enable_timing_log_ = candidate_enable_timing_log;
     timing_log_interval_ = candidate_timing_log_interval;
@@ -950,6 +959,17 @@ private:
       const std::optional<GatewayOdomResult> gateway_result =
           consumePendingGatewayResult();
       if (gateway_result.has_value()) {
+        if (stm32_enable_odometry_log_) {
+          RCLCPP_INFO(
+              this->get_logger(),
+              "STM32 odometry response %" PRIu64
+              ": success=%s, status='%s', dx=%.6f cm, dy=%.6f cm, "
+              "dtheta=%.6f deg.",
+              gateway_result->request_id,
+              gateway_result->success ? "true" : "false",
+              gateway_result->status.c_str(), gateway_result->dx_cm,
+              gateway_result->dy_cm, gateway_result->dtheta_deg);
+        }
         if (gateway_result->success && gateway_result->status == "ok" &&
             yaw_initialized_) {
           motion_prediction_applied =
@@ -1123,6 +1143,7 @@ private:
   bool use_stm32_gateway_odometry_ = false;
   std::string stm32_command_service_;
   int stm32_request_timeout_ms_ = 200;
+  bool stm32_enable_odometry_log_ = false;
   double current_yaw_rad_ = 0.0;
   bool yaw_initialized_ = false;
   double odom_x_ = 0.0;

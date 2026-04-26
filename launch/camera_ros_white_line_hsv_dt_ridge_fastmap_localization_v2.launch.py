@@ -237,7 +237,7 @@ def generate_launch_description():
             ),  # Whether to show final white mask
             DeclareLaunchArgument("ridge_show_debug_image", default_value="true"),  # Whether to show composite debug image
             DeclareLaunchArgument(
-                "ridge_enable_timing_debug", default_value="true"
+                "ridge_enable_timing_log", default_value="true"
             ),  # Whether to log ridge timing summary
             DeclareLaunchArgument(
                 "ridge_timing_summary_interval", default_value="10"
@@ -501,8 +501,8 @@ def generate_launch_description():
                     "ridge_show_debug_image": LaunchConfiguration(
                         "ridge_show_debug_image"
                     ),
-                    "ridge_enable_timing_debug": LaunchConfiguration(
-                        "ridge_enable_timing_debug"
+                    "ridge_enable_timing_log": LaunchConfiguration(
+                        "ridge_enable_timing_log"
                     ),
                     "ridge_timing_summary_interval": LaunchConfiguration(
                         "ridge_timing_summary_interval"

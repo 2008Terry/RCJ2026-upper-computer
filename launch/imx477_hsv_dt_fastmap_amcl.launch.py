@@ -54,6 +54,7 @@ def generate_launch_description():
     use_stm32_gateway_odometry = LaunchConfiguration("use_stm32_gateway_odometry")
     stm32_command_service = LaunchConfiguration("stm32_command_service")
     stm32_request_timeout_ms = LaunchConfiguration("stm32_request_timeout_ms")
+    stm32_enable_odometry_log = LaunchConfiguration("stm32_enable_odometry_log")
     stm32_port = LaunchConfiguration("stm32_port")
     stm32_baudrate = LaunchConfiguration("stm32_baudrate")
     stm32_tick_period_ms = LaunchConfiguration("stm32_tick_period_ms")
@@ -264,7 +265,7 @@ def generate_launch_description():
             ),  # Whether to show final white mask
             DeclareLaunchArgument("ridge_show_debug_image", default_value="true"),  # Whether to show composite debug image
             DeclareLaunchArgument(
-                "ridge_enable_timing_debug", default_value="true"
+                "ridge_enable_timing_log", default_value="false"
             ),  # Whether to log ridge timing summary
             DeclareLaunchArgument(
                 "ridge_timing_summary_interval", default_value="10"
@@ -287,6 +288,9 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "stm32_request_timeout_ms", default_value="200"
             ),  # Local timeout for one async STM32 odometry request
+            DeclareLaunchArgument(
+                "stm32_enable_odometry_log", default_value="false"
+            ),  # Whether AMCL logs each STM32 odometry dx/dy/dtheta response
             DeclareLaunchArgument("stm32_port", default_value="/dev/ttyUSB0"),  # STM32 serial port
             DeclareLaunchArgument("stm32_baudrate", default_value="115200"),  # STM32 serial baudrate
             DeclareLaunchArgument(
@@ -584,13 +588,34 @@ def generate_launch_description():
                     "ridge_show_debug_image": LaunchConfiguration(
                         "ridge_show_debug_image"
                     ),
-                    "ridge_enable_timing_debug": LaunchConfiguration(
-                        "ridge_enable_timing_debug"
+                    "ridge_enable_timing_log": LaunchConfiguration(
+                        "ridge_enable_timing_log"
                     ),
                     "ridge_timing_summary_interval": LaunchConfiguration(
                         "ridge_timing_summary_interval"
                     ),
                 }.items(),
+            ),
+            Node(
+                package="nav2_map_server",
+                executable="map_server",
+                name="map_server",
+                output="screen",
+                condition=IfCondition(enable_map_server),
+                parameters=[{"yaml_filename": map_yaml_file}],
+            ),
+            Node(
+                package="nav2_lifecycle_manager",
+                executable="lifecycle_manager",
+                name="lifecycle_manager_localization",
+                output="screen",
+                condition=IfCondition(enable_lifecycle_manager),
+                parameters=[
+                    {
+                        "autostart": True,
+                        "node_names": ["map_server"],
+                    }
+                ],
             ),
             Node(
                 package="rcj_localization",
@@ -634,6 +659,9 @@ def generate_launch_description():
                         "stm32_command_service": stm32_command_service,
                         "stm32_request_timeout_ms": ParameterValue(
                             stm32_request_timeout_ms, value_type=int
+                        ),
+                        "stm32_enable_odometry_log": ParameterValue(
+                            stm32_enable_odometry_log, value_type=bool
                         ),
                         "sigma_hit": ParameterValue(
                             sigma_hit, value_type=float

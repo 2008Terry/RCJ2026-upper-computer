@@ -348,7 +348,7 @@ def build_nodes(context):
                         LaunchConfiguration("ridge_show_debug_image"), value_type=bool
                     ),  # Whether to show composite debug image
                     "enable_timing_debug": ParameterValue(
-                        LaunchConfiguration("ridge_enable_timing_debug"),
+                        LaunchConfiguration("ridge_enable_timing_log"),
                         value_type=bool,
                     ),  # Whether to log ridge timing summary
                     "timing_summary_interval": ParameterValue(
@@ -525,7 +525,7 @@ def generate_launch_description():
             ),  # Whether to show final white mask
             DeclareLaunchArgument("ridge_show_debug_image", default_value="true"),  # Whether to show composite debug image
             DeclareLaunchArgument(
-                "ridge_enable_timing_debug", default_value="true"
+                "ridge_enable_timing_log", default_value="true"
             ),  # Whether to log ridge timing summary
             DeclareLaunchArgument(
                 "ridge_timing_summary_interval", default_value="10"
