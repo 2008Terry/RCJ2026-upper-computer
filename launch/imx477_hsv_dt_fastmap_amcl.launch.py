@@ -55,6 +55,17 @@ def generate_launch_description():
     stm32_command_service = LaunchConfiguration("stm32_command_service")
     stm32_request_timeout_ms = LaunchConfiguration("stm32_request_timeout_ms")
     stm32_enable_odometry_log = LaunchConfiguration("stm32_enable_odometry_log")
+    enable_global_search = LaunchConfiguration("enable_global_search")
+    global_search_random_ratio = LaunchConfiguration("global_search_random_ratio")
+    global_search_noise_xy = LaunchConfiguration("global_search_noise_xy")
+    global_search_noise_theta = LaunchConfiguration("global_search_noise_theta")
+    localized_xy_std_threshold = LaunchConfiguration("localized_xy_std_threshold")
+    localized_theta_std_threshold = LaunchConfiguration(
+        "localized_theta_std_threshold"
+    )
+    localized_min_updates = LaunchConfiguration("localized_min_updates")
+    lost_alpha_ratio_threshold = LaunchConfiguration("lost_alpha_ratio_threshold")
+    lost_min_updates = LaunchConfiguration("lost_min_updates")
     stm32_port = LaunchConfiguration("stm32_port")
     stm32_baudrate = LaunchConfiguration("stm32_baudrate")
     stm32_tick_period_ms = LaunchConfiguration("stm32_tick_period_ms")
@@ -232,10 +243,10 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="false"
+                "ridge_enable_image_view", default_value="true"
             ),  # Whether to show ridge debug windows
-            DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
-            DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
+            DeclareLaunchArgument("ridge_show_morph_mask", default_value="false"),  # Whether to show input white mask
+            DeclareLaunchArgument("ridge_show_distance_transform", default_value="false"),  # Whether to show the DT image before orientation filtering
             DeclareLaunchArgument("ridge_show_green_mask", default_value="false"),  # Whether to show input green mask
             DeclareLaunchArgument("ridge_show_black_mask", default_value="false"),  # Whether to show input black mask
             DeclareLaunchArgument("ridge_show_noise_mask", default_value="false"),  # Whether to show input noise mask
@@ -244,25 +255,25 @@ def generate_launch_description():
                 "ridge_show_candidate_prefilter_mask", default_value="false"
             ),  # Whether to show candidate-prefilter ridge mask
             DeclareLaunchArgument(
-                "ridge_show_orientation_valid_mask", default_value="true"
+                "ridge_show_orientation_valid_mask", default_value="false"
             ),  # Whether to show orientation-valid seed mask
             DeclareLaunchArgument(
                 "ridge_show_side_support_seed_mask", default_value="false"
             ),  # Whether to show supported side-scan seed mask
             DeclareLaunchArgument(
-                "ridge_show_side_support_mask", default_value="true"
+                "ridge_show_side_support_mask", default_value="false"
             ),  # Whether to show side-support mask
             DeclareLaunchArgument(
-                "ridge_show_width_supported_ridge_mask", default_value="true"
+                "ridge_show_width_supported_ridge_mask", default_value="false"
             ),  # Whether to show width-filtered ridge mask
             DeclareLaunchArgument(
-                "ridge_show_length_filtered_ridge_mask", default_value="true"
+                "ridge_show_length_filtered_ridge_mask", default_value="false"
             ),  # Whether to show length-filtered ridge mask
             DeclareLaunchArgument(
-                "ridge_show_reconstructed_mask", default_value="true"
+                "ridge_show_reconstructed_mask", default_value="false"
             ),  # Whether to show reconstructed mask
             DeclareLaunchArgument(
-                "ridge_show_white_final_mask", default_value="true"
+                "ridge_show_white_final_mask", default_value="false"
             ),  # Whether to show final white mask
             DeclareLaunchArgument("ridge_show_debug_image", default_value="true"),  # Whether to show composite debug image
             DeclareLaunchArgument(
@@ -292,6 +303,33 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "stm32_enable_odometry_log", default_value="true"
             ),  # Whether AMCL logs each STM32 odometry dx/dy/dtheta response
+            DeclareLaunchArgument(
+                "enable_global_search", default_value="true"
+            ),  # Whether AMCL skips odometry while initially searching or lost
+            DeclareLaunchArgument(
+                "global_search_random_ratio", default_value="0.70"
+            ),  # Fraction of particles randomly injected while globally searching
+            DeclareLaunchArgument(
+                "global_search_noise_xy", default_value="0.12"
+            ),  # XY diffusion used while globally searching
+            DeclareLaunchArgument(
+                "global_search_noise_theta", default_value="0.20"
+            ),  # Heading diffusion used while globally searching
+            DeclareLaunchArgument(
+                "localized_xy_std_threshold", default_value="0.20"
+            ),  # Weighted particle XY spread below this can exit global search
+            DeclareLaunchArgument(
+                "localized_theta_std_threshold", default_value="0.35"
+            ),  # Weighted particle heading spread below this can exit global search
+            DeclareLaunchArgument(
+                "localized_min_updates", default_value="5"
+            ),  # Consecutive concentrated updates required before using odometry
+            DeclareLaunchArgument(
+                "lost_alpha_ratio_threshold", default_value="0.45"
+            ),  # Alpha-fast/alpha-slow ratio below this re-enters global search
+            DeclareLaunchArgument(
+                "lost_min_updates", default_value="3"
+            ),  # Consecutive low alpha-ratio updates required to mark lost
             DeclareLaunchArgument("stm32_port", default_value="/dev/ttyUSB0"),  # STM32 serial port
             DeclareLaunchArgument("stm32_baudrate", default_value="115200"),  # STM32 serial baudrate
             DeclareLaunchArgument(
@@ -347,7 +385,7 @@ def generate_launch_description():
                 default_value="/field_line_observations_debug",
             ),  # Debug point cloud topic
             DeclareLaunchArgument("num_particles", default_value="1000"),  # Number of particles
-            DeclareLaunchArgument("sigma_hit", default_value="0.10"),  # Likelihood-field sigma
+            DeclareLaunchArgument("sigma_hit", default_value="0.07"),  # Likelihood-field sigma
             DeclareLaunchArgument("noise_xy", default_value="0.05"),  # XY motion noise
             DeclareLaunchArgument("noise_theta", default_value="0.10"),  # Heading motion noise
             DeclareLaunchArgument("alpha_fast_rate", default_value="0.1"),  # Fast weight adaptation rate
@@ -669,6 +707,33 @@ def generate_launch_description():
                         ),
                         "stm32_enable_odometry_log": ParameterValue(
                             stm32_enable_odometry_log, value_type=bool
+                        ),
+                        "enable_global_search": ParameterValue(
+                            enable_global_search, value_type=bool
+                        ),
+                        "global_search_random_ratio": ParameterValue(
+                            global_search_random_ratio, value_type=float
+                        ),
+                        "global_search_noise_xy": ParameterValue(
+                            global_search_noise_xy, value_type=float
+                        ),
+                        "global_search_noise_theta": ParameterValue(
+                            global_search_noise_theta, value_type=float
+                        ),
+                        "localized_xy_std_threshold": ParameterValue(
+                            localized_xy_std_threshold, value_type=float
+                        ),
+                        "localized_theta_std_threshold": ParameterValue(
+                            localized_theta_std_threshold, value_type=float
+                        ),
+                        "localized_min_updates": ParameterValue(
+                            localized_min_updates, value_type=int
+                        ),
+                        "lost_alpha_ratio_threshold": ParameterValue(
+                            lost_alpha_ratio_threshold, value_type=float
+                        ),
+                        "lost_min_updates": ParameterValue(
+                            lost_min_updates, value_type=int
                         ),
                         "sigma_hit": ParameterValue(
                             sigma_hit, value_type=float

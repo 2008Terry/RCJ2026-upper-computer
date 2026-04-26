@@ -127,16 +127,16 @@ def generate_launch_description():
             DeclareLaunchArgument("green_s_min", default_value="140"),  # Green HSV minimum S
             DeclareLaunchArgument("green_v_min", default_value="80"),  # Green HSV minimum V
             DeclareLaunchArgument(
-                "hsv_enable_timing_log", default_value="true"
+                "hsv_enable_timing_log", default_value="false"
             ),  # Whether to log HSV timing
             DeclareLaunchArgument(
                 "hsv_timing_log_interval", default_value="15"
             ),  # HSV timing log frame interval
             DeclareLaunchArgument(
-                "hsv_enable_image_view", default_value="true"
+                "hsv_enable_image_view", default_value="false"
             ),  # Master switch for HSV debug windows; false means no window creation or GUI processing
             DeclareLaunchArgument(
-                "hsv_enable_controls_window", default_value="true"
+                "hsv_enable_controls_window", default_value="false"
             ),  # Whether to show HSV slider controls window
             DeclareLaunchArgument("hsv_show_input_image", default_value="true"),  # Show the HSV input image window when hsv_enable_image_view is true
             DeclareLaunchArgument("hsv_show_white_mask", default_value="true"),  # Show the white-priority mask window when hsv_enable_image_view is true
@@ -203,7 +203,7 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="true"
+                "ridge_enable_image_view", default_value="false"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
             DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
@@ -237,7 +237,7 @@ def generate_launch_description():
             ),  # Whether to show final white mask
             DeclareLaunchArgument("ridge_show_debug_image", default_value="true"),  # Whether to show composite debug image
             DeclareLaunchArgument(
-                "ridge_enable_timing_log", default_value="true"
+                "ridge_enable_timing_log", default_value="false"
             ),  # Whether to log ridge timing summary
             DeclareLaunchArgument(
                 "ridge_timing_summary_interval", default_value="10"
@@ -245,7 +245,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "map_yaml_file", default_value=str(map_yaml_default)
             ),  # Nav2 map YAML path
-            DeclareLaunchArgument("use_fake_yaw", default_value="false"),  # Whether to use synthetic yaw
+            DeclareLaunchArgument("use_fake_yaw", default_value="true"),  # Whether to use synthetic yaw
             DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Robot yaw topic
             DeclareLaunchArgument(
                 "fake_yaw_degrees", default_value="0.0"
@@ -306,7 +306,7 @@ def generate_launch_description():
                 default_value="~/processing_time_ms",
             ),  # PF processing time topic
             DeclareLaunchArgument(
-                "topdown_pf_enable_timing_log", default_value="true"
+                "topdown_pf_enable_timing_log", default_value="false"
             ),  # Whether to log PF timing
             DeclareLaunchArgument(
                 "topdown_pf_timing_log_interval", default_value="10"

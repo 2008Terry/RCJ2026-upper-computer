@@ -253,6 +253,15 @@ private:
                                          "/stm32/send_command");
     this->declare_parameter("stm32_request_timeout_ms", 200);
     this->declare_parameter("stm32_enable_odometry_log", false);
+    this->declare_parameter("enable_global_search", true);
+    this->declare_parameter("global_search_random_ratio", 0.50);
+    this->declare_parameter("global_search_noise_xy", 0.12);
+    this->declare_parameter("global_search_noise_theta", 0.20);
+    this->declare_parameter("localized_xy_std_threshold", 0.20);
+    this->declare_parameter("localized_theta_std_threshold", 0.35);
+    this->declare_parameter("localized_min_updates", 5);
+    this->declare_parameter("lost_alpha_ratio_threshold", 0.45);
+    this->declare_parameter("lost_min_updates", 3);
 
     this->declare_parameter("sigma_hit", 0.10);
     this->declare_parameter("noise_xy", 0.05);
@@ -321,6 +330,25 @@ private:
           "Parameter 'stm32_command_service' must not be empty when "
           "'use_stm32_gateway_odometry' is true.");
     }
+    enable_global_search_ =
+        this->get_parameter("enable_global_search").as_bool();
+    global_search_random_ratio_ =
+        this->get_parameter("global_search_random_ratio").as_double();
+    global_search_noise_xy_ =
+        this->get_parameter("global_search_noise_xy").as_double();
+    global_search_noise_theta_ =
+        this->get_parameter("global_search_noise_theta").as_double();
+    localized_xy_std_threshold_ =
+        this->get_parameter("localized_xy_std_threshold").as_double();
+    localized_theta_std_threshold_ =
+        this->get_parameter("localized_theta_std_threshold").as_double();
+    localized_min_updates_ = static_cast<int>(
+        this->get_parameter("localized_min_updates").as_int());
+    lost_alpha_ratio_threshold_ =
+        this->get_parameter("lost_alpha_ratio_threshold").as_double();
+    lost_min_updates_ =
+        static_cast<int>(this->get_parameter("lost_min_updates").as_int());
+    global_search_active_ = enable_global_search_;
 
     filter_config_.num_particles =
         static_cast<int>(this->get_parameter("num_particles").as_int());
@@ -381,6 +409,11 @@ private:
                    max_points_, filter_config_, stm32_request_timeout_ms_,
                    filter_period_ms_, timing_log_interval_,
                    processing_time_topic_);
+    validateGlobalSearchConfig(
+        global_search_random_ratio_, global_search_noise_xy_,
+        global_search_noise_theta_, localized_xy_std_threshold_,
+        localized_theta_std_threshold_, localized_min_updates_,
+        lost_alpha_ratio_threshold_, lost_min_updates_);
 
     forward_axis_ = parseAxisMapping(forward_axis_name_);
     left_axis_ = parseAxisMapping(left_axis_name_);
@@ -483,6 +516,59 @@ private:
     }
   }
 
+  void validateGlobalSearchConfig(double global_search_random_ratio,
+                                  double global_search_noise_xy,
+                                  double global_search_noise_theta,
+                                  double localized_xy_std_threshold,
+                                  double localized_theta_std_threshold,
+                                  int localized_min_updates,
+                                  double lost_alpha_ratio_threshold,
+                                  int lost_min_updates) const {
+    if (!std::isfinite(global_search_random_ratio) ||
+        global_search_random_ratio < 0.0 || global_search_random_ratio > 1.0) {
+      throw std::runtime_error(
+          "Parameter 'global_search_random_ratio' must be between 0 and 1.");
+    }
+    if (!std::isfinite(global_search_noise_xy) ||
+        global_search_noise_xy < 0.0) {
+      throw std::runtime_error(
+          "Parameter 'global_search_noise_xy' must be a non-negative finite "
+          "number.");
+    }
+    if (!std::isfinite(global_search_noise_theta) ||
+        global_search_noise_theta < 0.0) {
+      throw std::runtime_error(
+          "Parameter 'global_search_noise_theta' must be a non-negative "
+          "finite number.");
+    }
+    if (!std::isfinite(localized_xy_std_threshold) ||
+        localized_xy_std_threshold <= 0.0) {
+      throw std::runtime_error(
+          "Parameter 'localized_xy_std_threshold' must be a positive finite "
+          "number.");
+    }
+    if (!std::isfinite(localized_theta_std_threshold) ||
+        localized_theta_std_threshold <= 0.0) {
+      throw std::runtime_error(
+          "Parameter 'localized_theta_std_threshold' must be a positive "
+          "finite number.");
+    }
+    if (localized_min_updates < 1) {
+      throw std::runtime_error(
+          "Parameter 'localized_min_updates' must be at least 1.");
+    }
+    if (!std::isfinite(lost_alpha_ratio_threshold) ||
+        lost_alpha_ratio_threshold < 0.0 ||
+        lost_alpha_ratio_threshold > 1.0) {
+      throw std::runtime_error(
+          "Parameter 'lost_alpha_ratio_threshold' must be between 0 and 1.");
+    }
+    if (lost_min_updates < 1) {
+      throw std::runtime_error(
+          "Parameter 'lost_min_updates' must be at least 1.");
+    }
+  }
+
   rcl_interfaces::msg::SetParametersResult
   handleParameterUpdates(const std::vector<rclcpp::Parameter> &parameters) {
     auto result = rcl_interfaces::msg::SetParametersResult();
@@ -500,6 +586,18 @@ private:
     bool candidate_enable_timing_log = enable_timing_log_;
     int candidate_timing_log_interval = timing_log_interval_;
     bool candidate_use_weighted_mean_pose = use_weighted_mean_pose_;
+    bool candidate_enable_global_search = enable_global_search_;
+    double candidate_global_search_random_ratio = global_search_random_ratio_;
+    double candidate_global_search_noise_xy = global_search_noise_xy_;
+    double candidate_global_search_noise_theta = global_search_noise_theta_;
+    double candidate_localized_xy_std_threshold =
+        localized_xy_std_threshold_;
+    double candidate_localized_theta_std_threshold =
+        localized_theta_std_threshold_;
+    int candidate_localized_min_updates = localized_min_updates_;
+    double candidate_lost_alpha_ratio_threshold =
+        lost_alpha_ratio_threshold_;
+    int candidate_lost_min_updates = lost_min_updates_;
 
     bool reinitialize_particles = false;
     bool recreate_timer = false;
@@ -581,6 +679,25 @@ private:
             static_cast<int>(parameter.as_int());
       } else if (name == "stm32_enable_odometry_log") {
         candidate_stm32_enable_odometry_log = parameter.as_bool();
+      } else if (name == "enable_global_search") {
+        candidate_enable_global_search = parameter.as_bool();
+      } else if (name == "global_search_random_ratio") {
+        candidate_global_search_random_ratio = parameter.as_double();
+      } else if (name == "global_search_noise_xy") {
+        candidate_global_search_noise_xy = parameter.as_double();
+      } else if (name == "global_search_noise_theta") {
+        candidate_global_search_noise_theta = parameter.as_double();
+      } else if (name == "localized_xy_std_threshold") {
+        candidate_localized_xy_std_threshold = parameter.as_double();
+      } else if (name == "localized_theta_std_threshold") {
+        candidate_localized_theta_std_threshold = parameter.as_double();
+      } else if (name == "localized_min_updates") {
+        candidate_localized_min_updates =
+            static_cast<int>(parameter.as_int());
+      } else if (name == "lost_alpha_ratio_threshold") {
+        candidate_lost_alpha_ratio_threshold = parameter.as_double();
+      } else if (name == "lost_min_updates") {
+        candidate_lost_min_updates = static_cast<int>(parameter.as_int());
       } else if (name == "filter_period_ms") {
         candidate_filter_period_ms = static_cast<int>(parameter.as_int());
         recreate_timer = true;
@@ -611,6 +728,14 @@ private:
                      candidate_stm32_request_timeout_ms,
                      candidate_filter_period_ms, candidate_timing_log_interval,
                      processing_time_topic_);
+      validateGlobalSearchConfig(
+          candidate_global_search_random_ratio,
+          candidate_global_search_noise_xy,
+          candidate_global_search_noise_theta,
+          candidate_localized_xy_std_threshold,
+          candidate_localized_theta_std_threshold,
+          candidate_localized_min_updates,
+          candidate_lost_alpha_ratio_threshold, candidate_lost_min_updates);
     } catch (const std::exception &ex) {
       result.successful = false;
       result.reason = ex.what();
@@ -628,6 +753,16 @@ private:
     enable_timing_log_ = candidate_enable_timing_log;
     timing_log_interval_ = candidate_timing_log_interval;
     use_weighted_mean_pose_ = candidate_use_weighted_mean_pose;
+    const bool global_search_was_enabled = enable_global_search_;
+    enable_global_search_ = candidate_enable_global_search;
+    global_search_random_ratio_ = candidate_global_search_random_ratio;
+    global_search_noise_xy_ = candidate_global_search_noise_xy;
+    global_search_noise_theta_ = candidate_global_search_noise_theta;
+    localized_xy_std_threshold_ = candidate_localized_xy_std_threshold;
+    localized_theta_std_threshold_ = candidate_localized_theta_std_threshold;
+    localized_min_updates_ = candidate_localized_min_updates;
+    lost_alpha_ratio_threshold_ = candidate_lost_alpha_ratio_threshold;
+    lost_min_updates_ = candidate_lost_min_updates;
     forward_axis_ = parseAxisMapping(forward_axis_name_);
     left_axis_ = parseAxisMapping(left_axis_name_);
 
@@ -652,7 +787,102 @@ private:
                   "the next received map.");
     }
 
+    if (!enable_global_search_) {
+      leaveGlobalSearch("global search disabled");
+    } else if (!global_search_was_enabled) {
+      enterGlobalSearch("global search enabled");
+    }
+
     return result;
+  }
+
+  void resetOdomBaseline() {
+    if (!odom_initialized_) {
+      return;
+    }
+
+    prev_odom_x_ = odom_x_;
+    prev_odom_y_ = odom_y_;
+    prev_odom_theta_ = odom_theta_;
+  }
+
+  void clearGatewayOdomState() {
+    if (!use_stm32_gateway_odometry_) {
+      return;
+    }
+
+    std::lock_guard<std::mutex> lock(gateway_mutex_);
+    gateway_request_in_flight_ = false;
+    active_request_id_ = 0;
+    active_request_yaw_rad_ = 0.0;
+    active_request_sent_time_ = std::chrono::steady_clock::time_point{};
+    pending_gateway_result_.reset();
+  }
+
+  void enterGlobalSearch(const std::string &reason) {
+    if (!enable_global_search_ || global_search_active_) {
+      return;
+    }
+
+    global_search_active_ = true;
+    localized_candidate_count_ = 0;
+    lost_candidate_count_ = 0;
+    resetOdomBaseline();
+    clearGatewayOdomState();
+
+    RCLCPP_WARN(
+        this->get_logger(),
+        "AMCL fusion entering global search: %s. Odom prediction is paused; "
+        "particles will use random diffusion and random map injection.",
+        reason.c_str());
+  }
+
+  void leaveGlobalSearch(const std::string &reason) {
+    if (!global_search_active_) {
+      return;
+    }
+
+    global_search_active_ = false;
+    localized_candidate_count_ = 0;
+    lost_candidate_count_ = 0;
+    resetOdomBaseline();
+    clearGatewayOdomState();
+
+    RCLCPP_INFO(this->get_logger(),
+                "AMCL fusion leaving global search: %s. Odom prediction is "
+                "enabled again.",
+                reason.c_str());
+  }
+
+  void updateGlobalSearchState(bool weights_updated) {
+    if (!enable_global_search_ || !weights_updated || !pf_) {
+      return;
+    }
+
+    const double xy_std = pf_->getPositionStdDev();
+    const double theta_std = pf_->getHeadingStdDev();
+    const bool localized_candidate =
+        std::isfinite(xy_std) && std::isfinite(theta_std) &&
+        xy_std <= localized_xy_std_threshold_ &&
+        theta_std <= localized_theta_std_threshold_;
+
+    if (global_search_active_) {
+      localized_candidate_count_ =
+          localized_candidate ? localized_candidate_count_ + 1 : 0;
+      if (localized_candidate_count_ >= localized_min_updates_) {
+        leaveGlobalSearch("particle cloud is concentrated");
+      }
+      return;
+    }
+
+    const double alpha_ratio = pf_->getAlphaRatio();
+    const bool lost_candidate =
+        std::isfinite(alpha_ratio) &&
+        alpha_ratio < lost_alpha_ratio_threshold_;
+    lost_candidate_count_ = lost_candidate ? lost_candidate_count_ + 1 : 0;
+    if (lost_candidate_count_ >= lost_min_updates_) {
+      enterGlobalSearch("adaptive weight ratio indicates localization loss");
+    }
   }
 
   void recreateTimer() {
@@ -684,6 +914,17 @@ private:
         "Map received. Building AMCL fusion distance transform field...");
     pf_->setMap(msg);
     map_received_ = true;
+    if (enable_global_search_) {
+      pf_->initRandomInMap();
+      global_search_active_ = true;
+      localized_candidate_count_ = 0;
+      lost_candidate_count_ = 0;
+      resetOdomBaseline();
+      clearGatewayOdomState();
+      RCLCPP_INFO(
+          this->get_logger(),
+          "AMCL fusion initialized global search particles across the map.");
+    }
   }
 
   void odomCallback(
@@ -962,7 +1203,11 @@ private:
     }
 
     bool motion_prediction_applied = false;
-    if (use_stm32_gateway_odometry_) {
+    if (enable_global_search_ && global_search_active_) {
+      pf_->predictWithNoise(current_yaw_rad_, global_search_noise_xy_,
+                            global_search_noise_theta_);
+      motion_prediction_applied = true;
+    } else if (use_stm32_gateway_odometry_) {
       expireTimedOutGatewayRequest();
 
       const std::optional<GatewayOdomResult> gateway_result =
@@ -1010,7 +1255,8 @@ private:
       pf_->predict(current_yaw_rad_);
     }
 
-    pf_->updateWeights(current_observations);
+    const bool weights_updated = pf_->updateWeights(current_observations);
+    updateGlobalSearchState(weights_updated);
 
     const std::vector<rcj_loc::Particle> posterior_particles =
         pf_->getParticles();
@@ -1019,7 +1265,11 @@ private:
                                 : pf_->getBestPose();
 
     publishVisualizationsAndTF(posterior_particles, posterior_pose);
-    pf_->resample();
+    const double forced_random_ratio =
+        enable_global_search_ && global_search_active_
+            ? global_search_random_ratio_
+            : 0.0;
+    pf_->resample(forced_random_ratio);
 
     const auto filter_end = std::chrono::steady_clock::now();
     const auto filter_duration_us =
@@ -1028,7 +1278,8 @@ private:
             .count();
     publishAndLogFilterTiming(filter_duration_us);
 
-    if (use_stm32_gateway_odometry_) {
+    if (use_stm32_gateway_odometry_ &&
+        !(enable_global_search_ && global_search_active_)) {
       issueGatewayOdomRequest();
     }
   }
@@ -1156,6 +1407,18 @@ private:
   std::string stm32_command_service_;
   int stm32_request_timeout_ms_ = 200;
   bool stm32_enable_odometry_log_ = false;
+  bool enable_global_search_ = true;
+  double global_search_random_ratio_ = 0.50;
+  double global_search_noise_xy_ = 0.12;
+  double global_search_noise_theta_ = 0.20;
+  double localized_xy_std_threshold_ = 0.20;
+  double localized_theta_std_threshold_ = 0.35;
+  int localized_min_updates_ = 5;
+  double lost_alpha_ratio_threshold_ = 0.45;
+  int lost_min_updates_ = 3;
+  bool global_search_active_ = true;
+  int localized_candidate_count_ = 0;
+  int lost_candidate_count_ = 0;
   double current_yaw_rad_ = 0.0;
   bool yaw_initialized_ = false;
   double odom_x_ = 0.0;

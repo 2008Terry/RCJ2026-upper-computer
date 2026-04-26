@@ -69,6 +69,47 @@ void ParticleFilterAmclFusion::initRandom() {
   alpha_fast_ = 0.0;
 }
 
+void ParticleFilterAmclFusion::getRandomBounds(double &min_x, double &max_x,
+                                               double &min_y,
+                                               double &max_y) const {
+  min_x = -config_.init_field_width / 2.0;
+  max_x = config_.init_field_width / 2.0;
+  min_y = -config_.init_field_height / 2.0;
+  max_y = config_.init_field_height / 2.0;
+
+  if (map_initialized_) {
+    min_x = map_origin_x_;
+    max_x = map_origin_x_ + (distance_map_.cols * map_resolution_);
+    min_y = map_origin_y_;
+    max_y = map_origin_y_ + (distance_map_.rows * map_resolution_);
+  }
+}
+
+Particle ParticleFilterAmclFusion::sampleRandomParticle(double weight) {
+  double min_x = 0.0;
+  double max_x = 0.0;
+  double min_y = 0.0;
+  double max_y = 0.0;
+  getRandomBounds(min_x, max_x, min_y, max_y);
+
+  std::uniform_real_distribution<double> dist_x(min_x, max_x);
+  std::uniform_real_distribution<double> dist_y(min_y, max_y);
+  std::uniform_real_distribution<double> dist_theta(-M_PI, M_PI);
+  return {dist_x(gen_), dist_y(gen_), dist_theta(gen_), weight};
+}
+
+void ParticleFilterAmclFusion::initRandomInMap() {
+  particles_.clear();
+  particles_.reserve(static_cast<std::size_t>(config_.num_particles));
+  const double weight = 1.0 / static_cast<double>(config_.num_particles);
+  for (int i = 0; i < config_.num_particles; ++i) {
+    particles_.push_back(sampleRandomParticle(weight));
+  }
+
+  alpha_slow_ = 0.0;
+  alpha_fast_ = 0.0;
+}
+
 void ParticleFilterAmclFusion::setMap(
     const nav_msgs::msg::OccupancyGrid::SharedPtr &map_msg) {
   map_resolution_ = map_msg->info.resolution;
@@ -94,8 +135,14 @@ void ParticleFilterAmclFusion::setMap(
 }
 
 void ParticleFilterAmclFusion::predict(double absolute_yaw) {
-  std::normal_distribution<double> noise_xy(0.0, config_.noise_xy);
-  std::normal_distribution<double> noise_theta(0.0, config_.noise_theta);
+  predictWithNoise(absolute_yaw, config_.noise_xy, config_.noise_theta);
+}
+
+void ParticleFilterAmclFusion::predictWithNoise(double absolute_yaw,
+                                                double noise_xy_std,
+                                                double noise_theta_std) {
+  std::normal_distribution<double> noise_xy(0.0, noise_xy_std);
+  std::normal_distribution<double> noise_theta(0.0, noise_theta_std);
 
   for (auto &particle : particles_) {
     particle.x += noise_xy(gen_);
@@ -229,7 +276,7 @@ bool ParticleFilterAmclFusion::updateWeights(
   return true;
 }
 
-void ParticleFilterAmclFusion::resample() {
+void ParticleFilterAmclFusion::resample(double forced_random_ratio) {
   if (particles_.empty()) {
     return;
   }
@@ -260,29 +307,15 @@ void ParticleFilterAmclFusion::resample() {
     p_random = std::max(0.0, 1.0 - (alpha_fast_ / alpha_slow_));
   }
   p_random = std::min(p_random, config_.random_injection_max_ratio);
+  forced_random_ratio = std::clamp(forced_random_ratio, 0.0, 1.0);
+  p_random = std::max(p_random, forced_random_ratio);
 
   const int random_count =
       static_cast<int>(static_cast<double>(particles_.size()) * p_random);
 
-  double min_x = -config_.init_field_width / 2.0;
-  double max_x = config_.init_field_width / 2.0;
-  double min_y = -config_.init_field_height / 2.0;
-  double max_y = config_.init_field_height / 2.0;
-  if (map_initialized_) {
-    min_x = map_origin_x_;
-    max_x = map_origin_x_ + (distance_map_.cols * map_resolution_);
-    min_y = map_origin_y_;
-    max_y = map_origin_y_ + (distance_map_.rows * map_resolution_);
-  }
-
-  std::uniform_real_distribution<double> dist_x(min_x, max_x);
-  std::uniform_real_distribution<double> dist_y(min_y, max_y);
-  std::uniform_real_distribution<double> dist_theta(-M_PI, M_PI);
-
   for (int j = 0; j < random_count; ++j) {
-    new_particles[new_particles.size() - 1 - j] = {
-        dist_x(gen_), dist_y(gen_), dist_theta(gen_),
-        1.0 / static_cast<double>(particles_.size())};
+    new_particles[new_particles.size() - 1 - j] =
+        sampleRandomParticle(1.0 / static_cast<double>(particles_.size()));
   }
 
   particles_ = new_particles;
@@ -329,6 +362,75 @@ Particle ParticleFilterAmclFusion::getWeightedMeanPose() const {
 
   return {x_sum / weight_sum, y_sum / weight_sum,
           normalizeAngle(std::atan2(sin_sum, cos_sum)), weight_sum};
+}
+
+double ParticleFilterAmclFusion::getAlphaRatio() const {
+  if (alpha_slow_ <= std::numeric_limits<double>::epsilon()) {
+    return 1.0;
+  }
+  return alpha_fast_ / alpha_slow_;
+}
+
+double ParticleFilterAmclFusion::getPositionStdDev() const {
+  if (particles_.empty()) {
+    return std::numeric_limits<double>::infinity();
+  }
+
+  double weight_sum = 0.0;
+  double x_sum = 0.0;
+  double y_sum = 0.0;
+  for (const auto &particle : particles_) {
+    if (!std::isfinite(particle.weight) || particle.weight <= 0.0) {
+      continue;
+    }
+    weight_sum += particle.weight;
+    x_sum += particle.weight * particle.x;
+    y_sum += particle.weight * particle.y;
+  }
+
+  if (weight_sum <= std::numeric_limits<double>::epsilon()) {
+    return std::numeric_limits<double>::infinity();
+  }
+
+  const double mean_x = x_sum / weight_sum;
+  const double mean_y = y_sum / weight_sum;
+  double var_sum = 0.0;
+  for (const auto &particle : particles_) {
+    if (!std::isfinite(particle.weight) || particle.weight <= 0.0) {
+      continue;
+    }
+    const double dx = particle.x - mean_x;
+    const double dy = particle.y - mean_y;
+    var_sum += particle.weight * ((dx * dx) + (dy * dy));
+  }
+
+  return std::sqrt(var_sum / weight_sum);
+}
+
+double ParticleFilterAmclFusion::getHeadingStdDev() const {
+  if (particles_.empty()) {
+    return std::numeric_limits<double>::infinity();
+  }
+
+  double weight_sum = 0.0;
+  double sin_sum = 0.0;
+  double cos_sum = 0.0;
+  for (const auto &particle : particles_) {
+    if (!std::isfinite(particle.weight) || particle.weight <= 0.0) {
+      continue;
+    }
+    weight_sum += particle.weight;
+    sin_sum += particle.weight * std::sin(particle.theta);
+    cos_sum += particle.weight * std::cos(particle.theta);
+  }
+
+  if (weight_sum <= std::numeric_limits<double>::epsilon()) {
+    return std::numeric_limits<double>::infinity();
+  }
+
+  const double mean_resultant_length =
+      std::clamp(std::hypot(sin_sum, cos_sum) / weight_sum, 1e-12, 1.0);
+  return std::sqrt(std::max(0.0, -2.0 * std::log(mean_resultant_length)));
 }
 
 } // namespace rcj_loc

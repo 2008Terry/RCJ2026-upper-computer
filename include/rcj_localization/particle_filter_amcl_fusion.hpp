@@ -44,19 +44,29 @@ public:
   const ParticleFilterAmclFusionConfig &getConfig() const { return config_; }
 
   void initRandom();
+  void initRandomInMap();
   void setMap(const nav_msgs::msg::OccupancyGrid::SharedPtr &map_msg);
   void predict(double absolute_yaw);
+  void predictWithNoise(double absolute_yaw, double noise_xy,
+                        double noise_theta);
   void predict(double absolute_yaw, double request_yaw, double delta_x_global_m,
                double delta_y_global_m, double delta_theta_rad);
   bool updateWeights(const std::vector<Point2D> &local_observations);
-  void resample();
+  void resample(double forced_random_ratio = 0.0);
 
   const std::vector<Particle> &getParticles() const { return particles_; }
   Particle getBestPose() const;
   Particle getWeightedMeanPose() const;
   bool hasMap() const { return map_initialized_; }
+  double getAlphaRatio() const;
+  double getPositionStdDev() const;
+  double getHeadingStdDev() const;
 
 private:
+  void getRandomBounds(double &min_x, double &max_x, double &min_y,
+                       double &max_y) const;
+  Particle sampleRandomParticle(double weight);
+
   ParticleFilterAmclFusionConfig config_;
   std::vector<Particle> particles_;
 
