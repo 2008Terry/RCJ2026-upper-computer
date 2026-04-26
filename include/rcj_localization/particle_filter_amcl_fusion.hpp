@@ -53,6 +53,7 @@ public:
 
   const std::vector<Particle> &getParticles() const { return particles_; }
   Particle getBestPose() const;
+  Particle getWeightedMeanPose() const;
   bool hasMap() const { return map_initialized_; }
 
 private:

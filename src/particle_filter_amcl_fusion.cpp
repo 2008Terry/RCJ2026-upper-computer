@@ -298,4 +298,37 @@ Particle ParticleFilterAmclFusion::getBestPose() const {
   return best;
 }
 
+Particle ParticleFilterAmclFusion::getWeightedMeanPose() const {
+  if (particles_.empty()) {
+    return {};
+  }
+
+  double weight_sum = 0.0;
+  double x_sum = 0.0;
+  double y_sum = 0.0;
+  double sin_sum = 0.0;
+  double cos_sum = 0.0;
+
+  for (const auto &particle : particles_) {
+    if (!std::isfinite(particle.weight) || particle.weight <= 0.0) {
+      continue;
+    }
+
+    weight_sum += particle.weight;
+    x_sum += particle.weight * particle.x;
+    y_sum += particle.weight * particle.y;
+    sin_sum += particle.weight * std::sin(particle.theta);
+    cos_sum += particle.weight * std::cos(particle.theta);
+  }
+
+  const double heading_norm = std::hypot(sin_sum, cos_sum);
+  if (weight_sum <= std::numeric_limits<double>::epsilon() ||
+      heading_norm <= std::numeric_limits<double>::epsilon()) {
+    return getBestPose();
+  }
+
+  return {x_sum / weight_sum, y_sum / weight_sum,
+          normalizeAngle(std::atan2(sin_sum, cos_sum)), weight_sum};
+}
+
 } // namespace rcj_loc

@@ -199,7 +199,8 @@ public:
         "meters_per_pixel=%.6f, "
         "forward_axis='%s', "
         "left_axis='%s', max_points=%d, num_particles=%d, sigma_hit=%.3f, "
-        "noise_xy=%.3f, noise_theta=%.3f, filter_period_ms=%d, "
+        "use_weighted_mean_pose=%s, noise_xy=%.3f, noise_theta=%.3f, "
+        "filter_period_ms=%d, "
         "publish_processing_time=%s, processing_time_topic='%s', "
         "enable_timing_log=%s, timing_log_interval=%d",
         mask_topic_.c_str(), yaw_topic_.c_str(),
@@ -210,6 +211,7 @@ public:
         stm32_enable_odometry_log_ ? "true" : "false",
         meters_per_pixel_, forward_axis_name_.c_str(), left_axis_name_.c_str(),
         max_points_, filter_config_.num_particles, filter_config_.sigma_hit,
+        use_weighted_mean_pose_ ? "true" : "false",
         filter_config_.noise_xy, filter_config_.noise_theta, filter_period_ms_,
         publish_processing_time_ ? "true" : "false",
         processing_time_topic_.c_str(), enable_timing_log_ ? "true" : "false",
@@ -239,6 +241,7 @@ private:
     this->declare_parameter("publish_debug_pointcloud", false);
     this->declare_parameter<std::string>("debug_pointcloud_topic",
                                          "/field_line_observations_debug");
+    this->declare_parameter("use_weighted_mean_pose", false);
     this->declare_parameter("num_particles", 1000);
     this->declare_parameter<std::string>("map_topic", "/map");
     this->declare_parameter<std::string>("yaw_topic", "/robot/yaw");
@@ -294,6 +297,8 @@ private:
         this->get_parameter("publish_debug_pointcloud").as_bool();
     debug_pointcloud_topic_ =
         this->get_parameter("debug_pointcloud_topic").as_string();
+    use_weighted_mean_pose_ =
+        this->get_parameter("use_weighted_mean_pose").as_bool();
     map_topic_ = this->get_parameter("map_topic").as_string();
     yaw_topic_ = this->get_parameter("yaw_topic").as_string();
     use_fake_yaw_ = this->get_parameter("use_fake_yaw").as_bool();
@@ -494,6 +499,7 @@ private:
     int candidate_filter_period_ms = filter_period_ms_;
     bool candidate_enable_timing_log = enable_timing_log_;
     int candidate_timing_log_interval = timing_log_interval_;
+    bool candidate_use_weighted_mean_pose = use_weighted_mean_pose_;
 
     bool reinitialize_particles = false;
     bool recreate_timer = false;
@@ -510,6 +516,8 @@ private:
         candidate_left_axis_name = parameter.as_string();
       } else if (name == "max_points") {
         candidate_max_points = static_cast<int>(parameter.as_int());
+      } else if (name == "use_weighted_mean_pose") {
+        candidate_use_weighted_mean_pose = parameter.as_bool();
       } else if (name == "num_particles") {
         candidate_filter_config.num_particles =
             static_cast<int>(parameter.as_int());
@@ -619,6 +627,7 @@ private:
     filter_period_ms_ = candidate_filter_period_ms;
     enable_timing_log_ = candidate_enable_timing_log;
     timing_log_interval_ = candidate_timing_log_interval;
+    use_weighted_mean_pose_ = candidate_use_weighted_mean_pose;
     forward_axis_ = parseAxisMapping(forward_axis_name_);
     left_axis_ = parseAxisMapping(left_axis_name_);
 
@@ -1005,9 +1014,11 @@ private:
 
     const std::vector<rcj_loc::Particle> posterior_particles =
         pf_->getParticles();
-    const rcj_loc::Particle posterior_best_pose = pf_->getBestPose();
+    const rcj_loc::Particle posterior_pose =
+        use_weighted_mean_pose_ ? pf_->getWeightedMeanPose()
+                                : pf_->getBestPose();
 
-    publishVisualizationsAndTF(posterior_particles, posterior_best_pose);
+    publishVisualizationsAndTF(posterior_particles, posterior_pose);
     pf_->resample();
 
     const auto filter_end = std::chrono::steady_clock::now();
@@ -1052,7 +1063,7 @@ private:
 
   void
   publishVisualizationsAndTF(const std::vector<rcj_loc::Particle> &particles,
-                             const rcj_loc::Particle &best_pose) {
+                             const rcj_loc::Particle &pose_estimate) {
     const rclcpp::Time now = this->now();
 
     geometry_msgs::msg::PoseArray cloud_msg;
@@ -1078,23 +1089,23 @@ private:
     geometry_msgs::msg::PoseWithCovarianceStamped pose_msg;
     pose_msg.header.stamp = now;
     pose_msg.header.frame_id = "map";
-    pose_msg.pose.pose.position.x = best_pose.x;
-    pose_msg.pose.pose.position.y = best_pose.y;
+    pose_msg.pose.pose.position.x = pose_estimate.x;
+    pose_msg.pose.pose.position.y = pose_estimate.y;
 
-    tf2::Quaternion q_best;
-    q_best.setRPY(0.0, 0.0, best_pose.theta);
-    pose_msg.pose.pose.orientation.x = q_best.x();
-    pose_msg.pose.pose.orientation.y = q_best.y();
-    pose_msg.pose.pose.orientation.z = q_best.z();
-    pose_msg.pose.pose.orientation.w = q_best.w();
+    tf2::Quaternion q_estimate;
+    q_estimate.setRPY(0.0, 0.0, pose_estimate.theta);
+    pose_msg.pose.pose.orientation.x = q_estimate.x();
+    pose_msg.pose.pose.orientation.y = q_estimate.y();
+    pose_msg.pose.pose.orientation.z = q_estimate.z();
+    pose_msg.pose.pose.orientation.w = q_estimate.w();
     pose_pub_->publish(pose_msg);
 
     geometry_msgs::msg::TransformStamped transform;
     transform.header.stamp = now;
     transform.header.frame_id = "map";
     transform.child_frame_id = "base_link";
-    transform.transform.translation.x = best_pose.x;
-    transform.transform.translation.y = best_pose.y;
+    transform.transform.translation.x = pose_estimate.x;
+    transform.transform.translation.y = pose_estimate.y;
     transform.transform.translation.z = 0.0;
     transform.transform.rotation = pose_msg.pose.pose.orientation;
     tf_broadcaster_->sendTransform(transform);
@@ -1135,6 +1146,7 @@ private:
   bool enable_localization_ = true;
   bool publish_debug_pointcloud_ = false;
   std::string debug_pointcloud_topic_;
+  bool use_weighted_mean_pose_ = false;
   std::string map_topic_;
   std::string yaw_topic_;
   bool use_fake_yaw_ = false;

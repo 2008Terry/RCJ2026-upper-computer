@@ -67,6 +67,7 @@ def generate_launch_description():
     forward_axis = LaunchConfiguration("forward_axis")
     left_axis = LaunchConfiguration("left_axis")
     max_points = LaunchConfiguration("max_points")
+    use_weighted_mean_pose = LaunchConfiguration("use_weighted_mean_pose")
     publish_debug_pointcloud = LaunchConfiguration("publish_debug_pointcloud")
     debug_pointcloud_topic = LaunchConfiguration("debug_pointcloud_topic")
     num_particles = LaunchConfiguration("num_particles")
@@ -273,7 +274,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "map_yaml_file", default_value=str(map_yaml_default)
             ),  # Nav2 map YAML path
-            DeclareLaunchArgument("use_fake_yaw", default_value="false"),  # Whether to use synthetic yaw
+            DeclareLaunchArgument("use_fake_yaw", default_value="true"),  # Whether to use synthetic yaw
             DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Robot yaw topic
             DeclareLaunchArgument(
                 "fake_yaw_degrees", default_value="0.0"
@@ -289,7 +290,7 @@ def generate_launch_description():
                 "stm32_request_timeout_ms", default_value="200"
             ),  # Local timeout for one async STM32 odometry request
             DeclareLaunchArgument(
-                "stm32_enable_odometry_log", default_value="false"
+                "stm32_enable_odometry_log", default_value="true"
             ),  # Whether AMCL logs each STM32 odometry dx/dy/dtheta response
             DeclareLaunchArgument("stm32_port", default_value="/dev/ttyUSB0"),  # STM32 serial port
             DeclareLaunchArgument("stm32_baudrate", default_value="115200"),  # STM32 serial baudrate
@@ -335,6 +336,9 @@ def generate_launch_description():
             DeclareLaunchArgument("forward_axis", default_value="v+"),  # Image axis treated as robot forward
             DeclareLaunchArgument("left_axis", default_value="u-"),  # Image axis treated as robot left
             DeclareLaunchArgument("max_points", default_value="3000"),  # Maximum observation points per frame
+            DeclareLaunchArgument(
+                "use_weighted_mean_pose", default_value="true"
+            ),  # Use weighted mean pose instead of the highest-weight particle
             DeclareLaunchArgument(
                 "publish_debug_pointcloud", default_value="true"
             ),  # Whether to publish debug point cloud
@@ -633,6 +637,9 @@ def generate_launch_description():
                         "left_axis": left_axis,
                         "max_points": ParameterValue(
                             max_points, value_type=int
+                        ),
+                        "use_weighted_mean_pose": ParameterValue(
+                            use_weighted_mean_pose, value_type=bool
                         ),
                         "enable_localization": ParameterValue(
                             enable_localization, value_type=bool
