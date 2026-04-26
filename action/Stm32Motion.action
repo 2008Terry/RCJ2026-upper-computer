@@ -1,0 +1,7 @@
+string command
+---
+bool success
+string status
+string message
+uint32 attempts
+---

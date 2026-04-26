@@ -11,7 +11,9 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_action REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(action_msgs REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -30,8 +32,10 @@ include_directories(include)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BlackFeatureDetection.msg"
   "msg/BlackFeatureDetectionArray.msg"
+  "action/Stm32Motion.action"
   "srv/Stm32Command.srv"
   DEPENDENCIES
+    action_msgs
     geometry_msgs
     std_msgs
 )
@@ -142,6 +146,7 @@ add_executable(stm32_serial_gateway_node
 
 ament_target_dependencies(stm32_serial_gateway_node
   "rclcpp"
+  "rclcpp_action"
 )
 
 rosidl_get_typesupport_target(cpp_typesupport_target
@@ -171,6 +176,7 @@ install(PROGRAMS
   "scripts/yaw_publisher.py"
   "src/camera_fixed_exposure_debug.py"
   "scripts/stm32_command_demo.py"
+  "scripts/stm32_square_loop.py"
   "src/image_publisher.py"
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -396,6 +402,7 @@ ament_target_dependencies(amcl_fusion
   geometry_msgs
   nav_msgs
   tf2_ros
+  visualization_msgs
   cv_bridge
 )
 target_link_libraries(amcl_fusion

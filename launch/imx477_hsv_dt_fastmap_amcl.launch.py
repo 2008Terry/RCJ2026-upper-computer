@@ -43,6 +43,7 @@ def generate_launch_description():
     use_fake_yaw = LaunchConfiguration("use_fake_yaw")
     yaw_topic = LaunchConfiguration("yaw_topic")
     fake_yaw_degrees = LaunchConfiguration("fake_yaw_degrees")
+    yaw_zero_map_degrees = LaunchConfiguration("yaw_zero_map_degrees")
     map_topic = LaunchConfiguration("map_topic")
     enable_localization = LaunchConfiguration("enable_localization")
     enable_map_server = LaunchConfiguration("enable_map_server")
@@ -55,6 +56,9 @@ def generate_launch_description():
     stm32_command_service = LaunchConfiguration("stm32_command_service")
     stm32_request_timeout_ms = LaunchConfiguration("stm32_request_timeout_ms")
     stm32_enable_odometry_log = LaunchConfiguration("stm32_enable_odometry_log")
+    use_random_search_when_unlocalized = LaunchConfiguration(
+        "use_random_search_when_unlocalized"
+    )
     enable_global_search = LaunchConfiguration("enable_global_search")
     global_search_random_ratio = LaunchConfiguration("global_search_random_ratio")
     global_search_noise_xy = LaunchConfiguration("global_search_noise_xy")
@@ -71,6 +75,7 @@ def generate_launch_description():
     stm32_tick_period_ms = LaunchConfiguration("stm32_tick_period_ms")
     stm32_resend_period_ms = LaunchConfiguration("stm32_resend_period_ms")
     stm32_command_timeout_ms = LaunchConfiguration("stm32_command_timeout_ms")
+    stm32_motion_timeout_ms = LaunchConfiguration("stm32_motion_timeout_ms")
     stm32_max_queue_size = LaunchConfiguration("stm32_max_queue_size")
     stm32_enable_serial_log = LaunchConfiguration("stm32_enable_serial_log")
     stm32_enable_raw_reply_log = LaunchConfiguration("stm32_enable_raw_reply_log")
@@ -81,6 +86,15 @@ def generate_launch_description():
     use_weighted_mean_pose = LaunchConfiguration("use_weighted_mean_pose")
     publish_debug_pointcloud = LaunchConfiguration("publish_debug_pointcloud")
     debug_pointcloud_topic = LaunchConfiguration("debug_pointcloud_topic")
+    publish_particle_weight_markers = LaunchConfiguration(
+        "publish_particle_weight_markers"
+    )
+    particle_weight_marker_topic = LaunchConfiguration(
+        "particle_weight_marker_topic"
+    )
+    particle_weight_marker_scale = LaunchConfiguration(
+        "particle_weight_marker_scale"
+    )
     num_particles = LaunchConfiguration("num_particles")
     sigma_hit = LaunchConfiguration("sigma_hit")
     noise_xy = LaunchConfiguration("noise_xy")
@@ -243,7 +257,7 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="true"
+                "ridge_enable_image_view", default_value="false"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="false"),  # Whether to show input white mask
             DeclareLaunchArgument("ridge_show_distance_transform", default_value="false"),  # Whether to show the DT image before orientation filtering
@@ -290,6 +304,9 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "fake_yaw_degrees", default_value="0.0"
             ),  # Fixed yaw angle used when use_fake_yaw is true
+            DeclareLaunchArgument(
+                "yaw_zero_map_degrees", default_value="90.0"
+            ),  # Map yaw of robot yaw 0 degrees; 90 means forward points toward the top goal
             DeclareLaunchArgument("odom_topic", default_value="/wheel_odometry"),  # Wheel odometry topic
             DeclareLaunchArgument(
                 "use_stm32_gateway_odometry", default_value="true"
@@ -298,22 +315,26 @@ def generate_launch_description():
                 "stm32_command_service", default_value="/stm32/send_command"
             ),  # STM32 gateway service name
             DeclareLaunchArgument(
-                "stm32_request_timeout_ms", default_value="200"
+                "stm32_request_timeout_ms", default_value="50"
             ),  # Local timeout for one async STM32 odometry request
             DeclareLaunchArgument(
                 "stm32_enable_odometry_log", default_value="true"
             ),  # Whether AMCL logs each STM32 odometry dx/dy/dtheta response
             DeclareLaunchArgument(
-                "enable_global_search", default_value="true"
-            ),  # Whether AMCL skips odometry while initially searching or lost
+                "use_random_search_when_unlocalized", default_value="false"
+            ),  # Whether unlocalized/lost AMCL uses random diffusion and random particle injection
             DeclareLaunchArgument(
-                "global_search_random_ratio", default_value="0.70"
+                "enable_global_search",
+                default_value=use_random_search_when_unlocalized,
+            ),  # Backward-compatible alias passed to amcl_fusion
+            DeclareLaunchArgument(
+                "global_search_random_ratio", default_value="0.50"
             ),  # Fraction of particles randomly injected while globally searching
             DeclareLaunchArgument(
                 "global_search_noise_xy", default_value="0.12"
             ),  # XY diffusion used while globally searching
             DeclareLaunchArgument(
-                "global_search_noise_theta", default_value="0.20"
+                "global_search_noise_theta", default_value="0.10"
             ),  # Heading diffusion used while globally searching
             DeclareLaunchArgument(
                 "localized_xy_std_threshold", default_value="0.20"
@@ -337,10 +358,13 @@ def generate_launch_description():
             ),  # STM32 gateway tick period
             DeclareLaunchArgument(
                 "stm32_resend_period_ms", default_value="20"
-            ),  # STM32 gateway resend period
+            ),  # Deprecated compatibility parameter; gateway commands are sent once
             DeclareLaunchArgument(
-                "stm32_command_timeout_ms", default_value="50"
+                "stm32_command_timeout_ms", default_value="30"
             ),  # STM32 gateway command timeout
+            DeclareLaunchArgument(
+                "stm32_motion_timeout_ms", default_value="5000"
+            ),  # STM32 cmd_dis/cmd_turn completion ACK timeout
             DeclareLaunchArgument(
                 "stm32_max_queue_size", default_value="32"
             ),  # STM32 gateway queue capacity
@@ -371,7 +395,7 @@ def generate_launch_description():
                 default_value="true",
             ),  # Whether to start AMCL fusion node
             DeclareLaunchArgument("meters_per_pixel", default_value="0.0036"),  # Camera projection scale
-            DeclareLaunchArgument("forward_axis", default_value="v+"),  # Image axis treated as robot forward
+            DeclareLaunchArgument("forward_axis", default_value="v-"),  # Image axis treated as robot forward
             DeclareLaunchArgument("left_axis", default_value="u-"),  # Image axis treated as robot left
             DeclareLaunchArgument("max_points", default_value="3000"),  # Maximum observation points per frame
             DeclareLaunchArgument(
@@ -384,8 +408,18 @@ def generate_launch_description():
                 "debug_pointcloud_topic",
                 default_value="/field_line_observations_debug",
             ),  # Debug point cloud topic
+            DeclareLaunchArgument(
+                "publish_particle_weight_markers", default_value="true"
+            ),  # Whether to publish RViz Marker particles colored by weight
+            DeclareLaunchArgument(
+                "particle_weight_marker_topic",
+                default_value="/particle_weights",
+            ),  # Weighted particle Marker topic
+            DeclareLaunchArgument(
+                "particle_weight_marker_scale", default_value="0.035"
+            ),  # Weighted particle Marker point size in meters
             DeclareLaunchArgument("num_particles", default_value="1000"),  # Number of particles
-            DeclareLaunchArgument("sigma_hit", default_value="0.07"),  # Likelihood-field sigma
+            DeclareLaunchArgument("sigma_hit", default_value="0.10"),  # Likelihood-field sigma
             DeclareLaunchArgument("noise_xy", default_value="0.05"),  # XY motion noise
             DeclareLaunchArgument("noise_theta", default_value="0.10"),  # Heading motion noise
             DeclareLaunchArgument("alpha_fast_rate", default_value="0.1"),  # Fast weight adaptation rate
@@ -435,6 +469,7 @@ def generate_launch_description():
                     "tick_period_ms": stm32_tick_period_ms,
                     "resend_period_ms": stm32_resend_period_ms,
                     "command_timeout_ms": stm32_command_timeout_ms,
+                    "motion_timeout_ms": stm32_motion_timeout_ms,
                     "max_queue_size": stm32_max_queue_size,
                     "enable_serial_log": stm32_enable_serial_log,
                     "enable_raw_reply_log": stm32_enable_raw_reply_log,
@@ -686,6 +721,13 @@ def generate_launch_description():
                             publish_debug_pointcloud, value_type=bool
                         ),
                         "debug_pointcloud_topic": debug_pointcloud_topic,
+                        "publish_particle_weight_markers": ParameterValue(
+                            publish_particle_weight_markers, value_type=bool
+                        ),
+                        "particle_weight_marker_topic": particle_weight_marker_topic,
+                        "particle_weight_marker_scale": ParameterValue(
+                            particle_weight_marker_scale, value_type=float
+                        ),
                         "num_particles": ParameterValue(
                             num_particles, value_type=int
                         ),
@@ -696,6 +738,9 @@ def generate_launch_description():
                         ),
                         "fake_yaw_degrees": ParameterValue(
                             fake_yaw_degrees, value_type=float
+                        ),
+                        "yaw_zero_map_degrees": ParameterValue(
+                            yaw_zero_map_degrees, value_type=float
                         ),
                         "odom_topic": odom_topic,
                         "use_stm32_gateway_odometry": ParameterValue(

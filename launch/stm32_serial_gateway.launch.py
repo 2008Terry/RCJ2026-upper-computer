@@ -19,6 +19,11 @@ def generate_launch_description():
                 description="Serial port connected to the STM32.",
             ),
             DeclareLaunchArgument(
+                "motion_action_name",
+                default_value="/stm32/motion",
+                description="STM32 motion action name for cmd_dis/cmd_turn.",
+            ),
+            DeclareLaunchArgument(
                 "baudrate",
                 default_value="115200",
                 description="Serial baudrate.",
@@ -31,12 +36,23 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "resend_period_ms",
                 default_value="20",
-                description="How often to resend the active command while waiting for ACK.",
+                description=(
+                    "Deprecated compatibility parameter; commands are sent once "
+                    "and this value is ignored."
+                ),
             ),
             DeclareLaunchArgument(
                 "command_timeout_ms",
                 default_value="50",
                 description="Total timeout for one active command in milliseconds.",
+            ),
+            DeclareLaunchArgument(
+                "motion_timeout_ms",
+                default_value="5000",
+                description=(
+                    "Timeout for cmd_dis/cmd_turn completion ACK after the motion command "
+                    "has been sent, in milliseconds."
+                ),
             ),
             DeclareLaunchArgument(
                 "max_queue_size",
@@ -71,6 +87,7 @@ def generate_launch_description():
                 parameters=[
                     {
                         "port": LaunchConfiguration("port"),
+                        "motion_action_name": LaunchConfiguration("motion_action_name"),
                         "baudrate": ParameterValue(
                             LaunchConfiguration("baudrate"), value_type=int
                         ),
@@ -82,6 +99,9 @@ def generate_launch_description():
                         ),
                         "command_timeout_ms": ParameterValue(
                             LaunchConfiguration("command_timeout_ms"), value_type=int
+                        ),
+                        "motion_timeout_ms": ParameterValue(
+                            LaunchConfiguration("motion_timeout_ms"), value_type=int
                         ),
                         "max_queue_size": ParameterValue(
                             LaunchConfiguration("max_queue_size"), value_type=int

@@ -3,6 +3,7 @@
 #include <cinttypes>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -26,10 +27,12 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
+#include <std_msgs/msg/color_rgba.hpp>
 #include <std_msgs/msg/float32.hpp>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <visualization_msgs/msg/marker.hpp>
 
 #include <opencv2/core.hpp>
 
@@ -101,6 +104,12 @@ double normalizeAngle(double angle_rad) {
 
 double degreesToRadians(double angle_deg) { return angle_deg * (M_PI / 180.0); }
 
+double radiansToDegrees(double angle_rad) { return angle_rad * (180.0 / M_PI); }
+
+double yawDegreesToMapRadians(double yaw_degrees, double zero_map_degrees) {
+  return normalizeAngle(degreesToRadians(zero_map_degrees + yaw_degrees));
+}
+
 void validateAxisMotionNoiseConfig(const rcj_loc::AxisMotionNoiseConfig &config,
                                    const std::string &prefix) {
   const auto validate = [&](double value, const std::string &suffix) {
@@ -146,7 +155,8 @@ public:
       pf_ = std::make_unique<rcj_loc::ParticleFilterAmclFusion>(filter_config_);
 
       if (use_fake_yaw_) {
-        current_yaw_rad_ = normalizeAngle(degreesToRadians(fake_yaw_degrees_));
+        current_yaw_rad_ =
+            yawDegreesToMapRadians(fake_yaw_degrees_, yaw_zero_map_degrees_);
         yaw_initialized_ = true;
         fake_yaw_pub_ =
             this->create_publisher<std_msgs::msg::Float32>(yaw_topic_, 10);
@@ -182,6 +192,11 @@ public:
               "/amcl_pose", 10);
       particle_pub_ = this->create_publisher<geometry_msgs::msg::PoseArray>(
           "/particlecloud", 10);
+      if (publish_particle_weight_markers_) {
+        particle_weight_marker_pub_ =
+            this->create_publisher<visualization_msgs::msg::Marker>(
+                particle_weight_marker_topic_, 10);
+      }
       tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
       recreateTimer();
     }
@@ -193,6 +208,7 @@ public:
         this->get_logger(),
         "amcl_fusion started. mask_topic='%s', yaw_topic='%s', "
         "use_fake_yaw=%s, fake_yaw_degrees=%.3f, "
+        "yaw_zero_map_degrees=%.3f, "
         "odom_topic='%s', "
         "use_stm32_gateway_odometry=%s, stm32_command_service='%s', "
         "stm32_request_timeout_ms=%d, stm32_enable_odometry_log=%s, "
@@ -200,11 +216,14 @@ public:
         "forward_axis='%s', "
         "left_axis='%s', max_points=%d, num_particles=%d, sigma_hit=%.3f, "
         "use_weighted_mean_pose=%s, noise_xy=%.3f, noise_theta=%.3f, "
+        "publish_particle_weight_markers=%s, "
+        "particle_weight_marker_topic='%s', particle_weight_marker_scale=%.3f, "
         "filter_period_ms=%d, "
         "publish_processing_time=%s, processing_time_topic='%s', "
         "enable_timing_log=%s, timing_log_interval=%d",
         mask_topic_.c_str(), yaw_topic_.c_str(),
         use_fake_yaw_ ? "true" : "false", fake_yaw_degrees_,
+        yaw_zero_map_degrees_,
         odom_topic_.c_str(),
         use_stm32_gateway_odometry_ ? "true" : "false",
         stm32_command_service_.c_str(), stm32_request_timeout_ms_,
@@ -212,7 +231,10 @@ public:
         meters_per_pixel_, forward_axis_name_.c_str(), left_axis_name_.c_str(),
         max_points_, filter_config_.num_particles, filter_config_.sigma_hit,
         use_weighted_mean_pose_ ? "true" : "false",
-        filter_config_.noise_xy, filter_config_.noise_theta, filter_period_ms_,
+        filter_config_.noise_xy, filter_config_.noise_theta,
+        publish_particle_weight_markers_ ? "true" : "false",
+        particle_weight_marker_topic_.c_str(), particle_weight_marker_scale_,
+        filter_period_ms_,
         publish_processing_time_ ? "true" : "false",
         processing_time_topic_.c_str(), enable_timing_log_ ? "true" : "false",
         timing_log_interval_);
@@ -228,13 +250,14 @@ private:
     double dy_cm = 0.0;
     double dtheta_deg = 0.0;
     double request_yaw_rad = 0.0;
+    std::optional<rcj_loc::Particle> request_pose;
   };
 
   void declareParameters() {
     this->declare_parameter<std::string>(
         "mask_topic", "/white_line_skeleton_filter_node/white_final_mask");
     this->declare_parameter("meters_per_pixel", 0.0025);
-    this->declare_parameter<std::string>("forward_axis", "v+");
+    this->declare_parameter<std::string>("forward_axis", "v-");
     this->declare_parameter<std::string>("left_axis", "u-");
     this->declare_parameter("max_points", 5000);
     this->declare_parameter("enable_localization", true);
@@ -242,11 +265,16 @@ private:
     this->declare_parameter<std::string>("debug_pointcloud_topic",
                                          "/field_line_observations_debug");
     this->declare_parameter("use_weighted_mean_pose", false);
+    this->declare_parameter("publish_particle_weight_markers", false);
+    this->declare_parameter<std::string>("particle_weight_marker_topic",
+                                         "/particle_weights");
+    this->declare_parameter("particle_weight_marker_scale", 0.035);
     this->declare_parameter("num_particles", 1000);
     this->declare_parameter<std::string>("map_topic", "/map");
     this->declare_parameter<std::string>("yaw_topic", "/robot/yaw");
     this->declare_parameter("use_fake_yaw", false);
     this->declare_parameter("fake_yaw_degrees", 0.0);
+    this->declare_parameter("yaw_zero_map_degrees", 0.0);
     this->declare_parameter<std::string>("odom_topic", "/wheel_odometry");
     this->declare_parameter("use_stm32_gateway_odometry", false);
     this->declare_parameter<std::string>("stm32_command_service",
@@ -308,13 +336,37 @@ private:
         this->get_parameter("debug_pointcloud_topic").as_string();
     use_weighted_mean_pose_ =
         this->get_parameter("use_weighted_mean_pose").as_bool();
+    publish_particle_weight_markers_ =
+        this->get_parameter("publish_particle_weight_markers").as_bool();
+    particle_weight_marker_topic_ =
+        this->get_parameter("particle_weight_marker_topic").as_string();
+    particle_weight_marker_scale_ =
+        this->get_parameter("particle_weight_marker_scale").as_double();
     map_topic_ = this->get_parameter("map_topic").as_string();
     yaw_topic_ = this->get_parameter("yaw_topic").as_string();
     use_fake_yaw_ = this->get_parameter("use_fake_yaw").as_bool();
     fake_yaw_degrees_ = this->get_parameter("fake_yaw_degrees").as_double();
+    yaw_zero_map_degrees_ =
+        this->get_parameter("yaw_zero_map_degrees").as_double();
     if (!std::isfinite(fake_yaw_degrees_)) {
       throw std::runtime_error(
           "Parameter 'fake_yaw_degrees' must be a finite number.");
+    }
+    if (!std::isfinite(yaw_zero_map_degrees_)) {
+      throw std::runtime_error(
+          "Parameter 'yaw_zero_map_degrees' must be a finite number.");
+    }
+    if (publish_particle_weight_markers_ &&
+        particle_weight_marker_topic_.empty()) {
+      throw std::runtime_error(
+          "Parameter 'particle_weight_marker_topic' must not be empty when "
+          "'publish_particle_weight_markers' is true.");
+    }
+    if (!std::isfinite(particle_weight_marker_scale_) ||
+        particle_weight_marker_scale_ <= 0.0) {
+      throw std::runtime_error(
+          "Parameter 'particle_weight_marker_scale' must be a positive finite "
+          "number.");
     }
     odom_topic_ = this->get_parameter("odom_topic").as_string();
     use_stm32_gateway_odometry_ =
@@ -709,9 +761,13 @@ private:
                  name == "publish_debug_pointcloud" ||
                  name == "debug_pointcloud_topic" || name == "map_topic" ||
                  name == "yaw_topic" || name == "use_fake_yaw" ||
-                 name == "fake_yaw_degrees" || name == "odom_topic" ||
+                 name == "fake_yaw_degrees" ||
+                 name == "yaw_zero_map_degrees" || name == "odom_topic" ||
                  name == "use_stm32_gateway_odometry" ||
                  name == "stm32_command_service" ||
+                 name == "publish_particle_weight_markers" ||
+                 name == "particle_weight_marker_topic" ||
+                 name == "particle_weight_marker_scale" ||
                  name == "publish_processing_time" ||
                  name == "processing_time_topic") {
         result.successful = false;
@@ -816,7 +872,10 @@ private:
     active_request_id_ = 0;
     active_request_yaw_rad_ = 0.0;
     active_request_sent_time_ = std::chrono::steady_clock::time_point{};
+    active_request_pose_.reset();
     pending_gateway_result_.reset();
+    last_success_pose_.reset();
+    latest_failed_request_pose_.reset();
   }
 
   void enterGlobalSearch(const std::string &reason) {
@@ -893,8 +952,8 @@ private:
   }
 
   void yawCallback(const std_msgs::msg::Float32::SharedPtr msg) {
-    current_yaw_rad_ =
-        normalizeAngle(degreesToRadians(static_cast<double>(msg->data)));
+    current_yaw_rad_ = yawDegreesToMapRadians(static_cast<double>(msg->data),
+                                              yaw_zero_map_degrees_);
     yaw_initialized_ = true;
   }
 
@@ -959,7 +1018,7 @@ private:
       return;
     }
 
-    std::uint64_t expired_request_id = 0;
+    GatewayOdomResult timeout_result;
     {
       std::lock_guard<std::mutex> lock(gateway_mutex_);
       if (!gateway_request_in_flight_) {
@@ -974,18 +1033,27 @@ private:
         return;
       }
 
-      expired_request_id = active_request_id_;
+      timeout_result.request_id = active_request_id_;
+      timeout_result.success = false;
+      timeout_result.status = "timeout";
+      timeout_result.message =
+          "STM32 odometry request timed out locally after " +
+          std::to_string(stm32_request_timeout_ms_) + " ms.";
+      timeout_result.request_yaw_rad = active_request_yaw_rad_;
+      timeout_result.request_pose = active_request_pose_;
       gateway_request_in_flight_ = false;
       active_request_id_ = 0;
       active_request_yaw_rad_ = 0.0;
       active_request_sent_time_ = std::chrono::steady_clock::time_point{};
+      active_request_pose_.reset();
+      pending_gateway_result_ = timeout_result;
     }
 
     RCLCPP_WARN(
         this->get_logger(),
         "STM32 odometry request %" PRIu64 " timed out locally after %d ms. "
         "Falling back to random diffusion until a later request succeeds.",
-        expired_request_id, stm32_request_timeout_ms_);
+        timeout_result.request_id, stm32_request_timeout_ms_);
   }
 
   std::optional<GatewayOdomResult> consumePendingGatewayResult() {
@@ -999,15 +1067,99 @@ private:
     return result;
   }
 
-  bool applyGatewayMotionPrediction(const GatewayOdomResult &result) {
-    const double delta_x_global_m = result.dx_cm * 0.01;
-    const double delta_y_global_m = result.dy_cm * 0.01;
-    const double delta_theta_rad =
-        normalizeAngle(degreesToRadians(result.dtheta_deg));
+  void rememberFailedGatewayRequest(const GatewayOdomResult &result) {
+    if (!result.request_pose.has_value()) {
+      RCLCPP_WARN(
+          this->get_logger(),
+          "STM32 odometry request %" PRIu64
+          " failed without a request pose anchor; compensation state unchanged.",
+          result.request_id);
+      return;
+    }
 
-    if (!std::isfinite(delta_x_global_m) || !std::isfinite(delta_y_global_m) ||
+    latest_failed_request_pose_ = result.request_pose;
+  }
+
+  void rememberSuccessfulGatewayRequest(const rcj_loc::Particle &posterior_pose) {
+    last_success_pose_ = posterior_pose;
+    latest_failed_request_pose_.reset();
+  }
+
+  bool buildCompensatedGatewayOdom(const GatewayOdomResult &result,
+                                   double &dx_cm, double &dy_cm,
+                                   double &dtheta_deg,
+                                   double &request_yaw_rad) {
+    dx_cm = result.dx_cm;
+    dy_cm = result.dy_cm;
+    dtheta_deg = result.dtheta_deg;
+    request_yaw_rad = result.request_yaw_rad;
+
+    if (!latest_failed_request_pose_.has_value() ||
+        !last_success_pose_.has_value()) {
+      return true;
+    }
+
+    const auto &last_success = *last_success_pose_;
+    const auto &latest_failure = *latest_failed_request_pose_;
+    const double absorbed_global_x_m = latest_failure.x - last_success.x;
+    const double absorbed_global_y_m = latest_failure.y - last_success.y;
+    const double absorbed_dtheta_rad =
+        normalizeAngle(latest_failure.theta - last_success.theta);
+    const double stm32_x_axis_map_rad =
+        normalizeAngle(degreesToRadians(yaw_zero_map_degrees_));
+    const double cos_axis = std::cos(stm32_x_axis_map_rad);
+    const double sin_axis = std::sin(stm32_x_axis_map_rad);
+    const double absorbed_stm32_x_m =
+        (cos_axis * absorbed_global_x_m) + (sin_axis * absorbed_global_y_m);
+    const double absorbed_stm32_y_m =
+        (-sin_axis * absorbed_global_x_m) + (cos_axis * absorbed_global_y_m);
+
+    dx_cm -= absorbed_stm32_x_m * 100.0;
+    dy_cm -= absorbed_stm32_y_m * 100.0;
+    dtheta_deg = radiansToDegrees(normalizeAngle(
+        degreesToRadians(dtheta_deg) - absorbed_dtheta_rad));
+    request_yaw_rad = latest_failure.theta;
+
+    if (stm32_enable_odometry_log_) {
+      RCLCPP_INFO(
+          this->get_logger(),
+          "Compensated STM32 odometry request %" PRIu64
+          ": raw=(%.6f, %.6f, %.6f), absorbed=(%.6f, %.6f, %.6f), "
+          "compensated=(%.6f, %.6f, %.6f).",
+          result.request_id, result.dx_cm, result.dy_cm, result.dtheta_deg,
+          absorbed_stm32_x_m * 100.0, absorbed_stm32_y_m * 100.0,
+          radiansToDegrees(absorbed_dtheta_rad), dx_cm, dy_cm, dtheta_deg);
+    }
+
+    return true;
+  }
+
+  bool applyGatewayMotionPrediction(const GatewayOdomResult &result) {
+    double dx_cm = 0.0;
+    double dy_cm = 0.0;
+    double dtheta_deg = 0.0;
+    double request_yaw_rad = 0.0;
+    if (!buildCompensatedGatewayOdom(result, dx_cm, dy_cm, dtheta_deg,
+                                     request_yaw_rad)) {
+      return false;
+    }
+
+    const double delta_x_stm32_m = dx_cm * 0.01;
+    const double delta_y_stm32_m = dy_cm * 0.01;
+    const double delta_theta_rad = normalizeAngle(degreesToRadians(dtheta_deg));
+    const double stm32_x_axis_map_rad =
+        normalizeAngle(degreesToRadians(yaw_zero_map_degrees_));
+    const double cos_axis = std::cos(stm32_x_axis_map_rad);
+    const double sin_axis = std::sin(stm32_x_axis_map_rad);
+    const double delta_x_global_m =
+        (cos_axis * delta_x_stm32_m) - (sin_axis * delta_y_stm32_m);
+    const double delta_y_global_m =
+        (sin_axis * delta_x_stm32_m) + (cos_axis * delta_y_stm32_m);
+
+    if (!std::isfinite(delta_x_stm32_m) || !std::isfinite(delta_y_stm32_m) ||
+        !std::isfinite(delta_x_global_m) || !std::isfinite(delta_y_global_m) ||
         !std::isfinite(delta_theta_rad) ||
-        !std::isfinite(result.request_yaw_rad)) {
+        !std::isfinite(request_yaw_rad)) {
       RCLCPP_WARN(this->get_logger(),
                   "Ignoring STM32 odometry response %" PRIu64
                   " because it contains non-finite motion data.",
@@ -1015,17 +1167,19 @@ private:
       return false;
     }
 
-    pf_->predict(current_yaw_rad_, result.request_yaw_rad, delta_x_global_m,
+    pf_->predict(current_yaw_rad_, request_yaw_rad, delta_x_global_m,
                  delta_y_global_m, delta_theta_rad);
     return true;
   }
 
   void handleGatewayOdomResponse(std::uint64_t request_id,
                                  double request_yaw_rad,
+                                 rcj_loc::Particle request_pose,
                                  Stm32CommandFuture future) {
     GatewayOdomResult result;
     result.request_id = request_id;
     result.request_yaw_rad = request_yaw_rad;
+    result.request_pose = request_pose;
 
     try {
       const auto response = future.get();
@@ -1050,10 +1204,11 @@ private:
     active_request_id_ = 0;
     active_request_yaw_rad_ = 0.0;
     active_request_sent_time_ = std::chrono::steady_clock::time_point{};
+    active_request_pose_.reset();
     pending_gateway_result_ = result;
   }
 
-  void issueGatewayOdomRequest() {
+  void issueGatewayOdomRequest(const rcj_loc::Particle &request_pose) {
     if (!use_stm32_gateway_odometry_ || !stm32_command_client_) {
       return;
     }
@@ -1089,6 +1244,7 @@ private:
       active_request_id_ = next_gateway_request_id_++;
       active_request_sent_time_ = std::chrono::steady_clock::now();
       active_request_yaw_rad_ = current_yaw_rad_;
+      active_request_pose_ = request_pose;
       request_id = active_request_id_;
       request_yaw_rad = active_request_yaw_rad_;
     }
@@ -1096,8 +1252,10 @@ private:
     try {
       stm32_command_client_->async_send_request(
           request,
-          [this, request_id, request_yaw_rad](Stm32CommandFuture future) {
-            handleGatewayOdomResponse(request_id, request_yaw_rad, future);
+          [this, request_id, request_yaw_rad,
+           request_pose](Stm32CommandFuture future) {
+            handleGatewayOdomResponse(request_id, request_yaw_rad, request_pose,
+                                      future);
           });
     } catch (const std::exception &ex) {
       std::lock_guard<std::mutex> lock(gateway_mutex_);
@@ -1106,6 +1264,7 @@ private:
         active_request_id_ = 0;
         active_request_yaw_rad_ = 0.0;
         active_request_sent_time_ = std::chrono::steady_clock::time_point{};
+        active_request_pose_.reset();
       }
 
       RCLCPP_WARN(this->get_logger(),
@@ -1203,6 +1362,7 @@ private:
     }
 
     bool motion_prediction_applied = false;
+    bool successful_gateway_result_seen = false;
     if (enable_global_search_ && global_search_active_) {
       pf_->predictWithNoise(current_yaw_rad_, global_search_noise_xy_,
                             global_search_noise_theta_);
@@ -1226,9 +1386,11 @@ private:
         }
         if (gateway_result->success && gateway_result->status == "ok" &&
             yaw_initialized_) {
+          successful_gateway_result_seen = true;
           motion_prediction_applied =
               applyGatewayMotionPrediction(*gateway_result);
         } else {
+          rememberFailedGatewayRequest(*gateway_result);
           RCLCPP_WARN_THROTTLE(
               this->get_logger(), *this->get_clock(), 2000,
               "STM32 odometry request failed with success=%s, status='%s'. "
@@ -1264,6 +1426,10 @@ private:
         use_weighted_mean_pose_ ? pf_->getWeightedMeanPose()
                                 : pf_->getBestPose();
 
+    if (successful_gateway_result_seen) {
+      rememberSuccessfulGatewayRequest(posterior_pose);
+    }
+
     publishVisualizationsAndTF(posterior_particles, posterior_pose);
     const double forced_random_ratio =
         enable_global_search_ && global_search_active_
@@ -1280,7 +1446,7 @@ private:
 
     if (use_stm32_gateway_odometry_ &&
         !(enable_global_search_ && global_search_active_)) {
-      issueGatewayOdomRequest();
+      issueGatewayOdomRequest(posterior_pose);
     }
   }
 
@@ -1336,6 +1502,7 @@ private:
       cloud_msg.poses.push_back(pose);
     }
     particle_pub_->publish(cloud_msg);
+    publishParticleWeightMarkers(particles, now);
 
     geometry_msgs::msg::PoseWithCovarianceStamped pose_msg;
     pose_msg.header.stamp = now;
@@ -1362,6 +1529,78 @@ private:
     tf_broadcaster_->sendTransform(transform);
   }
 
+  std_msgs::msg::ColorRGBA particleWeightColor(double normalized_weight) const {
+    const double t = std::clamp(normalized_weight, 0.0, 1.0);
+    std_msgs::msg::ColorRGBA color;
+    color.a = static_cast<float>(0.25 + (0.75 * t));
+
+    if (t < 0.5) {
+      const double u = t * 2.0;
+      color.r = static_cast<float>(0.15 + (0.85 * u));
+      color.g = static_cast<float>(0.35 + (0.55 * u));
+      color.b = static_cast<float>(1.0 - (0.85 * u));
+    } else {
+      const double u = (t - 0.5) * 2.0;
+      color.r = 1.0f;
+      color.g = static_cast<float>(0.90 - (0.75 * u));
+      color.b = 0.05f;
+    }
+
+    return color;
+  }
+
+  void publishParticleWeightMarkers(
+      const std::vector<rcj_loc::Particle> &particles,
+      const rclcpp::Time &stamp) {
+    if (!publish_particle_weight_markers_ || !particle_weight_marker_pub_) {
+      return;
+    }
+
+    visualization_msgs::msg::Marker marker;
+    marker.header.stamp = stamp;
+    marker.header.frame_id = "map";
+    marker.ns = "amcl_particle_weights";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::POINTS;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = particle_weight_marker_scale_;
+    marker.scale.y = particle_weight_marker_scale_;
+    marker.color.a = 1.0;
+    marker.points.reserve(particles.size());
+    marker.colors.reserve(particles.size());
+
+    double min_weight = std::numeric_limits<double>::infinity();
+    double max_weight = 0.0;
+    for (const auto &particle : particles) {
+      if (!std::isfinite(particle.weight) || particle.weight < 0.0) {
+        continue;
+      }
+      min_weight = std::min(min_weight, particle.weight);
+      max_weight = std::max(max_weight, particle.weight);
+    }
+
+    const double weight_range = max_weight - min_weight;
+    const bool has_weight_range =
+        std::isfinite(min_weight) && weight_range > 1e-12;
+
+    for (const auto &particle : particles) {
+      geometry_msgs::msg::Point point;
+      point.x = particle.x;
+      point.y = particle.y;
+      point.z = 0.03;
+      marker.points.push_back(point);
+
+      double normalized_weight = 0.0;
+      if (has_weight_range && std::isfinite(particle.weight)) {
+        normalized_weight = (particle.weight - min_weight) / weight_range;
+      }
+      marker.colors.push_back(particleWeightColor(normalized_weight));
+    }
+
+    particle_weight_marker_pub_->publish(marker);
+  }
+
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr mask_sub_;
   rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr yaw_sub_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
@@ -1375,6 +1614,8 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
       pose_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr particle_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
+      particle_weight_marker_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::TimerBase::SharedPtr fake_yaw_timer_;
@@ -1398,10 +1639,14 @@ private:
   bool publish_debug_pointcloud_ = false;
   std::string debug_pointcloud_topic_;
   bool use_weighted_mean_pose_ = false;
+  bool publish_particle_weight_markers_ = false;
+  std::string particle_weight_marker_topic_;
+  double particle_weight_marker_scale_ = 0.035;
   std::string map_topic_;
   std::string yaw_topic_;
   bool use_fake_yaw_ = false;
   double fake_yaw_degrees_ = 0.0;
+  double yaw_zero_map_degrees_ = 0.0;
   std::string odom_topic_;
   bool use_stm32_gateway_odometry_ = false;
   std::string stm32_command_service_;
@@ -1433,6 +1678,9 @@ private:
   std::uint64_t active_request_id_ = 0;
   std::chrono::steady_clock::time_point active_request_sent_time_{};
   double active_request_yaw_rad_ = 0.0;
+  std::optional<rcj_loc::Particle> active_request_pose_;
+  std::optional<rcj_loc::Particle> last_success_pose_;
+  std::optional<rcj_loc::Particle> latest_failed_request_pose_;
   bool map_received_ = false;
   int filter_period_ms_ = 100;
   bool publish_processing_time_ = true;

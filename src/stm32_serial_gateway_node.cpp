@@ -5,6 +5,7 @@
 #include <cstring>
 #include <deque>
 #include <fcntl.h>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -15,8 +16,10 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <rclcpp_action/rclcpp_action.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include "rcj_localization/action/stm32_motion.hpp"
 #include "rcj_localization/srv/stm32_command.hpp"
 
 namespace
@@ -45,6 +48,7 @@ struct Command
 struct ParsedReply
 {
   std::string command_name;
+  std::string command_text;
   ReplyStatus status;
   double dx = 0.0;
   double dy = 0.0;
@@ -105,6 +109,11 @@ std::string commandName(CommandKind kind)
     return "cmd_request";
   }
   throw std::runtime_error("Unknown STM32 command kind.");
+}
+
+bool isMotionCommand(CommandKind kind)
+{
+  return kind == CommandKind::Distance || kind == CommandKind::Turn;
 }
 
 std::string formatNumber(double value)
@@ -191,6 +200,19 @@ std::string buildPacket(const Command &command)
          << std::uppercase << std::hex << std::setw(4) << std::setfill('0')
          << crc16CcittFalse(command_text) << "\r\n";
   return stream.str();
+}
+
+std::optional<ReplyStatus> parseReplyStatus(const std::string &status_text)
+{
+  if (status_text == "ok")
+  {
+    return ReplyStatus::Ok;
+  }
+  if (status_text == "eror")
+  {
+    return ReplyStatus::Eror;
+  }
+  return std::nullopt;
 }
 
 std::optional<std::uint16_t> parseCrcHex(const std::string &crc_text)
@@ -282,6 +304,7 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
   {
     if (tokens >> reply.dx >> reply.dy >> reply.dtheta && !(tokens >> extra_token))
     {
+      reply.command_text = reply.command_name;
       reply.status = ReplyStatus::Ok;
       return reply;
     }
@@ -291,6 +314,7 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
     if ((tokens >> reply.command_name >> status_text) && !(tokens >> extra_token) &&
         status_text == "eror")
     {
+      reply.command_text = reply.command_name;
       reply.status = ReplyStatus::Eror;
       return reply;
     }
@@ -298,19 +322,54 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
     return std::nullopt;
   }
 
+  if (reply.command_name == "cmd_dis")
+  {
+    Command command{};
+    command.kind = CommandKind::Distance;
+    if (tokens >> command.primary_value >> command.secondary_value >> status_text &&
+        !(tokens >> extra_token))
+    {
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
+  }
+  else if (reply.command_name == "cmd_turn")
+  {
+    Command command{};
+    command.kind = CommandKind::Turn;
+    command.secondary_value = 0.0;
+    if (tokens >> command.primary_value >> status_text && !(tokens >> extra_token))
+    {
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
+  }
+
+  tokens.clear();
+  tokens.str(command_text);
+  tokens >> reply.command_name;
   if (!(tokens >> status_text) || (tokens >> extra_token))
   {
     return std::nullopt;
   }
 
-  if (status_text == "ok")
+  const auto status = parseReplyStatus(status_text);
+  if (status.has_value())
   {
-    reply.status = ReplyStatus::Ok;
-    return reply;
-  }
-  if (status_text == "eror")
-  {
-    reply.status = ReplyStatus::Eror;
+    reply.command_text = reply.command_name;
+    reply.status = *status;
     return reply;
   }
 
@@ -324,20 +383,29 @@ class Stm32SerialGatewayNode : public rclcpp::Node
 public:
   using Stm32Command = rcj_localization::srv::Stm32Command;
   using Stm32CommandService = rclcpp::Service<Stm32Command>;
+  using Stm32Motion = rcj_localization::action::Stm32Motion;
+  using GoalHandleStm32Motion = rclcpp_action::ServerGoalHandle<Stm32Motion>;
 
   Stm32SerialGatewayNode()
       : Node("stm32_serial_gateway_node")
   {
     declare_parameter<std::string>("port", "/dev/ttyUSB0");
+    declare_parameter<std::string>("motion_action_name", "/stm32/motion");
     declare_parameter("baudrate", 115200);
     declare_parameter("tick_period_ms", 10);
     declare_parameter("resend_period_ms", 20);
     declare_parameter("command_timeout_ms", 50);
+    declare_parameter("motion_timeout_ms", 5000);
     declare_parameter("max_queue_size", 32);
     declare_parameter("enable_serial_log", true);
     declare_parameter("enable_raw_reply_log", false);
 
     port_ = get_parameter("port").as_string();
+    motion_action_name_ = get_parameter("motion_action_name").as_string();
+    if (motion_action_name_.empty())
+    {
+      throw std::runtime_error("Parameter 'motion_action_name' must not be empty.");
+    }
     baudrate_ = static_cast<int>(get_parameter("baudrate").as_int());
     tick_period_ms_ =
         std::max(1, static_cast<int>(get_parameter("tick_period_ms").as_int()));
@@ -345,6 +413,8 @@ public:
         std::max(1, static_cast<int>(get_parameter("resend_period_ms").as_int()));
     command_timeout_ms_ =
         std::max(1, static_cast<int>(get_parameter("command_timeout_ms").as_int()));
+    motion_timeout_ms_ =
+        std::max(1, static_cast<int>(get_parameter("motion_timeout_ms").as_int()));
     max_queue_size_ =
         static_cast<std::size_t>(std::max(1, static_cast<int>(get_parameter("max_queue_size").as_int())));
     enable_serial_log_ = get_parameter("enable_serial_log").as_bool();
@@ -362,6 +432,23 @@ public:
           handleCommandRequest(service, request_header, request);
         });
 
+    motion_action_server_ = rclcpp_action::create_server<Stm32Motion>(
+        this,
+        motion_action_name_,
+        std::bind(
+            &Stm32SerialGatewayNode::handleMotionGoal,
+            this,
+            std::placeholders::_1,
+            std::placeholders::_2),
+        std::bind(
+            &Stm32SerialGatewayNode::handleMotionCancel,
+            this,
+            std::placeholders::_1),
+        std::bind(
+            &Stm32SerialGatewayNode::handleMotionAccepted,
+            this,
+            std::placeholders::_1));
+
     timer_ = create_wall_timer(
         std::chrono::milliseconds(tick_period_ms_),
         [this]()
@@ -369,14 +456,16 @@ public:
 
     RCLCPP_INFO(
         get_logger(),
-        "stm32_serial_gateway_node started. service='/stm32/send_command', port='%s', "
-        "baudrate=%d, tick_period_ms=%d, resend_period_ms=%d, command_timeout_ms=%d, "
-        "max_queue_size=%zu, enable_raw_reply_log=%s",
+        "stm32_serial_gateway_node started. service='/stm32/send_command', motion_action='%s', port='%s', "
+        "baudrate=%d, tick_period_ms=%d, resend_period_ms=%d(no-op), command_timeout_ms=%d, "
+        "motion_timeout_ms=%d, max_queue_size=%zu, enable_raw_reply_log=%s",
+        motion_action_name_.c_str(),
         port_.c_str(),
         baudrate_,
         tick_period_ms_,
         resend_period_ms_,
         command_timeout_ms_,
+        motion_timeout_ms_,
         max_queue_size_,
         enable_raw_reply_log_ ? "true" : "false");
   }
@@ -393,12 +482,14 @@ private:
     std::string command_text;
     std::shared_ptr<Stm32CommandService> service;
     std::shared_ptr<rmw_request_id_t> request_header;
+    std::shared_ptr<GoalHandleStm32Motion> motion_goal_handle;
     std::uint32_t attempts = 0;
     bool started = false;
     bool awaiting_ack = false;
     bool write_in_progress = false;
     std::string outgoing_packet;
     std::size_t outgoing_offset = 0;
+    std::chrono::steady_clock::time_point enqueue_time{};
     std::chrono::steady_clock::time_point start_time{};
     std::chrono::steady_clock::time_point last_send_time{};
   };
@@ -419,6 +510,18 @@ private:
       return;
     }
 
+    if (isMotionCommand(command.kind))
+    {
+      sendResponse(
+          service,
+          request_header,
+          false,
+          "unsupported_command",
+          "cmd_dis and cmd_turn are available through the /stm32/motion action, not /stm32/send_command.",
+          0);
+      return;
+    }
+
     if (pending_queue_.size() >= max_queue_size_)
     {
       sendResponse(
@@ -436,6 +539,7 @@ private:
     pending.command_text = buildCommandText(command);
     pending.service = service;
     pending.request_header = request_header;
+    pending.enqueue_time = std::chrono::steady_clock::now();
     pending_queue_.push_back(std::move(pending));
 
     if (enable_serial_log_)
@@ -448,9 +552,104 @@ private:
     }
   }
 
+  rclcpp_action::GoalResponse handleMotionGoal(
+      const rclcpp_action::GoalUUID &,
+      std::shared_ptr<const Stm32Motion::Goal> goal)
+  {
+    try
+    {
+      const Command command = parseCommandSpec(goal->command);
+      if (!isMotionCommand(command.kind))
+      {
+        RCLCPP_WARN(
+            get_logger(),
+            "Rejected STM32 motion action goal '%s': expected cmd_dis or cmd_turn.",
+            goal->command.c_str());
+        return rclcpp_action::GoalResponse::REJECT;
+      }
+    }
+    catch (const std::exception &error)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "Rejected invalid STM32 motion action goal '%s': %s",
+          goal->command.c_str(),
+          error.what());
+      return rclcpp_action::GoalResponse::REJECT;
+    }
+
+    return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+  }
+
+  rclcpp_action::CancelResponse handleMotionCancel(
+      const std::shared_ptr<GoalHandleStm32Motion>)
+  {
+    RCLCPP_WARN(
+        get_logger(),
+        "Rejecting STM32 motion action cancel request: STM32 cancel is not implemented.");
+    return rclcpp_action::CancelResponse::REJECT;
+  }
+
+  void handleMotionAccepted(
+      const std::shared_ptr<GoalHandleStm32Motion> goal_handle)
+  {
+    const auto goal = goal_handle->get_goal();
+    Command command{};
+    try
+    {
+      command = parseCommandSpec(goal->command);
+      if (!isMotionCommand(command.kind))
+      {
+        sendMotionResult(
+            goal_handle,
+            false,
+            "invalid_command",
+            "STM32 motion action only accepts cmd_dis and cmd_turn.",
+            0);
+        return;
+      }
+    }
+    catch (const std::exception &error)
+    {
+      sendMotionResult(goal_handle, false, "invalid_command", error.what(), 0);
+      return;
+    }
+
+    if (pending_queue_.size() >= max_queue_size_)
+    {
+      sendMotionResult(
+          goal_handle,
+          false,
+          "queue_full",
+          "STM32 command queue is full.",
+          0);
+      return;
+    }
+
+    PendingCommand pending;
+    pending.command = command;
+    pending.command_text = buildCommandText(command);
+    pending.motion_goal_handle = goal_handle;
+    pending.enqueue_time = std::chrono::steady_clock::now();
+    pending_queue_.push_back(std::move(pending));
+
+    if (enable_serial_log_)
+    {
+      RCLCPP_INFO(
+          get_logger(),
+          "Queued STM32 motion action: %s (queue_size=%zu)",
+          pending_queue_.back().command_text.c_str(),
+          pending_queue_.size());
+    }
+  }
+
   void tick()
   {
     readIncomingData();
+
+    const auto now = std::chrono::steady_clock::now();
+    expireQueuedRequestCommands(now);
+    expireTimedOutMotionCommand(now);
 
     if (!active_command_.has_value())
     {
@@ -461,7 +660,6 @@ private:
       return;
     }
 
-    const auto now = std::chrono::steady_clock::now();
     if (active_command_->started &&
         (now - active_command_->start_time) >= std::chrono::milliseconds(command_timeout_ms_))
     {
@@ -478,13 +676,55 @@ private:
       return;
     }
 
-    const bool should_send =
-        !active_command_->awaiting_ack ||
-        (now - active_command_->last_send_time) >= std::chrono::milliseconds(resend_period_ms_);
-    if (should_send)
+    if (!active_command_->started)
     {
       beginSendingActiveCommand(now);
     }
+  }
+
+  void expireQueuedRequestCommands(const std::chrono::steady_clock::time_point &now)
+  {
+    auto command = pending_queue_.begin();
+    while (command != pending_queue_.end())
+    {
+      if (command->command.kind != CommandKind::Request ||
+          command->enqueue_time == std::chrono::steady_clock::time_point{} ||
+          (now - command->enqueue_time) < std::chrono::milliseconds(command_timeout_ms_))
+      {
+        ++command;
+        continue;
+      }
+
+      const std::string message =
+          "STM32 cmd_request timed out in gateway queue after " +
+          std::to_string(command_timeout_ms_) + " ms before it was sent.";
+      if (enable_serial_log_)
+      {
+        RCLCPP_WARN(get_logger(), "%s", message.c_str());
+      }
+      sendCommandResult(*command, false, "timeout", message);
+      command = pending_queue_.erase(command);
+    }
+  }
+
+  void expireTimedOutMotionCommand(const std::chrono::steady_clock::time_point &now)
+  {
+    if (!active_motion_command_.has_value() || !active_motion_command_->started)
+    {
+      return;
+    }
+
+    if ((now - active_motion_command_->start_time) < std::chrono::milliseconds(motion_timeout_ms_))
+    {
+      return;
+    }
+
+    const std::string command_text = active_motion_command_->command_text;
+    const std::string message =
+        "STM32 motion command '" + command_text + "' timed out after " +
+        std::to_string(motion_timeout_ms_) + " ms waiting for completion ACK.";
+    RCLCPP_WARN(get_logger(), "%s", message.c_str());
+    finishActiveMotionCommand(false, "motion_timeout", message);
   }
 
   void startNextCommand()
@@ -494,8 +734,24 @@ private:
       return;
     }
 
-    active_command_ = std::move(pending_queue_.front());
-    pending_queue_.pop_front();
+    auto next_command = pending_queue_.begin();
+    if (active_motion_command_.has_value())
+    {
+      next_command = std::find_if(
+          pending_queue_.begin(),
+          pending_queue_.end(),
+          [](const PendingCommand &pending)
+          {
+            return pending.command.kind == CommandKind::Request;
+          });
+      if (next_command == pending_queue_.end())
+      {
+        return;
+      }
+    }
+
+    active_command_ = std::move(*next_command);
+    pending_queue_.erase(next_command);
   }
 
   void beginSendingActiveCommand(const std::chrono::steady_clock::time_point &now)
@@ -574,6 +830,12 @@ private:
           get_logger(),
           "Sent STM32 command: %s",
           sent_packet.substr(0, sent_packet.size() - 2).c_str());
+    }
+
+    if (isMotionCommand(command.command.kind))
+    {
+      active_motion_command_ = std::move(command);
+      active_command_.reset();
     }
   }
 
@@ -715,24 +977,43 @@ private:
 
   void handleReplyLine(const std::string &line)
   {
-    if (!active_command_.has_value())
-    {
-      return;
-    }
-
     const auto parsed_reply = parseReplyLine(line);
     if (!parsed_reply.has_value())
     {
       return;
     }
 
-    const std::string expected_command_name = commandName(active_command_->command.kind);
-    if (parsed_reply->command_name != expected_command_name)
+    if (active_command_.has_value() &&
+        replyMatchesCommand(*parsed_reply, *active_command_))
     {
+      handleActiveCommandReply(*parsed_reply);
       return;
     }
 
-    if (parsed_reply->status == ReplyStatus::Ok)
+    if (active_motion_command_.has_value() &&
+        replyMatchesCommand(*parsed_reply, *active_motion_command_))
+    {
+      handleActiveMotionReply(*parsed_reply);
+      return;
+    }
+  }
+
+  bool replyMatchesCommand(
+      const ParsedReply &parsed_reply,
+      const PendingCommand &pending) const
+  {
+    const std::string expected_command_name = commandName(pending.command.kind);
+    if (parsed_reply.command_name != expected_command_name)
+    {
+      return false;
+    }
+    return parsed_reply.command_text == pending.command_text ||
+           parsed_reply.command_text == expected_command_name;
+  }
+
+  void handleActiveCommandReply(const ParsedReply &parsed_reply)
+  {
+    if (parsed_reply.status == ReplyStatus::Ok)
     {
       if (enable_serial_log_)
       {
@@ -741,33 +1022,33 @@ private:
           RCLCPP_INFO(
               get_logger(),
               "STM32 replied to '%s' with dx=%.6f, dy=%.6f, dtheta=%.6f.",
-              parsed_reply->command_name.c_str(),
-              parsed_reply->dx,
-              parsed_reply->dy,
-              parsed_reply->dtheta);
+              parsed_reply.command_name.c_str(),
+              parsed_reply.dx,
+              parsed_reply.dy,
+              parsed_reply.dtheta);
         }
         else
         {
           RCLCPP_INFO(
               get_logger(),
               "STM32 acknowledged command '%s' with ok.",
-              parsed_reply->command_name.c_str());
+              active_command_->command_text.c_str());
         }
       }
 
       if (active_command_->command.kind == CommandKind::Request)
       {
         std::ostringstream message;
-        message << "STM32 request data received: dx=" << formatNumber(parsed_reply->dx)
-                << ", dy=" << formatNumber(parsed_reply->dy)
-                << ", dtheta=" << formatNumber(parsed_reply->dtheta) << ".";
+        message << "STM32 request data received: dx=" << formatNumber(parsed_reply.dx)
+                << ", dy=" << formatNumber(parsed_reply.dy)
+                << ", dtheta=" << formatNumber(parsed_reply.dtheta) << ".";
         finishActiveCommand(
             true,
             "ok",
             message.str(),
-            parsed_reply->dx,
-            parsed_reply->dy,
-            parsed_reply->dtheta);
+            parsed_reply.dx,
+            parsed_reply.dy,
+            parsed_reply.dtheta);
       }
       else
       {
@@ -780,10 +1061,40 @@ private:
     {
       RCLCPP_WARN(
           get_logger(),
-          "STM32 replied 'eror' for '%s'; resending after %d ms unless command times out.",
-          parsed_reply->command_name.c_str(),
-          resend_period_ms_);
+          "STM32 replied 'eror' for '%s'.",
+          parsed_reply.command_name.c_str());
     }
+    finishActiveCommand(false, "eror", "STM32 replied eror.");
+  }
+
+  void handleActiveMotionReply(const ParsedReply &parsed_reply)
+  {
+    if (!active_motion_command_.has_value())
+    {
+      return;
+    }
+
+    if (parsed_reply.status == ReplyStatus::Ok)
+    {
+      if (enable_serial_log_)
+      {
+        RCLCPP_INFO(
+            get_logger(),
+            "STM32 acknowledged command '%s' with ok.",
+            active_motion_command_->command_text.c_str());
+      }
+      finishActiveMotionCommand(true, "ok", "STM32 command acknowledged.");
+      return;
+    }
+
+    if (enable_serial_log_)
+    {
+      RCLCPP_WARN(
+          get_logger(),
+          "STM32 replied 'eror' for active motion command '%s'.",
+          active_motion_command_->command_text.c_str());
+    }
+    finishActiveMotionCommand(false, "eror", "STM32 replied eror for active motion command.");
   }
 
   void finishActiveCommand(
@@ -799,11 +1110,79 @@ private:
       return;
     }
 
-    const auto service = active_command_->service;
-    const auto request_header = active_command_->request_header;
-    const std::uint32_t attempts = active_command_->attempts;
-    sendResponse(service, request_header, success, status, message, attempts, dx, dy, dtheta);
+    const PendingCommand completed_command = *active_command_;
+    sendCommandResult(completed_command, success, status, message, dx, dy, dtheta);
     active_command_.reset();
+  }
+
+  void finishActiveMotionCommand(
+      bool success,
+      const std::string &status,
+      const std::string &message)
+  {
+    if (!active_motion_command_.has_value())
+    {
+      return;
+    }
+
+    const PendingCommand completed_command = *active_motion_command_;
+    sendCommandResult(completed_command, success, status, message);
+    active_motion_command_.reset();
+  }
+
+  void sendCommandResult(
+      const PendingCommand &command,
+      bool success,
+      const std::string &status,
+      const std::string &message,
+      double dx = 0.0,
+      double dy = 0.0,
+      double dtheta = 0.0)
+  {
+    if (command.motion_goal_handle)
+    {
+      sendMotionResult(
+          command.motion_goal_handle,
+          success,
+          status,
+          message,
+          command.attempts);
+      return;
+    }
+
+    sendResponse(
+        command.service,
+        command.request_header,
+        success,
+        status,
+        message,
+        command.attempts,
+        dx,
+        dy,
+        dtheta);
+  }
+
+  void sendMotionResult(
+      const std::shared_ptr<GoalHandleStm32Motion> &goal_handle,
+      bool success,
+      const std::string &status,
+      const std::string &message,
+      std::uint32_t attempts)
+  {
+    auto result = std::make_shared<Stm32Motion::Result>();
+    result->success = success;
+    result->status = status;
+    result->message = message;
+    result->attempts = attempts;
+
+    if (success)
+    {
+      goal_handle->succeed(result);
+    }
+    else
+    {
+      goal_handle->abort(result);
+    }
   }
 
   void sendResponse(
@@ -829,10 +1208,12 @@ private:
   }
 
   std::string port_;
+  std::string motion_action_name_;
   int baudrate_ = 115200;
   int tick_period_ms_ = 10;
   int resend_period_ms_ = 20;
   int command_timeout_ms_ = 50;
+  int motion_timeout_ms_ = 5000;
   std::size_t max_queue_size_ = 32;
   bool enable_serial_log_ = true;
   bool enable_raw_reply_log_ = false;
@@ -840,7 +1221,9 @@ private:
   std::string incoming_buffer_;
   std::deque<PendingCommand> pending_queue_;
   std::optional<PendingCommand> active_command_;
+  std::optional<PendingCommand> active_motion_command_;
   rclcpp::Service<Stm32Command>::SharedPtr service_;
+  rclcpp_action::Server<Stm32Motion>::SharedPtr motion_action_server_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
