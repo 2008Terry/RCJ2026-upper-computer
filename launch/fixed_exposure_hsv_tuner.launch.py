@@ -94,6 +94,27 @@ def generate_launch_description() -> LaunchDescription:
                 "hsv_show_overlay_image", default_value="true"
             ),  # Show the HSV overlay window
             DeclareLaunchArgument(
+                "hsv_publish_debug_images", default_value="false"
+            ),  # Master switch for HSV debug image topics
+            DeclareLaunchArgument(
+                "hsv_publish_input_image", default_value="true"
+            ),  # Publish HSV input debug topic when subscribed
+            DeclareLaunchArgument(
+                "hsv_publish_white_mask", default_value="true"
+            ),  # Publish HSV white debug mask when subscribed
+            DeclareLaunchArgument(
+                "hsv_publish_green_mask", default_value="true"
+            ),  # Publish HSV green debug mask when subscribed
+            DeclareLaunchArgument(
+                "hsv_publish_black_mask", default_value="true"
+            ),  # Publish HSV black debug mask when subscribed
+            DeclareLaunchArgument(
+                "hsv_publish_noise_mask", default_value="true"
+            ),  # Publish HSV noise debug mask when subscribed
+            DeclareLaunchArgument(
+                "hsv_publish_overlay_image", default_value="true"
+            ),  # Publish HSV overlay debug topic when subscribed
+            DeclareLaunchArgument(
                 "hsv_display_max_width", default_value="960"
             ),  # HSV window max width
             DeclareLaunchArgument(
@@ -175,6 +196,34 @@ def generate_launch_description() -> LaunchDescription:
                         ),
                         "show_overlay_image": ParameterValue(
                             LaunchConfiguration("hsv_show_overlay_image"),
+                            value_type=bool,
+                        ),
+                        "publish_debug_images": ParameterValue(
+                            LaunchConfiguration("hsv_publish_debug_images"),
+                            value_type=bool,
+                        ),
+                        "publish_input_image": ParameterValue(
+                            LaunchConfiguration("hsv_publish_input_image"),
+                            value_type=bool,
+                        ),
+                        "publish_white_mask": ParameterValue(
+                            LaunchConfiguration("hsv_publish_white_mask"),
+                            value_type=bool,
+                        ),
+                        "publish_green_mask": ParameterValue(
+                            LaunchConfiguration("hsv_publish_green_mask"),
+                            value_type=bool,
+                        ),
+                        "publish_black_mask": ParameterValue(
+                            LaunchConfiguration("hsv_publish_black_mask"),
+                            value_type=bool,
+                        ),
+                        "publish_noise_mask": ParameterValue(
+                            LaunchConfiguration("hsv_publish_noise_mask"),
+                            value_type=bool,
+                        ),
+                        "publish_overlay_image": ParameterValue(
+                            LaunchConfiguration("hsv_publish_overlay_image"),
                             value_type=bool,
                         ),
                         "display_max_width": ParameterValue(

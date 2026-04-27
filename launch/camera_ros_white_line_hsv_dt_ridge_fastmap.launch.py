@@ -390,6 +390,13 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "remap_enable_image_view", default_value="false"
             ),  # Whether to show remap windows
+            DeclareLaunchArgument("remap_show_input_image", default_value="true"),  # Show remap input window when remap image_view is true
+            DeclareLaunchArgument("remap_show_output_image", default_value="true"),  # Show remap output window when remap image_view is true
+            DeclareLaunchArgument(
+                "remap_publish_debug_images", default_value="false"
+            ),  # Master switch for remap debug image topics
+            DeclareLaunchArgument("remap_publish_input_image", default_value="true"),  # Publish remap input debug topic when subscribed
+            DeclareLaunchArgument("remap_publish_output_image", default_value="true"),  # Publish remap output debug topic when subscribed
             DeclareLaunchArgument(
                 "remap_enable_timing_log", default_value="true"
             ),  # Whether to log remap timing
@@ -417,6 +424,15 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "hsv_show_overlay_image", default_value="true"
             ),  # Show the HSV overlay window when hsv_enable_image_view is true
+            DeclareLaunchArgument(
+                "hsv_publish_debug_images", default_value="false"
+            ),  # Master switch for HSV debug image topics
+            DeclareLaunchArgument("hsv_publish_input_image", default_value="true"),  # Publish HSV input debug topic when subscribed
+            DeclareLaunchArgument("hsv_publish_white_mask", default_value="true"),  # Publish HSV white debug mask when subscribed
+            DeclareLaunchArgument("hsv_publish_green_mask", default_value="true"),  # Publish HSV green debug mask when subscribed
+            DeclareLaunchArgument("hsv_publish_black_mask", default_value="true"),  # Publish HSV black debug mask when subscribed
+            DeclareLaunchArgument("hsv_publish_noise_mask", default_value="true"),  # Publish HSV noise debug mask when subscribed
+            DeclareLaunchArgument("hsv_publish_overlay_image", default_value="true"),  # Publish HSV overlay debug topic when subscribed
             DeclareLaunchArgument("hsv_display_max_width", default_value="960"),  # HSV window max width
             DeclareLaunchArgument("hsv_display_max_height", default_value="720"),  # HSV window max height
             DeclareLaunchArgument(
@@ -489,6 +505,9 @@ def generate_launch_description():
                 "ridge_show_orientation_valid_mask", default_value="true"
             ),  # Whether to show orientation-valid ridge mask
             DeclareLaunchArgument(
+                "ridge_show_side_support_seed_mask", default_value="false"
+            ),  # Whether to show supported side-scan seed mask
+            DeclareLaunchArgument(
                 "ridge_show_side_support_mask", default_value="true"
             ),  # Whether to show side-support mask
             DeclareLaunchArgument(
@@ -504,6 +523,40 @@ def generate_launch_description():
                 "ridge_show_white_final_mask", default_value="true"
             ),  # Whether to show final white mask
             DeclareLaunchArgument("ridge_show_debug_image", default_value="true"),  # Whether to show composite debug image
+            DeclareLaunchArgument(
+                "ridge_publish_debug_images", default_value="false"
+            ),  # Master switch for ridge debug image topics
+            DeclareLaunchArgument("ridge_publish_morph_mask", default_value="true"),  # Publish ridge input morph mask when subscribed
+            DeclareLaunchArgument("ridge_publish_distance_transform", default_value="true"),  # Publish ridge distance-transform debug image when subscribed
+            DeclareLaunchArgument("ridge_publish_green_mask", default_value="true"),  # Publish ridge input green mask when subscribed
+            DeclareLaunchArgument("ridge_publish_black_mask", default_value="true"),  # Publish ridge input black mask when subscribed
+            DeclareLaunchArgument("ridge_publish_noise_mask", default_value="true"),  # Publish ridge input noise mask when subscribed
+            DeclareLaunchArgument("ridge_publish_ridge_mask", default_value="true"),  # Publish extracted ridge mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_candidate_prefilter_mask", default_value="true"
+            ),  # Publish candidate-prefilter ridge mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_orientation_valid_mask", default_value="true"
+            ),  # Publish orientation-valid seed mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_side_support_seed_mask", default_value="true"
+            ),  # Publish supported side-scan seed mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_side_support_mask", default_value="true"
+            ),  # Publish side-support mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_width_supported_ridge_mask", default_value="true"
+            ),  # Publish width-filtered ridge mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_length_filtered_ridge_mask", default_value="true"
+            ),  # Publish length-filtered ridge mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_reconstructed_mask", default_value="true"
+            ),  # Publish reconstructed mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_white_final_mask", default_value="true"
+            ),  # Keep final white mask topic available when subscribed
+            DeclareLaunchArgument("ridge_publish_debug_image", default_value="true"),  # Publish composite debug image when subscribed
             DeclareLaunchArgument(
                 "ridge_enable_timing_log", default_value="true"
             ),  # Whether to log ridge timing summary

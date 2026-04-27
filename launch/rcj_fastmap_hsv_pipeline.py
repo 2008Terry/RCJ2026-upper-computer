@@ -12,6 +12,10 @@ from rcj_shared_launch_params import (
 )
 
 
+def optional_launch_config(name, default_value):
+    return LaunchConfiguration(name, default=default_value)
+
+
 def find_latest_fastmap_file():
     config_dir = Path(get_package_share_directory("rcj_localization")) / "config"
     candidates = sorted(config_dir.glob("undistort_map_*_fast.xml"))
@@ -115,6 +119,26 @@ def build_camera_hsv_fastmap_nodes(context, *, use_apply_mask_argument=False):
                     "enable_image_view": LaunchConfiguration(
                         "remap_enable_image_view"
                     ),
+                    "show_input_image": ParameterValue(
+                        optional_launch_config("remap_show_input_image", "true"),
+                        value_type=bool,
+                    ),
+                    "show_output_image": ParameterValue(
+                        optional_launch_config("remap_show_output_image", "true"),
+                        value_type=bool,
+                    ),
+                    "publish_debug_images": ParameterValue(
+                        optional_launch_config("remap_publish_debug_images", "false"),
+                        value_type=bool,
+                    ),
+                    "publish_input_image": ParameterValue(
+                        optional_launch_config("remap_publish_input_image", "true"),
+                        value_type=bool,
+                    ),
+                    "publish_output_image": ParameterValue(
+                        optional_launch_config("remap_publish_output_image", "true"),
+                        value_type=bool,
+                    ),
                     "enable_timing_log": ParameterValue(
                         LaunchConfiguration("remap_enable_timing_log"),
                         value_type=bool,
@@ -176,6 +200,34 @@ def build_camera_hsv_fastmap_nodes(context, *, use_apply_mask_argument=False):
                     ),
                     "show_overlay_image": ParameterValue(
                         LaunchConfiguration("hsv_show_overlay_image"),
+                        value_type=bool,
+                    ),
+                    "publish_debug_images": ParameterValue(
+                        optional_launch_config("hsv_publish_debug_images", "false"),
+                        value_type=bool,
+                    ),
+                    "publish_input_image": ParameterValue(
+                        optional_launch_config("hsv_publish_input_image", "true"),
+                        value_type=bool,
+                    ),
+                    "publish_white_mask": ParameterValue(
+                        optional_launch_config("hsv_publish_white_mask", "true"),
+                        value_type=bool,
+                    ),
+                    "publish_green_mask": ParameterValue(
+                        optional_launch_config("hsv_publish_green_mask", "true"),
+                        value_type=bool,
+                    ),
+                    "publish_black_mask": ParameterValue(
+                        optional_launch_config("hsv_publish_black_mask", "true"),
+                        value_type=bool,
+                    ),
+                    "publish_noise_mask": ParameterValue(
+                        optional_launch_config("hsv_publish_noise_mask", "true"),
+                        value_type=bool,
+                    ),
+                    "publish_overlay_image": ParameterValue(
+                        optional_launch_config("hsv_publish_overlay_image", "true"),
                         value_type=bool,
                     ),
                     "display_max_width": ParameterValue(
@@ -315,6 +367,10 @@ def build_dt_ridge_node():
                     LaunchConfiguration("ridge_show_orientation_valid_mask"),
                     value_type=bool,
                 ),
+                "show_side_support_seed_mask": ParameterValue(
+                    optional_launch_config("ridge_show_side_support_seed_mask", "false"),
+                    value_type=bool,
+                ),
                 "show_side_support_mask": ParameterValue(
                     LaunchConfiguration("ridge_show_side_support_mask"),
                     value_type=bool,
@@ -337,6 +393,64 @@ def build_dt_ridge_node():
                 ),
                 "show_debug_image": ParameterValue(
                     LaunchConfiguration("ridge_show_debug_image"), value_type=bool
+                ),
+                "publish_debug_images": ParameterValue(
+                    optional_launch_config("ridge_publish_debug_images", "false"),
+                    value_type=bool,
+                ),
+                "publish_morph_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_morph_mask", "true"), value_type=bool
+                ),
+                "publish_distance_transform": ParameterValue(
+                    optional_launch_config("ridge_publish_distance_transform", "true"),
+                    value_type=bool,
+                ),
+                "publish_green_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_green_mask", "true"), value_type=bool
+                ),
+                "publish_black_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_black_mask", "true"), value_type=bool
+                ),
+                "publish_noise_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_noise_mask", "true"), value_type=bool
+                ),
+                "publish_ridge_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_ridge_mask", "true"), value_type=bool
+                ),
+                "publish_candidate_prefilter_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_candidate_prefilter_mask", "true"),
+                    value_type=bool,
+                ),
+                "publish_orientation_valid_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_orientation_valid_mask", "true"),
+                    value_type=bool,
+                ),
+                "publish_side_support_seed_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_side_support_seed_mask", "true"),
+                    value_type=bool,
+                ),
+                "publish_side_support_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_side_support_mask", "true"),
+                    value_type=bool,
+                ),
+                "publish_width_supported_ridge_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_width_supported_ridge_mask", "true"),
+                    value_type=bool,
+                ),
+                "publish_length_filtered_ridge_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_length_filtered_ridge_mask", "true"),
+                    value_type=bool,
+                ),
+                "publish_reconstructed_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_reconstructed_mask", "true"),
+                    value_type=bool,
+                ),
+                "publish_white_final_mask": ParameterValue(
+                    optional_launch_config("ridge_publish_white_final_mask", "true"),
+                    value_type=bool,
+                ),
+                "publish_debug_image": ParameterValue(
+                    optional_launch_config("ridge_publish_debug_image", "true"), value_type=bool
                 ),
                 "enable_timing_debug": ParameterValue(
                     LaunchConfiguration("ridge_enable_timing_log"),

@@ -17,6 +17,7 @@
 #endif
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <std_msgs/msg/header.hpp>
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -218,6 +219,13 @@ public:
     declare_parameter("show_black_mask", false);
     declare_parameter("show_noise_mask", false);
     declare_parameter("show_overlay_image", true);
+    declare_parameter("publish_debug_images", false);
+    declare_parameter("publish_input_image", true);
+    declare_parameter("publish_white_mask", true);
+    declare_parameter("publish_green_mask", true);
+    declare_parameter("publish_black_mask", true);
+    declare_parameter("publish_noise_mask", true);
+    declare_parameter("publish_overlay_image", true);
     declare_parameter("display_max_width", 960);
     declare_parameter("display_max_height", 720);
 
@@ -243,6 +251,12 @@ public:
     green_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/green_mask", 10);
     black_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/black_mask", 10);
     noise_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/noise_mask", 10);
+    debug_input_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/input_image", 10);
+    debug_white_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/white_mask", 10);
+    debug_green_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/green_mask", 10);
+    debug_black_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/black_mask", 10);
+    debug_noise_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/noise_mask", 10);
+    debug_overlay_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/overlay_image", 10);
 
     RCLCPP_INFO(
       get_logger(),
@@ -352,6 +366,13 @@ private:
     show_black_mask_ = get_parameter("show_black_mask").as_bool();
     show_noise_mask_ = get_parameter("show_noise_mask").as_bool();
     show_overlay_image_ = get_parameter("show_overlay_image").as_bool();
+    publish_debug_images_ = get_parameter("publish_debug_images").as_bool();
+    publish_input_image_ = get_parameter("publish_input_image").as_bool();
+    publish_white_mask_ = get_parameter("publish_white_mask").as_bool();
+    publish_green_mask_ = get_parameter("publish_green_mask").as_bool();
+    publish_black_mask_ = get_parameter("publish_black_mask").as_bool();
+    publish_noise_mask_ = get_parameter("publish_noise_mask").as_bool();
+    publish_overlay_image_ = get_parameter("publish_overlay_image").as_bool();
     display_max_width_ =
       std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
     display_max_height_ =
@@ -546,6 +567,56 @@ private:
       printCurrentParameters();
     }
     return true;
+  }
+
+  template<typename PublisherT>
+  bool shouldPublishDebugImage(const std::shared_ptr<PublisherT> & publisher, bool image_enabled) const
+  {
+    return publish_debug_images_ && image_enabled && publisher != nullptr &&
+           publisher->get_subscription_count() > 0U;
+  }
+
+  bool publishDebugImageIfNeeded(
+    const rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr & publisher,
+    bool image_enabled,
+    const std_msgs::msg::Header & header,
+    const std::string & encoding,
+    const cv::Mat & image)
+  {
+    if (!shouldPublishDebugImage(publisher, image_enabled)) {
+      return false;
+    }
+    publisher->publish(*cv_bridge::CvImage(header, encoding, image).toImageMsg());
+    return true;
+  }
+
+  bool publishDebugImages(
+    const std_msgs::msg::Header & header,
+    const cv::Mat & frame,
+    const cv::Mat & white_mask,
+    const cv::Mat & green_mask,
+    const cv::Mat & black_mask,
+    const cv::Mat & noise_mask)
+  {
+    bool published_any = false;
+    published_any |= publishDebugImageIfNeeded(
+      debug_input_pub_, publish_input_image_, header, "bgr8", frame);
+    published_any |= publishDebugImageIfNeeded(
+      debug_white_mask_pub_, publish_white_mask_, header, "mono8", white_mask);
+    published_any |= publishDebugImageIfNeeded(
+      debug_green_mask_pub_, publish_green_mask_, header, "mono8", green_mask);
+    published_any |= publishDebugImageIfNeeded(
+      debug_black_mask_pub_, publish_black_mask_, header, "mono8", black_mask);
+    published_any |= publishDebugImageIfNeeded(
+      debug_noise_mask_pub_, publish_noise_mask_, header, "mono8", noise_mask);
+
+    if (shouldPublishDebugImage(debug_overlay_pub_, publish_overlay_image_)) {
+      cv::Mat overlay = frame.clone();
+      overlay.setTo(cv::Scalar(0, 255, 0), white_mask);
+      debug_overlay_pub_->publish(*cv_bridge::CvImage(header, "bgr8", overlay).toImageMsg());
+      published_any = true;
+    }
+    return published_any;
   }
 
   void resetTimingSummary()
@@ -761,6 +832,7 @@ private:
     green_mask_pub_->publish(*cv_bridge::CvImage(msg->header, "mono8", green_mask).toImageMsg());
     black_mask_pub_->publish(*cv_bridge::CvImage(msg->header, "mono8", black_mask).toImageMsg());
     noise_mask_pub_->publish(*cv_bridge::CvImage(msg->header, "mono8", noise_mask).toImageMsg());
+    publishDebugImages(msg->header, frame, white_mask, green_mask, black_mask, noise_mask);
     if (timing_enabled) {
       recordStageDuration(
         timing.stage_us,
@@ -808,6 +880,12 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr green_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr black_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr noise_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_input_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_white_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_green_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_black_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_noise_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_overlay_pub_;
 
   int white_h_min_{0};
   int white_h_max_{kHueMax};
@@ -828,6 +906,13 @@ private:
   bool show_black_mask_{false};
   bool show_noise_mask_{false};
   bool show_overlay_image_{true};
+  bool publish_debug_images_{false};
+  bool publish_input_image_{true};
+  bool publish_white_mask_{true};
+  bool publish_green_mask_{true};
+  bool publish_black_mask_{true};
+  bool publish_noise_mask_{true};
+  bool publish_overlay_image_{true};
   bool headless_warned_{false};
   bool controls_window_created_{false};
   bool controls_window_initialized_{false};
