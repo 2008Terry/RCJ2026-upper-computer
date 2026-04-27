@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -6,6 +7,16 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_shared_launch_params import (
+    camera_control_launch_arguments,
+    camera_control_parameters,
+    declare_camera_control_arguments,
+    declare_hsv_green_white_black_arguments,
+    hsv_green_white_black_launch_arguments,
+    hsv_green_white_black_parameters,
+)
 
 
 def generate_launch_description():
@@ -22,6 +33,11 @@ def generate_launch_description():
     frame_id = LaunchConfiguration("frame_id")
     camera_info_url = LaunchConfiguration("camera_info_url")
     use_node_time = LaunchConfiguration("use_node_time")
+    exposure_time = LaunchConfiguration("exposure_time")
+    exposure_time_mode = LaunchConfiguration("exposure_time_mode")
+    ae_enable = LaunchConfiguration("ae_enable")
+    analogue_gain = LaunchConfiguration("analogue_gain")
+    awb_enable = LaunchConfiguration("awb_enable")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
     lut_file = LaunchConfiguration("lut_file")
@@ -41,6 +57,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_node_time", default_value="false"),  # Whether camera_ros uses node clock
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # CameraInfo topic name
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic name
+            *declare_camera_control_arguments(),
             DeclareLaunchArgument("lut_file", default_value=str(default_lut)),  # LUT XML file for pixel-to-ground projection
             DeclareLaunchArgument(
                 "robot_mask_path",
@@ -157,6 +174,7 @@ def generate_launch_description():
                         "frame_id": frame_id,
                         "camera_info_url": camera_info_url,
                         "use_node_time": ParameterValue(use_node_time, value_type=bool),
+                        **camera_control_parameters(),
                     }
                 ],
             ),

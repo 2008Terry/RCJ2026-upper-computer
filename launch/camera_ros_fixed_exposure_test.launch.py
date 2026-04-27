@@ -47,11 +47,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("use_node_time", default_value="false"),  # Use node clock for timestamps.
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # Remapped camera info topic.
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Remapped image output topic.
-            DeclareLaunchArgument("exposure_time", default_value="10000"),  # Manual exposure time in microseconds.
-            DeclareLaunchArgument("exposure_time_mode", default_value="1"),  # Exposure control mode.
-            DeclareLaunchArgument("ae_enable", default_value="true"),  # Enable auto exposure.
-            DeclareLaunchArgument("analogue_gain", default_value="1.0"),  # Sensor analog gain multiplier.
-            DeclareLaunchArgument("awb_enable", default_value="true"),  # Enable auto white balance.
+            *declare_camera_control_arguments(),
             DeclareLaunchArgument("enable_camera_debug_view", default_value="true"),  # Start the debug viewer node.
             DeclareLaunchArgument("camera_node_name", default_value="/camera"),  # Camera node name for parameter updates.
             DeclareLaunchArgument(
@@ -85,15 +81,7 @@ def generate_launch_description() -> LaunchDescription:
                         # On newer libcamera builds, manual exposure is typically selected
                         # via ExposureTimeMode=1. Keeping AeEnable=false also helps when
                         # testing on setups that still expose the older auto-exposure flag.
-                        "ExposureTime": ParameterValue(exposure_time, value_type=int),
-                        "ExposureTimeMode": ParameterValue(
-                            exposure_time_mode, value_type=int
-                        ),
-                        "AeEnable": ParameterValue(ae_enable, value_type=bool),
-                        "AnalogueGain": ParameterValue(
-                            analogue_gain, value_type=float
-                        ),
-                        "AwbEnable": ParameterValue(awb_enable, value_type=bool),
+                        **camera_control_parameters(),
                     }
                 ],
             ),

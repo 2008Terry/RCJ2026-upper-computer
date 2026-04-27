@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
@@ -8,6 +9,12 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_shared_launch_params import (
+    camera_ros_parameters,
+    declare_camera_ros_arguments,
+)
 
 
 def find_latest_fastmap_file():
@@ -79,25 +86,7 @@ def build_nodes(context):
                 ],
                 parameters=[
                     {
-                        "camera": ParameterValue(
-                            LaunchConfiguration("camera_index"),
-                            value_type=int,
-                        ),
-                        "role": LaunchConfiguration("role"),
-                        "format": LaunchConfiguration("format"),
-                        "width": ParameterValue(width_value, value_type=int),
-                        "height": ParameterValue(height_value, value_type=int),
-                        "orientation": ParameterValue(
-                            LaunchConfiguration("orientation"),
-                            value_type=int,
-                        ),
-                        "sensor_mode": LaunchConfiguration("sensor_mode"),
-                        "frame_id": LaunchConfiguration("frame_id"),
-                        "camera_info_url": LaunchConfiguration("camera_info_url"),
-                        "use_node_time": ParameterValue(
-                            LaunchConfiguration("use_node_time"),
-                            value_type=bool,
-                        ),
+                        **camera_ros_parameters(width_value, height_value),
                     }
                 ],
             ),
@@ -119,16 +108,7 @@ def build_nodes(context):
 def generate_launch_description():
     return LaunchDescription(
         [
-            DeclareLaunchArgument("camera_index", default_value="0"),  # Camera index
-            DeclareLaunchArgument("role", default_value="viewfinder"),  # camera_ros role
-            DeclareLaunchArgument("format", default_value="RGB888"),  # Camera pixel format
-            DeclareLaunchArgument("width", default_value="800"),  # Capture width, empty means use fastmap source width
-            DeclareLaunchArgument("height", default_value="600"),  # Capture height, empty means use fastmap source height
-            DeclareLaunchArgument("orientation", default_value="0"),  # Camera rotation angle
-            DeclareLaunchArgument("sensor_mode", default_value="1332:990"),  # Camera sensor mode
-            DeclareLaunchArgument("frame_id", default_value="camera"),  # Image frame id
-            DeclareLaunchArgument("camera_info_url", default_value=""),  # Camera calibration URL
-            DeclareLaunchArgument("use_node_time", default_value="false"),  # Use node time instead of sensor timestamps
+            *declare_camera_ros_arguments(),
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # Camera info topic
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
             DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),  # Remapped image topic

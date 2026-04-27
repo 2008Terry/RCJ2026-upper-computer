@@ -260,6 +260,9 @@ private:
     double dy_cm = 0.0;
     double dtheta_deg = 0.0;
     double request_yaw_rad = 0.0;
+    std::uint64_t total_request_count = 0;
+    std::uint64_t successful_request_count = 0;
+    double success_rate_percent = 0.0;
     std::optional<rcj_loc::Particle> request_pose;
   };
 
@@ -1056,6 +1059,7 @@ private:
       active_request_yaw_rad_ = 0.0;
       active_request_sent_time_ = std::chrono::steady_clock::time_point{};
       active_request_pose_.reset();
+      recordGatewayOdomResultLocked(timeout_result);
       pending_gateway_result_ = timeout_result;
     }
 
@@ -1075,6 +1079,25 @@ private:
     std::optional<GatewayOdomResult> result = pending_gateway_result_;
     pending_gateway_result_.reset();
     return result;
+  }
+
+  bool isSuccessfulGatewayResult(const GatewayOdomResult &result) const {
+    return result.success && result.status == "ok";
+  }
+
+  void recordGatewayOdomResultLocked(GatewayOdomResult &result) {
+    ++gateway_request_total_count_;
+    if (isSuccessfulGatewayResult(result)) {
+      ++gateway_request_successful_count_;
+    }
+
+    result.total_request_count = gateway_request_total_count_;
+    result.successful_request_count = gateway_request_successful_count_;
+    result.success_rate_percent =
+        gateway_request_total_count_ == 0
+            ? 0.0
+            : (100.0 * static_cast<double>(gateway_request_successful_count_) /
+               static_cast<double>(gateway_request_total_count_));
   }
 
   void rememberFailedGatewayRequest(const GatewayOdomResult &result) {
@@ -1215,6 +1238,7 @@ private:
     active_request_yaw_rad_ = 0.0;
     active_request_sent_time_ = std::chrono::steady_clock::time_point{};
     active_request_pose_.reset();
+    recordGatewayOdomResultLocked(result);
     pending_gateway_result_ = result;
   }
 
@@ -1388,11 +1412,15 @@ private:
               this->get_logger(),
               "STM32 odometry response %" PRIu64
               ": success=%s, status='%s', dx=%.6f cm, dy=%.6f cm, "
-              "dtheta=%.6f deg.",
+              "dtheta=%.6f deg, total_requests=%" PRIu64
+              ", successful_requests=%" PRIu64 ", success_rate=%.2f%%.",
               gateway_result->request_id,
               gateway_result->success ? "true" : "false",
               gateway_result->status.c_str(), gateway_result->dx_cm,
-              gateway_result->dy_cm, gateway_result->dtheta_deg);
+              gateway_result->dy_cm, gateway_result->dtheta_deg,
+              gateway_result->total_request_count,
+              gateway_result->successful_request_count,
+              gateway_result->success_rate_percent);
         }
         if (gateway_result->success && gateway_result->status == "ok" &&
             yaw_initialized_) {
@@ -1685,6 +1713,8 @@ private:
   bool odom_initialized_ = false;
   bool gateway_request_in_flight_ = false;
   std::uint64_t next_gateway_request_id_ = 1;
+  std::uint64_t gateway_request_total_count_ = 0;
+  std::uint64_t gateway_request_successful_count_ = 0;
   std::uint64_t active_request_id_ = 0;
   std::chrono::steady_clock::time_point active_request_sent_time_{};
   double active_request_yaw_rad_ = 0.0;

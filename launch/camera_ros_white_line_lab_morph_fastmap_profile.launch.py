@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
@@ -7,6 +8,16 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_shared_launch_params import (
+    camera_control_launch_arguments,
+    camera_control_parameters,
+    declare_camera_control_arguments,
+    declare_hsv_green_white_black_arguments,
+    hsv_green_white_black_launch_arguments,
+    hsv_green_white_black_parameters,
+)
 
 
 def find_latest_fastmap_file():
@@ -67,6 +78,11 @@ def build_nodes(context):
     frame_id = LaunchConfiguration("frame_id")
     camera_info_url = LaunchConfiguration("camera_info_url")
     use_node_time = LaunchConfiguration("use_node_time")
+    exposure_time = LaunchConfiguration("exposure_time")
+    exposure_time_mode = LaunchConfiguration("exposure_time_mode")
+    ae_enable = LaunchConfiguration("ae_enable")
+    analogue_gain = LaunchConfiguration("analogue_gain")
+    awb_enable = LaunchConfiguration("awb_enable")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
     output_topic = LaunchConfiguration("output_topic")
@@ -98,6 +114,7 @@ def build_nodes(context):
                         "frame_id": frame_id,
                         "camera_info_url": camera_info_url,
                         "use_node_time": ParameterValue(use_node_time, value_type=bool),
+                        **camera_control_parameters(),
                     }
                 ],
             ),
@@ -172,6 +189,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_node_time", default_value="false"),  # Use node time instead of sensor timestamps
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # Camera info topic
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
+            *declare_camera_control_arguments(),
             DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),  # Remapped image topic
             DeclareLaunchArgument("robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")),  # Optional remapped-space robot mask image path
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Auto-select the latest fastmap XML

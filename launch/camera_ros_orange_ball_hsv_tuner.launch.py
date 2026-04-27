@@ -19,6 +19,11 @@ def generate_launch_description():
     frame_id = LaunchConfiguration("frame_id")
     camera_info_url = LaunchConfiguration("camera_info_url")
     use_node_time = LaunchConfiguration("use_node_time")
+    exposure_time = LaunchConfiguration("exposure_time")
+    exposure_time_mode = LaunchConfiguration("exposure_time_mode")
+    ae_enable = LaunchConfiguration("ae_enable")
+    analogue_gain = LaunchConfiguration("analogue_gain")
+    awb_enable = LaunchConfiguration("awb_enable")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
     robot_mask_path = LaunchConfiguration("robot_mask_path")
@@ -37,6 +42,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_node_time", default_value="false"),
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),
+            *declare_camera_control_arguments(),
             DeclareLaunchArgument(
                 "robot_mask_path",
                 default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "mask.png"),
@@ -69,6 +75,7 @@ def generate_launch_description():
                         "frame_id": frame_id,
                         "camera_info_url": camera_info_url,
                         "use_node_time": ParameterValue(use_node_time, value_type=bool),
+                        **camera_control_parameters(),
                     }
                 ],
             ),

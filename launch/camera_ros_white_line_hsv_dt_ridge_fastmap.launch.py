@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
@@ -7,6 +8,18 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_fastmap_hsv_pipeline import build_camera_hsv_dt_ridge_fastmap_nodes
+from rcj_shared_launch_params import (
+    camera_control_launch_arguments,
+    camera_control_parameters,
+    declare_camera_control_arguments,
+    declare_camera_ros_arguments,
+    declare_hsv_green_white_black_arguments,
+    hsv_green_white_black_launch_arguments,
+    hsv_green_white_black_parameters,
+)
 
 
 def find_latest_fastmap_file():
@@ -68,6 +81,11 @@ def build_nodes(context):
     frame_id = LaunchConfiguration("frame_id")
     camera_info_url = LaunchConfiguration("camera_info_url")
     use_node_time = LaunchConfiguration("use_node_time")
+    exposure_time = LaunchConfiguration("exposure_time")
+    exposure_time_mode = LaunchConfiguration("exposure_time_mode")
+    ae_enable = LaunchConfiguration("ae_enable")
+    analogue_gain = LaunchConfiguration("analogue_gain")
+    awb_enable = LaunchConfiguration("awb_enable")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
     remap_topic = LaunchConfiguration("remap_topic")
@@ -105,6 +123,7 @@ def build_nodes(context):
                     "frame_id": frame_id,  # Image frame id
                     "camera_info_url": camera_info_url,  # Camera calibration URL
                     "use_node_time": ParameterValue(use_node_time, value_type=bool),  # Whether to use node time
+                    **camera_control_parameters(),
                 }
             ],
         ),
@@ -144,33 +163,7 @@ def build_nodes(context):
                 {
                     "input_topic": remap_topic,  # HSV input image topic
                     "robot_mask_topic": hsv_robot_mask_topic,  # Remap-stage robot mask topic
-                    "white_h_min": ParameterValue(
-                        LaunchConfiguration("white_h_min"), value_type=int
-                    ),  # White HSV minimum H
-                    "white_h_max": ParameterValue(
-                        LaunchConfiguration("white_h_max"), value_type=int
-                    ),  # White HSV maximum H
-                    "white_s_max": ParameterValue(
-                        LaunchConfiguration("white_s_max"), value_type=int
-                    ),  # White HSV maximum S
-                    "white_v_min": ParameterValue(
-                        LaunchConfiguration("white_v_min"), value_type=int
-                    ),  # White HSV minimum V
-                    "black_v_max": ParameterValue(
-                        LaunchConfiguration("black_v_max"), value_type=int
-                    ),  # Black HSV maximum V
-                    "green_h_min": ParameterValue(
-                        LaunchConfiguration("green_h_min"), value_type=int
-                    ),  # Green HSV minimum H
-                    "green_h_max": ParameterValue(
-                        LaunchConfiguration("green_h_max"), value_type=int
-                    ),  # Green HSV maximum H
-                    "green_s_min": ParameterValue(
-                        LaunchConfiguration("green_s_min"), value_type=int
-                    ),  # Green HSV minimum S
-                    "green_v_min": ParameterValue(
-                        LaunchConfiguration("green_v_min"), value_type=int
-                    ),  # Green HSV minimum V
+                        **hsv_green_white_black_parameters(),
                     "enable_timing_log": ParameterValue(
                         LaunchConfiguration("hsv_enable_timing_log"),
                         value_type=bool,
@@ -371,22 +364,7 @@ def build_nodes(context):
 def generate_launch_description():
     return LaunchDescription(
         [
-            DeclareLaunchArgument("camera_index", default_value="0"),  # Camera index
-            DeclareLaunchArgument("role", default_value="viewfinder"),  # camera_ros role
-            DeclareLaunchArgument("format", default_value="RGB888"),  # Camera pixel format
-            DeclareLaunchArgument(
-                "width",
-                default_value="800",
-            ),  # Capture width
-            DeclareLaunchArgument(
-                "height",
-                default_value="600",
-            ),  # Capture height
-            DeclareLaunchArgument("orientation", default_value="0"),  # Camera rotation angle
-            DeclareLaunchArgument("sensor_mode", default_value="1332:990"),  # Camera sensor mode
-            DeclareLaunchArgument("frame_id", default_value="camera"),  # Image frame id
-            DeclareLaunchArgument("camera_info_url", default_value=""),  # Camera calibration URL
-            DeclareLaunchArgument("use_node_time", default_value="false"),  # Whether to use node time
+            *declare_camera_ros_arguments(),
             DeclareLaunchArgument(
                 "camera_info_topic", default_value="/camera/camera_info"
             ),  # Camera info topic
@@ -418,15 +396,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "remap_timing_log_interval", default_value="30"
             ),  # Remap timing log frame interval
-            DeclareLaunchArgument("white_h_min", default_value="0"),  # White HSV minimum H
-            DeclareLaunchArgument("white_h_max", default_value="179"),  # White HSV maximum H
-            DeclareLaunchArgument("white_s_max", default_value="118"),  # White HSV maximum S
-            DeclareLaunchArgument("white_v_min", default_value="197"),  # White HSV minimum V
-            DeclareLaunchArgument("black_v_max", default_value="124"),  # Black HSV maximum V
-            DeclareLaunchArgument("green_h_min", default_value="35"),  # Green HSV minimum H
-            DeclareLaunchArgument("green_h_max", default_value="100"),  # Green HSV maximum H
-            DeclareLaunchArgument("green_s_min", default_value="140"),  # Green HSV minimum S
-            DeclareLaunchArgument("green_v_min", default_value="80"),  # Green HSV minimum V
+            *declare_hsv_green_white_black_arguments(),
             DeclareLaunchArgument(
                 "hsv_enable_timing_log", default_value="true"
             ),  # Whether to log HSV timing
@@ -504,7 +474,7 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="false"
+                "ridge_enable_image_view", default_value="true"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
             DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
@@ -540,6 +510,6 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ridge_timing_summary_interval", default_value="10"
             ),  # Ridge timing summary frame interval
-            OpaqueFunction(function=build_nodes),
+            OpaqueFunction(function=build_camera_hsv_dt_ridge_fastmap_nodes),
         ]
     )

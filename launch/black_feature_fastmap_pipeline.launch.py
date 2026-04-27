@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
@@ -7,6 +8,16 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_shared_launch_params import (
+    camera_control_launch_arguments,
+    camera_control_parameters,
+    declare_camera_control_arguments,
+    declare_hsv_green_white_black_arguments,
+    hsv_green_white_black_launch_arguments,
+    hsv_green_white_black_parameters,
+)
 
 
 def find_latest_fastmap_file():
@@ -91,6 +102,7 @@ def build_nodes(context):
                     "use_node_time": ParameterValue(
                         LaunchConfiguration("use_node_time"), value_type=bool
                     ),
+                    **camera_control_parameters(),
                 }
             ],
         ),
@@ -140,33 +152,7 @@ def build_nodes(context):
                 {
                     "input_topic": output_topic,
                     "robot_mask_topic": "/black_feature_input_remap_node/robot_mask",
-                    "white_h_min": ParameterValue(
-                        LaunchConfiguration("white_h_min"), value_type=int
-                    ),
-                    "white_h_max": ParameterValue(
-                        LaunchConfiguration("white_h_max"), value_type=int
-                    ),
-                    "white_s_max": ParameterValue(
-                        LaunchConfiguration("white_s_max"), value_type=int
-                    ),
-                    "white_v_min": ParameterValue(
-                        LaunchConfiguration("white_v_min"), value_type=int
-                    ),
-                    "black_v_max": ParameterValue(
-                        LaunchConfiguration("black_v_max"), value_type=int
-                    ),
-                    "green_h_min": ParameterValue(
-                        LaunchConfiguration("green_h_min"), value_type=int
-                    ),
-                    "green_h_max": ParameterValue(
-                        LaunchConfiguration("green_h_max"), value_type=int
-                    ),
-                    "green_s_min": ParameterValue(
-                        LaunchConfiguration("green_s_min"), value_type=int
-                    ),
-                    "green_v_min": ParameterValue(
-                        LaunchConfiguration("green_v_min"), value_type=int
-                    ),
+                        **hsv_green_white_black_parameters(),
                     "enable_timing_log": ParameterValue(
                         LaunchConfiguration("hsv_enable_timing_log"), value_type=bool
                     ),
@@ -411,6 +397,7 @@ def generate_launch_description():
             ),
             # Raw image topic published by camera_node and consumed by remap.
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),
+            *declare_camera_control_arguments(),
             # Remapped top-down image topic produced by fastmap_remap_node.
             DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),
             # Automatically use the newest fastmap XML from the config folder.
@@ -445,23 +432,7 @@ def generate_launch_description():
             # Number of frames between remap timing log messages.
             DeclareLaunchArgument("remap_timing_log_interval", default_value="30"),
             # Minimum HSV hue allowed for white classification.
-            DeclareLaunchArgument("white_h_min", default_value="0"),
-            # Maximum HSV hue allowed for white classification.
-            DeclareLaunchArgument("white_h_max", default_value="179"),
-            # Maximum HSV saturation allowed for white pixels.
-            DeclareLaunchArgument("white_s_max", default_value="118"),
-            # Minimum HSV value required for white pixels.
-            DeclareLaunchArgument("white_v_min", default_value="197"),
-            # Maximum HSV value allowed for black classification.
-            DeclareLaunchArgument("black_v_max", default_value="124"),
-            # Minimum HSV hue allowed for green classification.
-            DeclareLaunchArgument("green_h_min", default_value="35"),
-            # Maximum HSV hue allowed for green classification.
-            DeclareLaunchArgument("green_h_max", default_value="100"),
-            # Minimum HSV saturation required for green pixels.
-            DeclareLaunchArgument("green_s_min", default_value="140"),
-            # Minimum HSV value required for green pixels.
-            DeclareLaunchArgument("green_v_min", default_value="80"),
+            *declare_hsv_green_white_black_arguments(),
             # Print periodic processing timing logs from the HSV node.
             DeclareLaunchArgument("hsv_enable_timing_log", default_value="true"),
             # Number of frames between HSV timing log messages.
