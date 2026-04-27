@@ -152,6 +152,21 @@ def build_nodes(context):
                     "white_v_min": ParameterValue(
                         LaunchConfiguration("white_v_min"), value_type=int
                     ),
+                    "black_h_min": ParameterValue(
+                        LaunchConfiguration("black_h_min"), value_type=int
+                    ),
+                    "black_h_max": ParameterValue(
+                        LaunchConfiguration("black_h_max"), value_type=int
+                    ),
+                    "black_s_min": ParameterValue(
+                        LaunchConfiguration("black_s_min"), value_type=int
+                    ),
+                    "black_s_max": ParameterValue(
+                        LaunchConfiguration("black_s_max"), value_type=int
+                    ),
+                    "black_v_min": ParameterValue(
+                        LaunchConfiguration("black_v_min"), value_type=int
+                    ),
                     "black_v_max": ParameterValue(
                         LaunchConfiguration("black_v_max"), value_type=int
                     ),
@@ -164,8 +179,14 @@ def build_nodes(context):
                     "green_s_min": ParameterValue(
                         LaunchConfiguration("green_s_min"), value_type=int
                     ),
+                    "green_s_max": ParameterValue(
+                        LaunchConfiguration("green_s_max"), value_type=int
+                    ),
                     "green_v_min": ParameterValue(
                         LaunchConfiguration("green_v_min"), value_type=int
+                    ),
+                    "green_v_max": ParameterValue(
+                        LaunchConfiguration("green_v_max"), value_type=int
                     ),
                     "enable_timing_log": ParameterValue(
                         LaunchConfiguration("hsv_enable_timing_log"), value_type=bool
@@ -196,6 +217,12 @@ def build_nodes(context):
                     ),
                     "show_overlay_image": ParameterValue(
                         LaunchConfiguration("hsv_show_overlay_image"), value_type=bool
+                    ),
+                    "show_green_overlay": ParameterValue(
+                        LaunchConfiguration("hsv_show_green_overlay"), value_type=bool
+                    ),
+                    "show_black_overlay": ParameterValue(
+                        LaunchConfiguration("hsv_show_black_overlay"), value_type=bool
                     ),
                     "display_max_width": ParameterValue(
                         LaunchConfiguration("hsv_display_max_width"), value_type=int
@@ -452,6 +479,16 @@ def generate_launch_description():
             DeclareLaunchArgument("white_s_max", default_value="118"),
             # Minimum HSV value required for white pixels.
             DeclareLaunchArgument("white_v_min", default_value="197"),
+            # Minimum HSV hue allowed for black classification.
+            DeclareLaunchArgument("black_h_min", default_value="0"),
+            # Maximum HSV hue allowed for black classification.
+            DeclareLaunchArgument("black_h_max", default_value="179"),
+            # Minimum HSV saturation allowed for black classification.
+            DeclareLaunchArgument("black_s_min", default_value="0"),
+            # Maximum HSV saturation allowed for black classification.
+            DeclareLaunchArgument("black_s_max", default_value="255"),
+            # Minimum HSV value allowed for black classification.
+            DeclareLaunchArgument("black_v_min", default_value="0"),
             # Maximum HSV value allowed for black classification.
             DeclareLaunchArgument("black_v_max", default_value="124"),
             # Minimum HSV hue allowed for green classification.
@@ -460,8 +497,12 @@ def generate_launch_description():
             DeclareLaunchArgument("green_h_max", default_value="100"),
             # Minimum HSV saturation required for green pixels.
             DeclareLaunchArgument("green_s_min", default_value="140"),
+            # Maximum HSV saturation allowed for green pixels.
+            DeclareLaunchArgument("green_s_max", default_value="255"),
             # Minimum HSV value required for green pixels.
             DeclareLaunchArgument("green_v_min", default_value="80"),
+            # Maximum HSV value allowed for green pixels.
+            DeclareLaunchArgument("green_v_max", default_value="255"),
             # Print periodic processing timing logs from the HSV node.
             DeclareLaunchArgument("hsv_enable_timing_log", default_value="true"),
             # Number of frames between HSV timing log messages.
@@ -481,7 +522,11 @@ def generate_launch_description():
             # Show the leftover noise mask produced by the HSV priority node.
             DeclareLaunchArgument("hsv_show_noise_mask", default_value="false"),
             # Show the HSV classification overlay image.
-            DeclareLaunchArgument("hsv_show_overlay_image", default_value="false"),
+            DeclareLaunchArgument("hsv_show_overlay_image", default_value="true"),
+            # Show the green mask overlaid in bright red on the remapped input image.
+            DeclareLaunchArgument("hsv_show_green_overlay", default_value="false"),
+            # Show the black mask overlaid in red on the remapped input image.
+            DeclareLaunchArgument("hsv_show_black_overlay", default_value="true"),
             # Maximum width of HSV debug windows in pixels.
             DeclareLaunchArgument("hsv_display_max_width", default_value="960"),
             # Maximum height of HSV debug windows in pixels.
@@ -525,37 +570,37 @@ def generate_launch_description():
             # Show whole circle candidates that produced no accepted arcs.
             DeclareLaunchArgument(
                 "detector_show_circle_rejected_component_mask",
-                default_value="true",
+                default_value="false",
             ),
             # Show arc fragments evaluated by the circle stage but rejected.
             DeclareLaunchArgument(
-                "detector_show_circle_rejected_arc_mask", default_value="true"
+                "detector_show_circle_rejected_arc_mask", default_value="false"
             ),
             # Show whole candidates rejected because the fitted radius is out of range.
             DeclareLaunchArgument(
-                "detector_show_circle_radius_rejected_mask", default_value="true"
+                "detector_show_circle_radius_rejected_mask", default_value="false"
             ),
             # Show whole candidates rejected because they contain too few pixels.
             DeclareLaunchArgument(
                 "detector_show_circle_too_few_pixels_rejected_mask",
-                default_value="true",
+                default_value="false",
             ),
             # Show whole candidates rejected by the radial residual fit check.
             DeclareLaunchArgument(
                 "detector_show_circle_radial_fit_rejected_mask",
-                default_value="true",
+                default_value="false",
             ),
             # Show whole candidates rejected because no occupied angle segments were found.
             DeclareLaunchArgument(
                 "detector_show_circle_no_segments_rejected_mask",
-                default_value="true",
+                default_value="false",
             ),
             # Show the final filtered black feature mask.
             DeclareLaunchArgument(
                 "detector_show_black_final_mask", default_value="true"
             ),
             # Show the final overlay image with black_final_mask on the remapped image.
-            DeclareLaunchArgument("detector_show_debug_image", default_value="true"),
+            DeclareLaunchArgument("detector_show_debug_image", default_value="false"),
             # Maximum width of detector debug windows in pixels.
             DeclareLaunchArgument("detector_display_max_width", default_value="960"),
             # Maximum height of detector debug windows in pixels.

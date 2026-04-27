@@ -49,7 +49,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Remapped image output topic.
             DeclareLaunchArgument("exposure_time", default_value="10000"),  # Manual exposure time in microseconds.
             DeclareLaunchArgument("exposure_time_mode", default_value="1"),  # Exposure control mode.
-            DeclareLaunchArgument("ae_enable", default_value="true"),  # Enable auto exposure.
+            DeclareLaunchArgument("ae_enable", default_value="false"),  # Enable auto exposure.
             DeclareLaunchArgument("analogue_gain", default_value="1.0"),  # Sensor analog gain multiplier.
             DeclareLaunchArgument("awb_enable", default_value="true"),  # Enable auto white balance.
             DeclareLaunchArgument("enable_camera_debug_view", default_value="true"),  # Start the debug viewer node.

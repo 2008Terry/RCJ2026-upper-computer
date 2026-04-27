@@ -32,6 +32,8 @@ constexpr char kGreenMaskWindowName[] = "HSV Green Mask";
 constexpr char kBlackMaskWindowName[] = "HSV Black Mask";
 constexpr char kNoiseMaskWindowName[] = "HSV Noise Mask";
 constexpr char kOverlayWindowName[] = "HSV White Overlay";
+constexpr char kGreenOverlayWindowName[] = "HSV Green Overlay";
+constexpr char kBlackOverlayWindowName[] = "HSV Black Overlay";
 
 using SteadyClock = std::chrono::steady_clock;
 using TimePoint = SteadyClock::time_point;
@@ -78,6 +80,14 @@ using HsvTimingArray =
 struct HsvFrameTiming
 {
   HsvTimingArray stage_us{};
+};
+
+struct PixelReadoutState
+{
+  std::string window_name;
+  cv::Mat displayed_image;
+  cv::Mat source_bgr;
+  cv::Mat source_hsv;
 };
 
 void recordStageDuration(
@@ -189,6 +199,107 @@ void resizeWindowToFitImage(
   cv::resizeWindow(window_name, fitted_size.width, fitted_size.height);
 }
 
+int mapPixelCoordinate(int coordinate, int from_extent, int to_extent)
+{
+  if (from_extent <= 0 || to_extent <= 0) {
+    return -1;
+  }
+
+  const double scale = static_cast<double>(to_extent) / static_cast<double>(from_extent);
+  return std::clamp(static_cast<int>(coordinate * scale), 0, to_extent - 1);
+}
+
+std::array<int, 3> rgbAt(const cv::Mat & image, int x, int y)
+{
+  if (image.channels() == 1) {
+    const int gray = static_cast<int>(image.at<std::uint8_t>(y, x));
+    return {gray, gray, gray};
+  }
+
+  if (image.channels() == 3) {
+    const cv::Vec3b bgr = image.at<cv::Vec3b>(y, x);
+    return {
+      static_cast<int>(bgr[2]),
+      static_cast<int>(bgr[1]),
+      static_cast<int>(bgr[0])};
+  }
+
+  if (image.channels() == 4) {
+    const cv::Vec4b bgra = image.at<cv::Vec4b>(y, x);
+    return {
+      static_cast<int>(bgra[2]),
+      static_cast<int>(bgra[1]),
+      static_cast<int>(bgra[0])};
+  }
+
+  return {0, 0, 0};
+}
+
+void updatePixelReadoutState(
+  PixelReadoutState & state,
+  const cv::Mat & displayed_image,
+  const cv::Mat & source_bgr,
+  const cv::Mat & source_hsv)
+{
+  state.displayed_image = displayed_image;
+  state.source_bgr = source_bgr;
+  state.source_hsv = source_hsv;
+}
+
+void clearPixelReadoutState(PixelReadoutState & state)
+{
+  state.displayed_image.release();
+  state.source_bgr.release();
+  state.source_hsv.release();
+}
+
+void pixelReadoutMouseCallback(int event, int x, int y, int, void * userdata)
+{
+  if (event != cv::EVENT_MOUSEMOVE || userdata == nullptr) {
+    return;
+  }
+
+  const auto * state = static_cast<const PixelReadoutState *>(userdata);
+  if (
+    state->window_name.empty() || state->displayed_image.empty() || state->source_bgr.empty() ||
+    state->source_hsv.empty())
+  {
+    return;
+  }
+
+  if (
+    x < 0 || y < 0 || x >= state->displayed_image.cols || y >= state->displayed_image.rows)
+  {
+    return;
+  }
+
+  const int source_x =
+    mapPixelCoordinate(x, state->displayed_image.cols, state->source_hsv.cols);
+  const int source_y =
+    mapPixelCoordinate(y, state->displayed_image.rows, state->source_hsv.rows);
+  if (
+    source_x < 0 || source_y < 0 || source_x >= state->source_hsv.cols ||
+    source_y >= state->source_hsv.rows || source_x >= state->source_bgr.cols ||
+    source_y >= state->source_bgr.rows)
+  {
+    return;
+  }
+
+  const std::array<int, 3> rgb = rgbAt(state->displayed_image, x, y);
+  const cv::Vec3b hsv = state->source_hsv.at<cv::Vec3b>(source_y, source_x);
+
+  std::ostringstream oss;
+  oss << "x=" << source_x << " y=" << source_y
+      << " RGB=(" << rgb[0] << "," << rgb[1] << "," << rgb[2] << ")"
+      << " HSV=(" << static_cast<int>(hsv[0]) << "," << static_cast<int>(hsv[1]) << ","
+      << static_cast<int>(hsv[2]) << ")";
+
+  try {
+    cv::displayStatusBar(state->window_name, oss.str(), 0);
+  } catch (const cv::Exception &) {
+  }
+}
+
 }  // namespace
 
 class WhiteLineHsvWhiteNode : public rclcpp::Node
@@ -203,11 +314,18 @@ public:
     declare_parameter("white_h_max", kHueMax);
     declare_parameter("white_s_max", 60);
     declare_parameter("white_v_min", 170);
+    declare_parameter("black_h_min", 0);
+    declare_parameter("black_h_max", kHueMax);
+    declare_parameter("black_s_min", 0);
+    declare_parameter("black_s_max", kByteMax);
+    declare_parameter("black_v_min", 0);
     declare_parameter("black_v_max", 70);
     declare_parameter("green_h_min", 35);
     declare_parameter("green_h_max", 95);
     declare_parameter("green_s_min", 40);
+    declare_parameter("green_s_max", kByteMax);
     declare_parameter("green_v_min", 40);
+    declare_parameter("green_v_max", kByteMax);
     declare_parameter("enable_timing_log", true);
     declare_parameter("timing_log_interval", 30);
     declare_parameter("enable_image_view", false);
@@ -218,6 +336,8 @@ public:
     declare_parameter("show_black_mask", false);
     declare_parameter("show_noise_mask", false);
     declare_parameter("show_overlay_image", true);
+    declare_parameter("show_green_overlay", false);
+    declare_parameter("show_black_overlay", false);
     declare_parameter("display_max_width", 960);
     declare_parameter("display_max_height", 720);
 
@@ -248,8 +368,11 @@ public:
       get_logger(),
       "white_line_hsv_white_node started. input_topic=%s, robot_mask_topic=%s, "
       "white_h_min=%d, white_h_max=%d, "
-      "white_s_max=%d, white_v_min=%d, black_v_max=%d, green_h_min=%d, green_h_max=%d, "
-      "green_s_min=%d, green_v_min=%d, enable_timing_log=%s, timing_log_interval=%d, "
+      "white_s_max=%d, white_v_min=%d, black_h_min=%d, black_h_max=%d, "
+      "black_s_min=%d, black_s_max=%d, black_v_min=%d, black_v_max=%d, "
+      "green_h_min=%d, green_h_max=%d, "
+      "green_s_min=%d, green_s_max=%d, green_v_min=%d, green_v_max=%d, "
+      "enable_timing_log=%s, timing_log_interval=%d, "
       "enable_image_view=%s, enable_controls_window=%s",
       input_topic.c_str(),
       robot_mask_topic.empty() ? "<disabled>" : robot_mask_topic.c_str(),
@@ -257,11 +380,18 @@ public:
       white_h_max_,
       white_s_max_,
       white_v_min_,
+      black_h_min_,
+      black_h_max_,
+      black_s_min_,
+      black_s_max_,
+      black_v_min_,
       black_v_max_,
       green_h_min_,
       green_h_max_,
       green_s_min_,
+      green_s_max_,
       green_v_min_,
+      green_v_max_,
       enable_timing_log_ ? "true" : "false",
       timing_log_interval_,
       enable_image_view_ ? "true" : "false",
@@ -332,11 +462,18 @@ private:
     white_h_max_ = clampHue(static_cast<int>(get_parameter("white_h_max").as_int()));
     white_s_max_ = clampByte(static_cast<int>(get_parameter("white_s_max").as_int()));
     white_v_min_ = clampByte(static_cast<int>(get_parameter("white_v_min").as_int()));
+    black_h_min_ = clampHue(static_cast<int>(get_parameter("black_h_min").as_int()));
+    black_h_max_ = clampHue(static_cast<int>(get_parameter("black_h_max").as_int()));
+    black_s_min_ = clampByte(static_cast<int>(get_parameter("black_s_min").as_int()));
+    black_s_max_ = clampByte(static_cast<int>(get_parameter("black_s_max").as_int()));
+    black_v_min_ = clampByte(static_cast<int>(get_parameter("black_v_min").as_int()));
     black_v_max_ = clampByte(static_cast<int>(get_parameter("black_v_max").as_int()));
     green_h_min_ = clampHue(static_cast<int>(get_parameter("green_h_min").as_int()));
     green_h_max_ = clampHue(static_cast<int>(get_parameter("green_h_max").as_int()));
     green_s_min_ = clampByte(static_cast<int>(get_parameter("green_s_min").as_int()));
+    green_s_max_ = clampByte(static_cast<int>(get_parameter("green_s_max").as_int()));
     green_v_min_ = clampByte(static_cast<int>(get_parameter("green_v_min").as_int()));
+    green_v_max_ = clampByte(static_cast<int>(get_parameter("green_v_max").as_int()));
   }
 
   void loadRuntimeParameters()
@@ -352,18 +489,31 @@ private:
     show_black_mask_ = get_parameter("show_black_mask").as_bool();
     show_noise_mask_ = get_parameter("show_noise_mask").as_bool();
     show_overlay_image_ = get_parameter("show_overlay_image").as_bool();
+    show_green_overlay_ = get_parameter("show_green_overlay").as_bool();
+    show_black_overlay_ = get_parameter("show_black_overlay").as_bool();
     display_max_width_ =
       std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
     display_max_height_ =
       std::max(1, static_cast<int>(get_parameter("display_max_height").as_int()));
   }
 
-  void syncWindow(const std::string & window_name, bool should_show, bool & created)
+  void syncWindow(
+    const std::string & window_name,
+    bool should_show,
+    bool & created,
+    PixelReadoutState * pixel_readout_state = nullptr)
   {
     if (should_show && !created) {
       cv::namedWindow(window_name, cv::WINDOW_NORMAL);
+      if (pixel_readout_state != nullptr) {
+        pixel_readout_state->window_name = window_name;
+        cv::setMouseCallback(window_name, pixelReadoutMouseCallback, pixel_readout_state);
+      }
       created = true;
     } else if (!should_show && created) {
+      if (pixel_readout_state != nullptr) {
+        clearPixelReadoutState(*pixel_readout_state);
+      }
       cv::destroyWindow(window_name);
       created = false;
     }
@@ -377,11 +527,18 @@ private:
       cv::createTrackbar("white_h_max", kControlsWindowName, nullptr, kHueMax);
       cv::createTrackbar("white_s_max", kControlsWindowName, nullptr, kByteMax);
       cv::createTrackbar("white_v_min", kControlsWindowName, nullptr, kByteMax);
+      cv::createTrackbar("black_h_min", kControlsWindowName, nullptr, kHueMax);
+      cv::createTrackbar("black_h_max", kControlsWindowName, nullptr, kHueMax);
+      cv::createTrackbar("black_s_min", kControlsWindowName, nullptr, kByteMax);
+      cv::createTrackbar("black_s_max", kControlsWindowName, nullptr, kByteMax);
+      cv::createTrackbar("black_v_min", kControlsWindowName, nullptr, kByteMax);
       cv::createTrackbar("black_v_max", kControlsWindowName, nullptr, kByteMax);
       cv::createTrackbar("green_h_min", kControlsWindowName, nullptr, kHueMax);
       cv::createTrackbar("green_h_max", kControlsWindowName, nullptr, kHueMax);
       cv::createTrackbar("green_s_min", kControlsWindowName, nullptr, kByteMax);
+      cv::createTrackbar("green_s_max", kControlsWindowName, nullptr, kByteMax);
       cv::createTrackbar("green_v_min", kControlsWindowName, nullptr, kByteMax);
+      cv::createTrackbar("green_v_max", kControlsWindowName, nullptr, kByteMax);
 
       controls_window_created_ = true;
       controls_window_initialized_ = false;
@@ -400,11 +557,18 @@ private:
       cv::setTrackbarPos("white_h_max", kControlsWindowName, white_h_max_);
       cv::setTrackbarPos("white_s_max", kControlsWindowName, white_s_max_);
       cv::setTrackbarPos("white_v_min", kControlsWindowName, white_v_min_);
+      cv::setTrackbarPos("black_h_min", kControlsWindowName, black_h_min_);
+      cv::setTrackbarPos("black_h_max", kControlsWindowName, black_h_max_);
+      cv::setTrackbarPos("black_s_min", kControlsWindowName, black_s_min_);
+      cv::setTrackbarPos("black_s_max", kControlsWindowName, black_s_max_);
+      cv::setTrackbarPos("black_v_min", kControlsWindowName, black_v_min_);
       cv::setTrackbarPos("black_v_max", kControlsWindowName, black_v_max_);
       cv::setTrackbarPos("green_h_min", kControlsWindowName, green_h_min_);
       cv::setTrackbarPos("green_h_max", kControlsWindowName, green_h_max_);
       cv::setTrackbarPos("green_s_min", kControlsWindowName, green_s_min_);
+      cv::setTrackbarPos("green_s_max", kControlsWindowName, green_s_max_);
       cv::setTrackbarPos("green_v_min", kControlsWindowName, green_v_min_);
+      cv::setTrackbarPos("green_v_max", kControlsWindowName, green_v_max_);
       controls_window_initialized_ = true;
     }
   }
@@ -419,11 +583,18 @@ private:
     white_h_max_ = clampHue(cv::getTrackbarPos("white_h_max", kControlsWindowName));
     white_s_max_ = clampByte(cv::getTrackbarPos("white_s_max", kControlsWindowName));
     white_v_min_ = clampByte(cv::getTrackbarPos("white_v_min", kControlsWindowName));
+    black_h_min_ = clampHue(cv::getTrackbarPos("black_h_min", kControlsWindowName));
+    black_h_max_ = clampHue(cv::getTrackbarPos("black_h_max", kControlsWindowName));
+    black_s_min_ = clampByte(cv::getTrackbarPos("black_s_min", kControlsWindowName));
+    black_s_max_ = clampByte(cv::getTrackbarPos("black_s_max", kControlsWindowName));
+    black_v_min_ = clampByte(cv::getTrackbarPos("black_v_min", kControlsWindowName));
     black_v_max_ = clampByte(cv::getTrackbarPos("black_v_max", kControlsWindowName));
     green_h_min_ = clampHue(cv::getTrackbarPos("green_h_min", kControlsWindowName));
     green_h_max_ = clampHue(cv::getTrackbarPos("green_h_max", kControlsWindowName));
     green_s_min_ = clampByte(cv::getTrackbarPos("green_s_min", kControlsWindowName));
+    green_s_max_ = clampByte(cv::getTrackbarPos("green_s_max", kControlsWindowName));
     green_v_min_ = clampByte(cv::getTrackbarPos("green_v_min", kControlsWindowName));
+    green_v_max_ = clampByte(cv::getTrackbarPos("green_v_max", kControlsWindowName));
   }
 
   void printCurrentParameters() const
@@ -431,16 +602,25 @@ private:
     RCLCPP_INFO(
       get_logger(),
       "white_h_min=%d, white_h_max=%d, white_s_max=%d, white_v_min=%d, "
-      "black_v_max=%d, green_h_min=%d, green_h_max=%d, green_s_min=%d, green_v_min=%d",
+      "black_h_min=%d, black_h_max=%d, black_s_min=%d, black_s_max=%d, "
+      "black_v_min=%d, black_v_max=%d, green_h_min=%d, green_h_max=%d, "
+      "green_s_min=%d, green_s_max=%d, green_v_min=%d, green_v_max=%d",
       white_h_min_,
       white_h_max_,
       white_s_max_,
       white_v_min_,
+      black_h_min_,
+      black_h_max_,
+      black_s_min_,
+      black_s_max_,
+      black_v_min_,
       black_v_max_,
       green_h_min_,
       green_h_max_,
       green_s_min_,
-      green_v_min_);
+      green_s_max_,
+      green_v_min_,
+      green_v_max_);
   }
 
   void syncImageViewState()
@@ -462,61 +642,104 @@ private:
     }
 
     syncControlsWindow(enable_controls_window_);
-    syncWindow(kInputWindowName, enable_image_view_ && show_input_image_, input_window_created_);
-    syncWindow(kMaskWindowName, enable_image_view_ && show_white_mask_, mask_window_created_);
     syncWindow(
-      kGreenMaskWindowName, enable_image_view_ && show_green_mask_, green_mask_window_created_);
+      kInputWindowName,
+      enable_image_view_ && show_input_image_,
+      input_window_created_,
+      &input_pixel_readout_);
     syncWindow(
-      kBlackMaskWindowName, enable_image_view_ && show_black_mask_, black_mask_window_created_);
+      kMaskWindowName,
+      enable_image_view_ && show_white_mask_,
+      mask_window_created_,
+      &mask_pixel_readout_);
     syncWindow(
-      kNoiseMaskWindowName, enable_image_view_ && show_noise_mask_, noise_mask_window_created_);
+      kGreenMaskWindowName,
+      enable_image_view_ && show_green_mask_,
+      green_mask_window_created_,
+      &green_mask_pixel_readout_);
     syncWindow(
-      kOverlayWindowName, enable_image_view_ && show_overlay_image_, overlay_window_created_);
+      kBlackMaskWindowName,
+      enable_image_view_ && show_black_mask_,
+      black_mask_window_created_,
+      &black_mask_pixel_readout_);
+    syncWindow(
+      kNoiseMaskWindowName,
+      enable_image_view_ && show_noise_mask_,
+      noise_mask_window_created_,
+      &noise_mask_pixel_readout_);
+    syncWindow(
+      kOverlayWindowName,
+      enable_image_view_ && show_overlay_image_,
+      overlay_window_created_,
+      &overlay_pixel_readout_);
+    syncWindow(
+      kGreenOverlayWindowName,
+      enable_image_view_ && show_green_overlay_,
+      green_overlay_window_created_,
+      &green_overlay_pixel_readout_);
+    syncWindow(
+      kBlackOverlayWindowName,
+      enable_image_view_ && show_black_overlay_,
+      black_overlay_window_created_,
+      &black_overlay_pixel_readout_);
   }
 
   void destroyDebugWindows()
   {
     syncControlsWindow(false);
-    syncWindow(kInputWindowName, false, input_window_created_);
-    syncWindow(kMaskWindowName, false, mask_window_created_);
-    syncWindow(kGreenMaskWindowName, false, green_mask_window_created_);
-    syncWindow(kBlackMaskWindowName, false, black_mask_window_created_);
-    syncWindow(kNoiseMaskWindowName, false, noise_mask_window_created_);
-    syncWindow(kOverlayWindowName, false, overlay_window_created_);
+    syncWindow(kInputWindowName, false, input_window_created_, &input_pixel_readout_);
+    syncWindow(kMaskWindowName, false, mask_window_created_, &mask_pixel_readout_);
+    syncWindow(
+      kGreenMaskWindowName, false, green_mask_window_created_, &green_mask_pixel_readout_);
+    syncWindow(
+      kBlackMaskWindowName, false, black_mask_window_created_, &black_mask_pixel_readout_);
+    syncWindow(
+      kNoiseMaskWindowName, false, noise_mask_window_created_, &noise_mask_pixel_readout_);
+    syncWindow(kOverlayWindowName, false, overlay_window_created_, &overlay_pixel_readout_);
+    syncWindow(
+      kGreenOverlayWindowName, false, green_overlay_window_created_, &green_overlay_pixel_readout_);
+    syncWindow(
+      kBlackOverlayWindowName, false, black_overlay_window_created_, &black_overlay_pixel_readout_);
   }
 
   void showDebugImages(
     const cv::Mat & frame,
+    const cv::Mat & hsv_image,
     const cv::Mat & white_mask,
     const cv::Mat & green_mask,
     const cv::Mat & black_mask,
     const cv::Mat & noise_mask)
   {
     if (input_window_created_) {
+      updatePixelReadoutState(input_pixel_readout_, frame, frame, hsv_image);
       cv::imshow(kInputWindowName, frame);
       resizeWindowToFitImage(
         kInputWindowName, frame, display_max_width_, display_max_height_);
     }
 
     if (mask_window_created_) {
+      updatePixelReadoutState(mask_pixel_readout_, white_mask, frame, hsv_image);
       cv::imshow(kMaskWindowName, white_mask);
       resizeWindowToFitImage(
         kMaskWindowName, white_mask, display_max_width_, display_max_height_);
     }
 
     if (green_mask_window_created_) {
+      updatePixelReadoutState(green_mask_pixel_readout_, green_mask, frame, hsv_image);
       cv::imshow(kGreenMaskWindowName, green_mask);
       resizeWindowToFitImage(
         kGreenMaskWindowName, green_mask, display_max_width_, display_max_height_);
     }
 
     if (black_mask_window_created_) {
+      updatePixelReadoutState(black_mask_pixel_readout_, black_mask, frame, hsv_image);
       cv::imshow(kBlackMaskWindowName, black_mask);
       resizeWindowToFitImage(
         kBlackMaskWindowName, black_mask, display_max_width_, display_max_height_);
     }
 
     if (noise_mask_window_created_) {
+      updatePixelReadoutState(noise_mask_pixel_readout_, noise_mask, frame, hsv_image);
       cv::imshow(kNoiseMaskWindowName, noise_mask);
       resizeWindowToFitImage(
         kNoiseMaskWindowName, noise_mask, display_max_width_, display_max_height_);
@@ -525,9 +748,28 @@ private:
     if (overlay_window_created_) {
       cv::Mat overlay = frame.clone();
       overlay.setTo(cv::Scalar(0, 255, 0), white_mask);
+      updatePixelReadoutState(overlay_pixel_readout_, overlay, frame, hsv_image);
       cv::imshow(kOverlayWindowName, overlay);
       resizeWindowToFitImage(
         kOverlayWindowName, overlay, display_max_width_, display_max_height_);
+    }
+
+    if (green_overlay_window_created_) {
+      cv::Mat green_overlay = frame.clone();
+      green_overlay.setTo(cv::Scalar(0, 0, 255), green_mask);
+      updatePixelReadoutState(green_overlay_pixel_readout_, green_overlay, frame, hsv_image);
+      cv::imshow(kGreenOverlayWindowName, green_overlay);
+      resizeWindowToFitImage(
+        kGreenOverlayWindowName, green_overlay, display_max_width_, display_max_height_);
+    }
+
+    if (black_overlay_window_created_) {
+      cv::Mat black_overlay = frame.clone();
+      black_overlay.setTo(cv::Scalar(0, 0, 255), black_mask);
+      updatePixelReadoutState(black_overlay_pixel_readout_, black_overlay, frame, hsv_image);
+      cv::imshow(kBlackOverlayWindowName, black_overlay);
+      resizeWindowToFitImage(
+        kBlackOverlayWindowName, black_overlay, display_max_width_, display_max_height_);
     }
   }
 
@@ -536,7 +778,7 @@ private:
     if (
       !controls_window_created_ && !input_window_created_ && !mask_window_created_ &&
       !green_mask_window_created_ && !black_mask_window_created_ && !noise_mask_window_created_ &&
-      !overlay_window_created_)
+      !overlay_window_created_ && !green_overlay_window_created_ && !black_overlay_window_created_)
     {
       return false;
     }
@@ -695,11 +937,27 @@ private:
 
     cv::Mat black_candidate;
     stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
-    cv::inRange(
-      hsv_image,
-      cv::Scalar(0, 0, 0),
-      cv::Scalar(kHueMax, kByteMax, black_v_max_),
-      black_candidate);
+    if (black_h_min_ <= black_h_max_) {
+      cv::inRange(
+        hsv_image,
+        cv::Scalar(black_h_min_, black_s_min_, black_v_min_),
+        cv::Scalar(black_h_max_, black_s_max_, black_v_max_),
+        black_candidate);
+    } else {
+      cv::Mat low_range_mask;
+      cv::Mat high_range_mask;
+      cv::inRange(
+        hsv_image,
+        cv::Scalar(0, black_s_min_, black_v_min_),
+        cv::Scalar(black_h_max_, black_s_max_, black_v_max_),
+        low_range_mask);
+      cv::inRange(
+        hsv_image,
+        cv::Scalar(black_h_min_, black_s_min_, black_v_min_),
+        cv::Scalar(kHueMax, black_s_max_, black_v_max_),
+        high_range_mask);
+      cv::bitwise_or(low_range_mask, high_range_mask, black_candidate);
+    }
     if (timing_enabled) {
       recordStageDuration(
         timing.stage_us,
@@ -714,7 +972,7 @@ private:
       cv::inRange(
         hsv_image,
         cv::Scalar(green_h_min_, green_s_min_, green_v_min_),
-        cv::Scalar(green_h_max_, kByteMax, kByteMax),
+        cv::Scalar(green_h_max_, green_s_max_, green_v_max_),
         green_candidate);
     } else {
       cv::Mat low_range_mask;
@@ -722,12 +980,12 @@ private:
       cv::inRange(
         hsv_image,
         cv::Scalar(0, green_s_min_, green_v_min_),
-        cv::Scalar(green_h_max_, kByteMax, kByteMax),
+        cv::Scalar(green_h_max_, green_s_max_, green_v_max_),
         low_range_mask);
       cv::inRange(
         hsv_image,
         cv::Scalar(green_h_min_, green_s_min_, green_v_min_),
-        cv::Scalar(kHueMax, kByteMax, kByteMax),
+        cv::Scalar(kHueMax, green_s_max_, green_v_max_),
         high_range_mask);
       cv::bitwise_or(low_range_mask, high_range_mask, green_candidate);
     }
@@ -772,10 +1030,10 @@ private:
     const bool gui_enabled =
       controls_window_created_ || input_window_created_ || mask_window_created_ ||
       green_mask_window_created_ || black_mask_window_created_ || noise_mask_window_created_ ||
-      overlay_window_created_;
+      overlay_window_created_ || green_overlay_window_created_ || black_overlay_window_created_;
     if (gui_enabled) {
       stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
-      showDebugImages(frame, white_mask, green_mask, black_mask, noise_mask);
+      showDebugImages(frame, hsv_image, white_mask, green_mask, black_mask, noise_mask);
       processGuiEvents();
       if (timing_enabled) {
         recordStageDuration(
@@ -813,11 +1071,18 @@ private:
   int white_h_max_{kHueMax};
   int white_s_max_{60};
   int white_v_min_{170};
+  int black_h_min_{0};
+  int black_h_max_{kHueMax};
+  int black_s_min_{0};
+  int black_s_max_{kByteMax};
+  int black_v_min_{0};
   int black_v_max_{70};
   int green_h_min_{35};
   int green_h_max_{95};
   int green_s_min_{40};
+  int green_s_max_{kByteMax};
   int green_v_min_{40};
+  int green_v_max_{kByteMax};
   bool enable_timing_log_{true};
   int timing_log_interval_{30};
   bool enable_image_view_{false};
@@ -828,6 +1093,8 @@ private:
   bool show_black_mask_{false};
   bool show_noise_mask_{false};
   bool show_overlay_image_{true};
+  bool show_green_overlay_{false};
+  bool show_black_overlay_{false};
   bool headless_warned_{false};
   bool controls_window_created_{false};
   bool controls_window_initialized_{false};
@@ -837,6 +1104,16 @@ private:
   bool black_mask_window_created_{false};
   bool noise_mask_window_created_{false};
   bool overlay_window_created_{false};
+  bool green_overlay_window_created_{false};
+  bool black_overlay_window_created_{false};
+  PixelReadoutState input_pixel_readout_;
+  PixelReadoutState mask_pixel_readout_;
+  PixelReadoutState green_mask_pixel_readout_;
+  PixelReadoutState black_mask_pixel_readout_;
+  PixelReadoutState noise_mask_pixel_readout_;
+  PixelReadoutState overlay_pixel_readout_;
+  PixelReadoutState green_overlay_pixel_readout_;
+  PixelReadoutState black_overlay_pixel_readout_;
   int display_max_width_{960};
   int display_max_height_{720};
   bool robot_mask_enabled_{false};
