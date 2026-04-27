@@ -783,6 +783,22 @@ public:
     declare_parameter("show_white_final_mask", true);
     declare_parameter("show_white_mask", true);
     declare_parameter("show_debug_image", true);
+    declare_parameter("publish_debug_images", false);
+    declare_parameter("publish_morph_mask", true);
+    declare_parameter("publish_distance_transform", true);
+    declare_parameter("publish_green_mask", true);
+    declare_parameter("publish_black_mask", true);
+    declare_parameter("publish_noise_mask", true);
+    declare_parameter("publish_ridge_mask", true);
+    declare_parameter("publish_candidate_prefilter_mask", true);
+    declare_parameter("publish_orientation_valid_mask", true);
+    declare_parameter("publish_side_support_seed_mask", true);
+    declare_parameter("publish_side_support_mask", true);
+    declare_parameter("publish_width_supported_ridge_mask", true);
+    declare_parameter("publish_length_filtered_ridge_mask", true);
+    declare_parameter("publish_reconstructed_mask", true);
+    declare_parameter("publish_white_final_mask", true);
+    declare_parameter("publish_debug_image", true);
     declare_parameter("enable_timing_debug", false);
     declare_parameter("timing_summary_interval", 10);
     declare_parameter("display_max_width", 960);
@@ -816,6 +832,10 @@ public:
     white_final_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/white_final_mask", 10);
     legacy_white_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/white_mask", 10);
     debug_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug_image", 10);
+    debug_morph_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/morph_mask", 10);
+    debug_green_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/green_mask", 10);
+    debug_black_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/black_mask", 10);
+    debug_noise_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/noise_mask", 10);
 
     RCLCPP_INFO(
       get_logger(),
@@ -863,6 +883,10 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr white_final_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr legacy_white_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_morph_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_green_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_black_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_noise_mask_pub_;
 
   std::string morph_mask_topic_;
   std::string green_mask_topic_;
@@ -906,6 +930,22 @@ private:
   bool show_reconstructed_mask_ = true;
   bool show_white_final_mask_ = true;
   bool show_debug_image_ = true;
+  bool publish_debug_images_ = false;
+  bool publish_morph_mask_ = true;
+  bool publish_distance_transform_ = true;
+  bool publish_green_mask_ = true;
+  bool publish_black_mask_ = true;
+  bool publish_noise_mask_ = true;
+  bool publish_ridge_mask_ = true;
+  bool publish_candidate_prefilter_mask_ = true;
+  bool publish_orientation_valid_mask_ = true;
+  bool publish_side_support_seed_mask_ = true;
+  bool publish_side_support_mask_ = true;
+  bool publish_width_supported_ridge_mask_ = true;
+  bool publish_length_filtered_ridge_mask_ = true;
+  bool publish_reconstructed_mask_ = true;
+  bool publish_white_final_mask_ = true;
+  bool publish_debug_image_ = true;
   bool enable_timing_debug_ = false;
   bool morph_window_created_ = false;
   bool distance_transform_window_created_ = false;
@@ -1015,6 +1055,22 @@ private:
     show_reconstructed_mask_ = get_parameter("show_reconstructed_mask").as_bool();
     show_white_final_mask_ = resolveBoolParameter("show_white_final_mask", {"show_white_mask"});
     show_debug_image_ = get_parameter("show_debug_image").as_bool();
+    publish_debug_images_ = get_parameter("publish_debug_images").as_bool();
+    publish_morph_mask_ = get_parameter("publish_morph_mask").as_bool();
+    publish_distance_transform_ = get_parameter("publish_distance_transform").as_bool();
+    publish_green_mask_ = get_parameter("publish_green_mask").as_bool();
+    publish_black_mask_ = get_parameter("publish_black_mask").as_bool();
+    publish_noise_mask_ = get_parameter("publish_noise_mask").as_bool();
+    publish_ridge_mask_ = get_parameter("publish_ridge_mask").as_bool();
+    publish_candidate_prefilter_mask_ = get_parameter("publish_candidate_prefilter_mask").as_bool();
+    publish_orientation_valid_mask_ = get_parameter("publish_orientation_valid_mask").as_bool();
+    publish_side_support_seed_mask_ = get_parameter("publish_side_support_seed_mask").as_bool();
+    publish_side_support_mask_ = get_parameter("publish_side_support_mask").as_bool();
+    publish_width_supported_ridge_mask_ = get_parameter("publish_width_supported_ridge_mask").as_bool();
+    publish_length_filtered_ridge_mask_ = get_parameter("publish_length_filtered_ridge_mask").as_bool();
+    publish_reconstructed_mask_ = get_parameter("publish_reconstructed_mask").as_bool();
+    publish_white_final_mask_ = get_parameter("publish_white_final_mask").as_bool();
+    publish_debug_image_ = get_parameter("publish_debug_image").as_bool();
     enable_timing_debug_ = get_parameter("enable_timing_debug").as_bool();
     timing_summary_interval_ =
       std::max(1, static_cast<int>(get_parameter("timing_summary_interval").as_int()));
@@ -1300,9 +1356,19 @@ private:
     }
   }
 
+  template<typename PublisherT>
+  bool shouldPublishDebugImage(const std::shared_ptr<PublisherT> & publisher, bool image_enabled) const
+  {
+    return publish_debug_images_ && image_enabled && hasSubscribers(publisher);
+  }
+
   bool publishOutputs(
     const std_msgs::msg::Header & header,
+    const cv::Mat & morph_mask,
     const cv::Mat & distance_transform_debug_image,
+    const cv::Mat & green_mask,
+    const cv::Mat & black_mask,
+    const cv::Mat & noise_mask,
     const cv::Mat & ridge_mask,
     const cv::Mat & candidate_prefilter_mask,
     const cv::Mat & orientation_valid_mask,
@@ -1331,7 +1397,20 @@ private:
       published_any = true;
     }
 
-    if (show_ridge_mask_) {
+    if (shouldPublishDebugImage(debug_morph_mask_pub_, publish_morph_mask_)) {
+      published_any |= publishImageIfSubscribed(debug_morph_mask_pub_, header, "mono8", morph_mask);
+    }
+    if (shouldPublishDebugImage(debug_green_mask_pub_, publish_green_mask_)) {
+      published_any |= publishImageIfSubscribed(debug_green_mask_pub_, header, "mono8", green_mask);
+    }
+    if (shouldPublishDebugImage(debug_black_mask_pub_, publish_black_mask_)) {
+      published_any |= publishImageIfSubscribed(debug_black_mask_pub_, header, "mono8", black_mask);
+    }
+    if (shouldPublishDebugImage(debug_noise_mask_pub_, publish_noise_mask_)) {
+      published_any |= publishImageIfSubscribed(debug_noise_mask_pub_, header, "mono8", noise_mask);
+    }
+
+    if (publish_debug_images_ && publish_ridge_mask_) {
       published_any |= publishImageIfSubscribed(ridge_mask_pub_, header, "mono8", ridge_mask);
       published_any |= publishImageIfSubscribed(
         legacy_skeleton_mask_pub_,
@@ -1339,42 +1418,42 @@ private:
         "mono8",
         ridge_mask);
     }
-    if (show_candidate_prefilter_mask_) {
+    if (publish_debug_images_ && publish_candidate_prefilter_mask_) {
       published_any |= publishImageIfSubscribed(
         candidate_prefilter_mask_pub_,
         header,
         "mono8",
         candidate_prefilter_mask);
     }
-    if (show_distance_transform_ && !distance_transform_debug_image.empty()) {
+    if (publish_debug_images_ && publish_distance_transform_ && !distance_transform_debug_image.empty()) {
       published_any |= publishImageIfSubscribed(
         distance_transform_pub_,
         header,
         "bgr8",
         distance_transform_debug_image);
     }
-    if (enable_orientation_estimate_ && show_orientation_valid_mask_) {
+    if (enable_orientation_estimate_ && publish_debug_images_ && publish_orientation_valid_mask_) {
       published_any |= publishImageIfSubscribed(
         orientation_valid_mask_pub_,
         header,
         "mono8",
         orientation_valid_mask);
     }
-    if (show_side_support_seed_mask_) {
+    if (publish_debug_images_ && publish_side_support_seed_mask_) {
       published_any |= publishImageIfSubscribed(
         side_support_seed_mask_pub_,
         header,
         "mono8",
         side_support_seed_mask);
     }
-    if (show_side_support_mask_) {
+    if (publish_debug_images_ && publish_side_support_mask_) {
       published_any |= publishImageIfSubscribed(
         side_support_mask_pub_,
         header,
         "mono8",
         side_support_mask);
     }
-    if (show_width_supported_ridge_mask_) {
+    if (publish_debug_images_ && publish_width_supported_ridge_mask_) {
       published_any |= publishImageIfSubscribed(
         width_supported_ridge_mask_pub_,
         header,
@@ -1386,7 +1465,7 @@ private:
         "mono8",
         width_supported_ridge_mask);
     }
-    if (show_length_filtered_ridge_mask_) {
+    if (publish_debug_images_ && publish_length_filtered_ridge_mask_) {
       published_any |= publishImageIfSubscribed(
         length_filtered_ridge_mask_pub_,
         header,
@@ -1403,14 +1482,14 @@ private:
         "mono8",
         length_filtered_ridge_mask);
     }
-    if (show_reconstructed_mask_) {
+    if (publish_debug_images_ && publish_reconstructed_mask_) {
       published_any |= publishImageIfSubscribed(
         reconstructed_mask_pub_,
         header,
         "mono8",
         reconstructed_mask);
     }
-    if (show_debug_image_ && !debug_image.empty()) {
+    if (publish_debug_images_ && publish_debug_image_ && !debug_image.empty()) {
       published_any |= publishImageIfSubscribed(debug_pub_, header, "bgr8", debug_image);
     }
 
@@ -1625,8 +1704,8 @@ private:
     }
 
     const bool distance_transform_debug_image_needed =
-      show_distance_transform_ &&
-      (distance_transform_window_created_ || hasSubscribers(distance_transform_pub_));
+      (show_distance_transform_ && distance_transform_window_created_) ||
+      shouldPublishDebugImage(distance_transform_pub_, publish_distance_transform_);
     cv::Mat distance_transform_debug_image;
     if (distance_transform_debug_image_needed) {
       stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
@@ -2023,7 +2102,8 @@ private:
     const unsigned long long current_frame_index = ++frame_count_;
 
     const bool debug_image_needed =
-      show_debug_image_ && (debug_window_created_ || hasSubscribers(debug_pub_));
+      (show_debug_image_ && debug_window_created_) ||
+      shouldPublishDebugImage(debug_pub_, publish_debug_image_);
     cv::Mat debug_image;
     if (debug_image_needed) {
       stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
@@ -2040,7 +2120,11 @@ private:
     stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
     const bool published_any = publishOutputs(
       morph_msg->header,
+      morph_mask,
       distance_transform_debug_image,
+      green_mask,
+      black_mask,
+      noise_mask,
       ridge_mask,
       candidate_prefilter_mask,
       orientation_valid_mask,

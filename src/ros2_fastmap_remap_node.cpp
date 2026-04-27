@@ -116,6 +116,9 @@ public:
         declare_parameter("enable_image_view", false);
         declare_parameter("show_input_image", true);
         declare_parameter("show_output_image", true);
+        declare_parameter("publish_debug_images", false);
+        declare_parameter("publish_input_image", true);
+        declare_parameter("publish_output_image", true);
         declare_parameter("display_max_width", 960);
         declare_parameter("display_max_height", 720);
         declare_parameter("enable_timing_log", true);
@@ -136,6 +139,10 @@ public:
         robotMaskPublisher_ = create_publisher<sensor_msgs::msg::Image>(
             "~/robot_mask",
             rclcpp::QoS(1).reliable().transient_local());
+        debugInputImagePublisher_ =
+            create_publisher<sensor_msgs::msg::Image>("~/debug/input_image", 10);
+        debugOutputImagePublisher_ =
+            create_publisher<sensor_msgs::msg::Image>("~/debug/output_image", 10);
 
         subscription_ = image_transport::create_subscription(
             this,
@@ -210,6 +217,9 @@ private:
         enableImageView_ = get_parameter("enable_image_view").as_bool();
         showInputImage_ = get_parameter("show_input_image").as_bool();
         showOutputImage_ = get_parameter("show_output_image").as_bool();
+        publishDebugImages_ = get_parameter("publish_debug_images").as_bool();
+        publishInputImage_ = get_parameter("publish_input_image").as_bool();
+        publishOutputImage_ = get_parameter("publish_output_image").as_bool();
         displayMaxWidth_ = std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
         displayMaxHeight_ = std::max(1, static_cast<int>(get_parameter("display_max_height").as_int()));
 
@@ -244,6 +254,29 @@ private:
 
         if (inputWindowCreated_ || outputWindowCreated_) {
             cv::waitKey(1);
+        }
+    }
+
+    template<typename PublisherT>
+    bool shouldPublishDebugImage(const std::shared_ptr<PublisherT>& publisher, bool image_enabled) const
+    {
+        return publishDebugImages_ && image_enabled && publisher != nullptr &&
+               publisher->get_subscription_count() > 0U;
+    }
+
+    void publishDebugImages(
+        const std_msgs::msg::Header& header,
+        const std::string& encoding,
+        const cv::Mat& input_image,
+        const cv::Mat& output_image)
+    {
+        if (shouldPublishDebugImage(debugInputImagePublisher_, publishInputImage_)) {
+            debugInputImagePublisher_->publish(
+                *cv_bridge::CvImage(header, encoding, input_image).toImageMsg());
+        }
+        if (shouldPublishDebugImage(debugOutputImagePublisher_, publishOutputImage_)) {
+            debugOutputImagePublisher_->publish(
+                *cv_bridge::CvImage(header, encoding, output_image).toImageMsg());
         }
     }
 
@@ -373,6 +406,7 @@ private:
             if (robotMaskEnabled_) {
                 publishRobotMask();
             }
+            publishDebugImages(msg->header, msg->encoding, cvInput->image, remappedImage_);
             showDebugImages(cvInput->image, remappedImage_);
 
             if (enableTimingLog_ &&
@@ -405,6 +439,8 @@ private:
     image_transport::Subscriber subscription_;
     image_transport::Publisher publisher_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr robotMaskPublisher_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debugInputImagePublisher_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debugOutputImagePublisher_;
     cv::Mat fastMap1_;
     cv::Mat fastMap2_;
     cv::Mat remappedImage_;
@@ -419,6 +455,9 @@ private:
     bool enableImageView_ = false;
     bool showInputImage_ = true;
     bool showOutputImage_ = true;
+    bool publishDebugImages_ = false;
+    bool publishInputImage_ = true;
+    bool publishOutputImage_ = true;
     bool headlessWarned_ = false;
     bool inputWindowCreated_ = false;
     bool outputWindowCreated_ = false;

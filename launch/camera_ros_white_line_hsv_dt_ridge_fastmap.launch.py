@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
@@ -7,6 +8,18 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_fastmap_hsv_pipeline import build_camera_hsv_dt_ridge_fastmap_nodes
+from rcj_shared_launch_params import (
+    camera_control_launch_arguments,
+    camera_control_parameters,
+    declare_camera_control_arguments,
+    declare_camera_ros_arguments,
+    declare_hsv_green_white_black_arguments,
+    hsv_green_white_black_launch_arguments,
+    hsv_green_white_black_parameters,
+)
 
 
 def find_latest_fastmap_file():
@@ -68,6 +81,11 @@ def build_nodes(context):
     frame_id = LaunchConfiguration("frame_id")
     camera_info_url = LaunchConfiguration("camera_info_url")
     use_node_time = LaunchConfiguration("use_node_time")
+    exposure_time = LaunchConfiguration("exposure_time")
+    exposure_time_mode = LaunchConfiguration("exposure_time_mode")
+    ae_enable = LaunchConfiguration("ae_enable")
+    analogue_gain = LaunchConfiguration("analogue_gain")
+    awb_enable = LaunchConfiguration("awb_enable")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
     remap_topic = LaunchConfiguration("remap_topic")
@@ -105,6 +123,7 @@ def build_nodes(context):
                     "frame_id": frame_id,  # Image frame id
                     "camera_info_url": camera_info_url,  # Camera calibration URL
                     "use_node_time": ParameterValue(use_node_time, value_type=bool),  # Whether to use node time
+                    **camera_control_parameters(),
                 }
             ],
         ),
@@ -144,33 +163,7 @@ def build_nodes(context):
                 {
                     "input_topic": remap_topic,  # HSV input image topic
                     "robot_mask_topic": hsv_robot_mask_topic,  # Remap-stage robot mask topic
-                    "white_h_min": ParameterValue(
-                        LaunchConfiguration("white_h_min"), value_type=int
-                    ),  # White HSV minimum H
-                    "white_h_max": ParameterValue(
-                        LaunchConfiguration("white_h_max"), value_type=int
-                    ),  # White HSV maximum H
-                    "white_s_max": ParameterValue(
-                        LaunchConfiguration("white_s_max"), value_type=int
-                    ),  # White HSV maximum S
-                    "white_v_min": ParameterValue(
-                        LaunchConfiguration("white_v_min"), value_type=int
-                    ),  # White HSV minimum V
-                    "black_v_max": ParameterValue(
-                        LaunchConfiguration("black_v_max"), value_type=int
-                    ),  # Black HSV maximum V
-                    "green_h_min": ParameterValue(
-                        LaunchConfiguration("green_h_min"), value_type=int
-                    ),  # Green HSV minimum H
-                    "green_h_max": ParameterValue(
-                        LaunchConfiguration("green_h_max"), value_type=int
-                    ),  # Green HSV maximum H
-                    "green_s_min": ParameterValue(
-                        LaunchConfiguration("green_s_min"), value_type=int
-                    ),  # Green HSV minimum S
-                    "green_v_min": ParameterValue(
-                        LaunchConfiguration("green_v_min"), value_type=int
-                    ),  # Green HSV minimum V
+                        **hsv_green_white_black_parameters(),
                     "enable_timing_log": ParameterValue(
                         LaunchConfiguration("hsv_enable_timing_log"),
                         value_type=bool,
@@ -371,31 +364,18 @@ def build_nodes(context):
 def generate_launch_description():
     return LaunchDescription(
         [
-            DeclareLaunchArgument("camera_index", default_value="0"),  # Camera index
-            DeclareLaunchArgument("role", default_value="viewfinder"),  # camera_ros role
-            DeclareLaunchArgument("format", default_value="RGB888"),  # Camera pixel format
-            DeclareLaunchArgument(
-                "width",
-                default_value="800",
-            ),  # Capture width
-            DeclareLaunchArgument(
-                "height",
-                default_value="600",
-            ),  # Capture height
-            DeclareLaunchArgument("orientation", default_value="0"),  # Camera rotation angle
-            DeclareLaunchArgument("sensor_mode", default_value="1332:990"),  # Camera sensor mode
-            DeclareLaunchArgument("frame_id", default_value="camera"),  # Image frame id
-            DeclareLaunchArgument("camera_info_url", default_value=""),  # Camera calibration URL
-            DeclareLaunchArgument("use_node_time", default_value="false"),  # Whether to use node time
+            *declare_camera_ros_arguments(),
             DeclareLaunchArgument(
                 "camera_info_topic", default_value="/camera/camera_info"
             ),  # Camera info topic
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
             DeclareLaunchArgument(
-                "remap_topic", default_value="/camera/image_remapped"
+                "remap_topic",
+                default_value="/white_line_hsv_input_remap_node/image_remapped",
             ),  # Remapped image topic
             DeclareLaunchArgument(
-                "white_mask_topic", default_value="/camera/white_mask"
+                "white_mask_topic",
+                default_value="/white_line_hsv_white_node/white_mask",
             ),  # White mask topic
             DeclareLaunchArgument(
                 "apply_mask", default_value="true"
@@ -412,21 +392,20 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "remap_enable_image_view", default_value="false"
             ),  # Whether to show remap windows
+            DeclareLaunchArgument("remap_show_input_image", default_value="true"),  # Show remap input window when remap image_view is true
+            DeclareLaunchArgument("remap_show_output_image", default_value="true"),  # Show remap output window when remap image_view is true
+            DeclareLaunchArgument(
+                "remap_publish_debug_images", default_value="true"
+            ),  # Master switch for remap debug image topics
+            DeclareLaunchArgument("remap_publish_input_image", default_value="true"),  # Publish remap input debug topic when subscribed
+            DeclareLaunchArgument("remap_publish_output_image", default_value="true"),  # Publish remap output debug topic when subscribed
             DeclareLaunchArgument(
                 "remap_enable_timing_log", default_value="true"
             ),  # Whether to log remap timing
             DeclareLaunchArgument(
                 "remap_timing_log_interval", default_value="30"
             ),  # Remap timing log frame interval
-            DeclareLaunchArgument("white_h_min", default_value="0"),  # White HSV minimum H
-            DeclareLaunchArgument("white_h_max", default_value="179"),  # White HSV maximum H
-            DeclareLaunchArgument("white_s_max", default_value="118"),  # White HSV maximum S
-            DeclareLaunchArgument("white_v_min", default_value="197"),  # White HSV minimum V
-            DeclareLaunchArgument("black_v_max", default_value="124"),  # Black HSV maximum V
-            DeclareLaunchArgument("green_h_min", default_value="35"),  # Green HSV minimum H
-            DeclareLaunchArgument("green_h_max", default_value="100"),  # Green HSV maximum H
-            DeclareLaunchArgument("green_s_min", default_value="140"),  # Green HSV minimum S
-            DeclareLaunchArgument("green_v_min", default_value="80"),  # Green HSV minimum V
+            *declare_hsv_green_white_black_arguments(),
             DeclareLaunchArgument(
                 "hsv_enable_timing_log", default_value="true"
             ),  # Whether to log HSV timing
@@ -447,6 +426,15 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "hsv_show_overlay_image", default_value="true"
             ),  # Show the HSV overlay window when hsv_enable_image_view is true
+            DeclareLaunchArgument(
+                "hsv_publish_debug_images", default_value="false"
+            ),  # Master switch for HSV debug image topics
+            DeclareLaunchArgument("hsv_publish_input_image", default_value="true"),  # Publish HSV input debug topic when subscribed
+            DeclareLaunchArgument("hsv_publish_white_mask", default_value="true"),  # Publish HSV white debug mask when subscribed
+            DeclareLaunchArgument("hsv_publish_green_mask", default_value="true"),  # Publish HSV green debug mask when subscribed
+            DeclareLaunchArgument("hsv_publish_black_mask", default_value="true"),  # Publish HSV black debug mask when subscribed
+            DeclareLaunchArgument("hsv_publish_noise_mask", default_value="true"),  # Publish HSV noise debug mask when subscribed
+            DeclareLaunchArgument("hsv_publish_overlay_image", default_value="true"),  # Publish HSV overlay debug topic when subscribed
             DeclareLaunchArgument("hsv_display_max_width", default_value="960"),  # HSV window max width
             DeclareLaunchArgument("hsv_display_max_height", default_value="720"),  # HSV window max height
             DeclareLaunchArgument(
@@ -504,7 +492,7 @@ def generate_launch_description():
                 "ridge_reconstruction_margin_px", default_value="1.0"
             ),  # Extra radius added during reconstruction
             DeclareLaunchArgument(
-                "ridge_enable_image_view", default_value="false"
+                "ridge_enable_image_view", default_value="true"
             ),  # Whether to show ridge debug windows
             DeclareLaunchArgument("ridge_show_morph_mask", default_value="true"),  # Whether to show input white mask
             DeclareLaunchArgument("ridge_show_distance_transform", default_value="true"),  # Whether to show the DT image before orientation filtering
@@ -518,6 +506,9 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "ridge_show_orientation_valid_mask", default_value="true"
             ),  # Whether to show orientation-valid ridge mask
+            DeclareLaunchArgument(
+                "ridge_show_side_support_seed_mask", default_value="false"
+            ),  # Whether to show supported side-scan seed mask
             DeclareLaunchArgument(
                 "ridge_show_side_support_mask", default_value="true"
             ),  # Whether to show side-support mask
@@ -535,11 +526,45 @@ def generate_launch_description():
             ),  # Whether to show final white mask
             DeclareLaunchArgument("ridge_show_debug_image", default_value="true"),  # Whether to show composite debug image
             DeclareLaunchArgument(
+                "ridge_publish_debug_images", default_value="false"
+            ),  # Master switch for ridge debug image topics
+            DeclareLaunchArgument("ridge_publish_morph_mask", default_value="true"),  # Publish ridge input morph mask when subscribed
+            DeclareLaunchArgument("ridge_publish_distance_transform", default_value="true"),  # Publish ridge distance-transform debug image when subscribed
+            DeclareLaunchArgument("ridge_publish_green_mask", default_value="true"),  # Publish ridge input green mask when subscribed
+            DeclareLaunchArgument("ridge_publish_black_mask", default_value="true"),  # Publish ridge input black mask when subscribed
+            DeclareLaunchArgument("ridge_publish_noise_mask", default_value="true"),  # Publish ridge input noise mask when subscribed
+            DeclareLaunchArgument("ridge_publish_ridge_mask", default_value="true"),  # Publish extracted ridge mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_candidate_prefilter_mask", default_value="true"
+            ),  # Publish candidate-prefilter ridge mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_orientation_valid_mask", default_value="true"
+            ),  # Publish orientation-valid seed mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_side_support_seed_mask", default_value="true"
+            ),  # Publish supported side-scan seed mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_side_support_mask", default_value="true"
+            ),  # Publish side-support mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_width_supported_ridge_mask", default_value="true"
+            ),  # Publish width-filtered ridge mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_length_filtered_ridge_mask", default_value="true"
+            ),  # Publish length-filtered ridge mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_reconstructed_mask", default_value="true"
+            ),  # Publish reconstructed mask when subscribed
+            DeclareLaunchArgument(
+                "ridge_publish_white_final_mask", default_value="true"
+            ),  # Keep final white mask topic available when subscribed
+            DeclareLaunchArgument("ridge_publish_debug_image", default_value="true"),  # Publish composite debug image when subscribed
+            DeclareLaunchArgument(
                 "ridge_enable_timing_log", default_value="true"
             ),  # Whether to log ridge timing summary
             DeclareLaunchArgument(
                 "ridge_timing_summary_interval", default_value="10"
             ),  # Ridge timing summary frame interval
-            OpaqueFunction(function=build_nodes),
+            OpaqueFunction(function=build_camera_hsv_dt_ridge_fastmap_nodes),
         ]
     )

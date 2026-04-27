@@ -1,14 +1,26 @@
 import xml.etree.ElementTree as ET
 from pathlib import Path
+import sys
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_shared_launch_params import (
+    camera_control_launch_arguments,
+    camera_control_parameters,
+    declare_camera_control_arguments,
+    declare_camera_ros_arguments,
+    declare_hsv_green_white_black_arguments,
+    hsv_green_white_black_launch_arguments,
+    hsv_green_white_black_parameters,
+)
+from rcj_fastmap_hsv_pipeline import build_camera_hsv_fastmap_nodes
 
 
 def find_latest_fastmap_file():
@@ -23,9 +35,6 @@ def find_latest_fastmap_file():
 
 def generate_launch_description():
     package_share = Path(get_package_share_directory("rcj_localization"))
-    base_launch_file = (
-        package_share / "launch" / "camera_ros_white_line_hsv_fastmap.launch.py"
-    )
     map_yaml_default = package_share / "maps" / "rcj_map.yaml"
 
     camera_index = LaunchConfiguration("camera_index")
@@ -38,6 +47,11 @@ def generate_launch_description():
     frame_id = LaunchConfiguration("frame_id")
     camera_info_url = LaunchConfiguration("camera_info_url")
     use_node_time = LaunchConfiguration("use_node_time")
+    exposure_time = LaunchConfiguration("exposure_time")
+    exposure_time_mode = LaunchConfiguration("exposure_time_mode")
+    ae_enable = LaunchConfiguration("ae_enable")
+    analogue_gain = LaunchConfiguration("analogue_gain")
+    awb_enable = LaunchConfiguration("awb_enable")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
     remap_topic = LaunchConfiguration("remap_topic")
@@ -102,20 +116,17 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            DeclareLaunchArgument("camera_index", default_value="0"),  # Camera index
-            DeclareLaunchArgument("role", default_value="viewfinder"),  # camera_ros role
-            DeclareLaunchArgument("format", default_value="RGB888"),  # Camera pixel format
-            DeclareLaunchArgument("width", default_value="800"),  # Capture width, empty means use selected Fastmap source width
-            DeclareLaunchArgument("height", default_value="600"),  # Capture height, empty means use selected Fastmap source height
-            DeclareLaunchArgument("orientation", default_value="0"),  # Camera rotation angle
-            DeclareLaunchArgument("sensor_mode", default_value="1332:990"),  # Camera sensor mode
-            DeclareLaunchArgument("frame_id", default_value="camera"),  # Image frame id
-            DeclareLaunchArgument("camera_info_url", default_value=""),  # Camera calibration URL
-            DeclareLaunchArgument("use_node_time", default_value="false"),  # Whether to use node time
+            *declare_camera_ros_arguments(),
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # Camera info topic
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
-            DeclareLaunchArgument("remap_topic", default_value="/camera/image_remapped"),  # Remapped image topic
-            DeclareLaunchArgument("white_mask_topic", default_value="/camera/white_mask"),  # White mask topic
+            DeclareLaunchArgument(
+                "remap_topic",
+                default_value="/white_line_hsv_input_remap_node/image_remapped",
+            ),  # Remapped image topic
+            DeclareLaunchArgument(
+                "white_mask_topic",
+                default_value="/white_line_hsv_white_node/white_mask",
+            ),  # White mask topic
             DeclareLaunchArgument("robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")),  # Optional remapped-space robot mask image path
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument("fastmap_file", default_value=""),  # Specific Fastmap XML path when auto-select is disabled
@@ -124,15 +135,7 @@ def generate_launch_description():
             DeclareLaunchArgument("remap_enable_image_view", default_value="false"),  # Whether to show remap windows
             DeclareLaunchArgument("remap_enable_timing_log", default_value="true"),  # Whether to log remap timing
             DeclareLaunchArgument("remap_timing_log_interval", default_value="30"),  # Remap timing log frame interval
-            DeclareLaunchArgument("white_h_min", default_value="0"),  # White HSV minimum H
-            DeclareLaunchArgument("white_h_max", default_value="179"),  # White HSV maximum H
-            DeclareLaunchArgument("white_s_max", default_value="118"),  # White HSV maximum S
-            DeclareLaunchArgument("white_v_min", default_value="197"),  # White HSV minimum V
-            DeclareLaunchArgument("black_v_max", default_value="124"),  # Black HSV maximum V
-            DeclareLaunchArgument("green_h_min", default_value="35"),  # Green HSV minimum H
-            DeclareLaunchArgument("green_h_max", default_value="100"),  # Green HSV maximum H
-            DeclareLaunchArgument("green_s_min", default_value="140"),  # Green HSV minimum S
-            DeclareLaunchArgument("green_v_min", default_value="80"),  # Green HSV minimum V
+            *declare_hsv_green_white_black_arguments(),
             DeclareLaunchArgument("hsv_enable_timing_log", default_value="true"),  # Whether to log HSV timing
             DeclareLaunchArgument("hsv_timing_log_interval", default_value="15"),  # HSV timing log frame interval
             DeclareLaunchArgument("hsv_enable_image_view", default_value="true"),  # Master switch for HSV debug windows; false means no window creation or GUI processing
@@ -208,84 +211,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "topdown_pf_timing_log_interval", default_value="10"
             ),  # PF timing log iteration interval
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(str(base_launch_file)),
-                launch_arguments={
-                    "camera_index": camera_index,
-                    "role": role,
-                    "format": image_format,
-                    "width": width,
-                    "height": height,
-                    "orientation": orientation,
-                    "sensor_mode": sensor_mode,
-                    "frame_id": frame_id,
-                    "camera_info_url": camera_info_url,
-                    "use_node_time": use_node_time,
-                    "camera_info_topic": camera_info_topic,
-                    "input_topic": input_topic,
-                    "remap_topic": remap_topic,
-                    "white_mask_topic": white_mask_topic,
-                    "robot_mask_path": robot_mask_path,
-                    "use_latest_fastmap": LaunchConfiguration("use_latest_fastmap"),
-                    "fastmap_file": fastmap_file,
-                    "input_transport": input_transport,
-                    "interpolation": interpolation,
-                    "remap_enable_image_view": LaunchConfiguration(
-                        "remap_enable_image_view"
-                    ),
-                    "remap_enable_timing_log": LaunchConfiguration(
-                        "remap_enable_timing_log"
-                    ),
-                    "remap_timing_log_interval": LaunchConfiguration(
-                        "remap_timing_log_interval"
-                    ),
-                    "white_h_min": LaunchConfiguration("white_h_min"),
-                    "white_h_max": LaunchConfiguration("white_h_max"),
-                    "white_s_max": LaunchConfiguration("white_s_max"),
-                    "white_v_min": LaunchConfiguration("white_v_min"),
-                    "black_v_max": LaunchConfiguration("black_v_max"),
-                    "green_h_min": LaunchConfiguration("green_h_min"),
-                    "green_h_max": LaunchConfiguration("green_h_max"),
-                    "green_s_min": LaunchConfiguration("green_s_min"),
-                    "green_v_min": LaunchConfiguration("green_v_min"),
-                    "hsv_enable_timing_log": LaunchConfiguration(
-                        "hsv_enable_timing_log"
-                    ),
-                    "hsv_timing_log_interval": LaunchConfiguration(
-                        "hsv_timing_log_interval"
-                    ),
-                    "hsv_enable_image_view": LaunchConfiguration(
-                        "hsv_enable_image_view"
-                    ),
-                    "hsv_enable_controls_window": LaunchConfiguration(
-                        "hsv_enable_controls_window"
-                    ),
-                    "hsv_show_input_image": LaunchConfiguration(
-                        "hsv_show_input_image"
-                    ),
-                    "hsv_show_white_mask": LaunchConfiguration(
-                        "hsv_show_white_mask"
-                    ),
-                    "hsv_show_green_mask": LaunchConfiguration(
-                        "hsv_show_green_mask"
-                    ),
-                    "hsv_show_black_mask": LaunchConfiguration(
-                        "hsv_show_black_mask"
-                    ),
-                    "hsv_show_noise_mask": LaunchConfiguration(
-                        "hsv_show_noise_mask"
-                    ),
-                    "hsv_show_overlay_image": LaunchConfiguration(
-                        "hsv_show_overlay_image"
-                    ),
-                    "hsv_display_max_width": LaunchConfiguration(
-                        "hsv_display_max_width"
-                    ),
-                    "hsv_display_max_height": LaunchConfiguration(
-                        "hsv_display_max_height"
-                    ),
-                }.items(),
-            ),
+            OpaqueFunction(function=build_camera_hsv_fastmap_nodes),
             Node(
                 package="nav2_map_server",
                 executable="map_server",

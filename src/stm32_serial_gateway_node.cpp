@@ -35,6 +35,7 @@ enum class CommandKind
 enum class ReplyStatus
 {
   Ok,
+  Done,
   Eror,
 };
 
@@ -208,11 +209,34 @@ std::optional<ReplyStatus> parseReplyStatus(const std::string &status_text)
   {
     return ReplyStatus::Ok;
   }
+  if (status_text == "done")
+  {
+    return ReplyStatus::Done;
+  }
   if (status_text == "eror")
   {
     return ReplyStatus::Eror;
   }
   return std::nullopt;
+}
+
+bool isSuccessStatus(ReplyStatus status)
+{
+  return status == ReplyStatus::Ok || status == ReplyStatus::Done;
+}
+
+std::string replyStatusText(ReplyStatus status)
+{
+  switch (status)
+  {
+  case ReplyStatus::Ok:
+    return "ok";
+  case ReplyStatus::Done:
+    return "done";
+  case ReplyStatus::Eror:
+    return "eror";
+  }
+  throw std::runtime_error("Unknown STM32 reply status.");
 }
 
 std::optional<std::uint16_t> parseCrcHex(const std::string &crc_text)
@@ -326,6 +350,18 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
   {
     Command command{};
     command.kind = CommandKind::Distance;
+    if (tokens >> status_text && status_text == "done" &&
+        tokens >> command.primary_value >> command.secondary_value &&
+        !(tokens >> extra_token))
+    {
+      reply.command_text = buildCommandText(command);
+      reply.status = ReplyStatus::Done;
+      return reply;
+    }
+
+    tokens.clear();
+    tokens.str(command_text);
+    tokens >> reply.command_name;
     if (tokens >> command.primary_value >> command.secondary_value >> status_text &&
         !(tokens >> extra_token))
     {
@@ -344,6 +380,17 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
     Command command{};
     command.kind = CommandKind::Turn;
     command.secondary_value = 0.0;
+    if (tokens >> status_text && status_text == "done" &&
+        tokens >> command.primary_value && !(tokens >> extra_token))
+    {
+      reply.command_text = buildCommandText(command);
+      reply.status = ReplyStatus::Done;
+      return reply;
+    }
+
+    tokens.clear();
+    tokens.str(command_text);
+    tokens >> reply.command_name;
     if (tokens >> command.primary_value >> status_text && !(tokens >> extra_token))
     {
       const auto status = parseReplyStatus(status_text);
@@ -991,7 +1038,7 @@ private:
     }
 
     if (active_motion_command_.has_value() &&
-        replyMatchesCommand(*parsed_reply, *active_motion_command_))
+        replyMatchesMotionCompletion(*parsed_reply, *active_motion_command_))
     {
       handleActiveMotionReply(*parsed_reply);
       return;
@@ -1011,9 +1058,25 @@ private:
            parsed_reply.command_text == expected_command_name;
   }
 
+  bool replyMatchesMotionCompletion(
+      const ParsedReply &parsed_reply,
+      const PendingCommand &pending) const
+  {
+    const std::string expected_command_name = commandName(pending.command.kind);
+    if (parsed_reply.command_name != expected_command_name)
+    {
+      return false;
+    }
+
+    // Motion actions must complete only on the full command ACK. A generic
+    // "cmd_dis ok" / "cmd_turn ok" can only prove the STM32 parsed the command,
+    // not that the movement finished.
+    return parsed_reply.command_text == pending.command_text;
+  }
+
   void handleActiveCommandReply(const ParsedReply &parsed_reply)
   {
-    if (parsed_reply.status == ReplyStatus::Ok)
+    if (isSuccessStatus(parsed_reply.status))
     {
       if (enable_serial_log_)
       {
@@ -1031,8 +1094,9 @@ private:
         {
           RCLCPP_INFO(
               get_logger(),
-              "STM32 acknowledged command '%s' with ok.",
-              active_command_->command_text.c_str());
+              "STM32 acknowledged command '%s' with %s.",
+              active_command_->command_text.c_str(),
+              replyStatusText(parsed_reply.status).c_str());
         }
       }
 
@@ -1052,7 +1116,10 @@ private:
       }
       else
       {
-        finishActiveCommand(true, "ok", "STM32 command acknowledged.");
+        finishActiveCommand(
+            true,
+            replyStatusText(parsed_reply.status),
+            "STM32 command acknowledged.");
       }
       return;
     }
@@ -1074,16 +1141,20 @@ private:
       return;
     }
 
-    if (parsed_reply.status == ReplyStatus::Ok)
+    if (isSuccessStatus(parsed_reply.status))
     {
       if (enable_serial_log_)
       {
         RCLCPP_INFO(
             get_logger(),
-            "STM32 acknowledged command '%s' with ok.",
-            active_motion_command_->command_text.c_str());
+            "STM32 acknowledged command '%s' with %s.",
+            active_motion_command_->command_text.c_str(),
+            replyStatusText(parsed_reply.status).c_str());
       }
-      finishActiveMotionCommand(true, "ok", "STM32 command acknowledged.");
+      finishActiveMotionCommand(
+          true,
+          replyStatusText(parsed_reply.status),
+          "STM32 command acknowledged.");
       return;
     }
 

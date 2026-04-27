@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
@@ -7,6 +8,16 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_shared_launch_params import (
+    camera_control_launch_arguments,
+    camera_control_parameters,
+    declare_camera_control_arguments,
+    declare_hsv_green_white_black_arguments,
+    hsv_green_white_black_launch_arguments,
+    hsv_green_white_black_parameters,
+)
 
 
 def find_latest_fastmap_file():
@@ -91,6 +102,7 @@ def build_nodes(context):
                     "use_node_time": ParameterValue(
                         LaunchConfiguration("use_node_time"), value_type=bool
                     ),
+                    **camera_control_parameters(),
                 }
             ],
         ),
@@ -438,8 +450,12 @@ def generate_launch_description():
             ),
             # Raw image topic published by camera_node and consumed by remap.
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),
+            *declare_camera_control_arguments(),
             # Remapped top-down image topic produced by fastmap_remap_node.
-            DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),
+            DeclareLaunchArgument(
+                "output_topic",
+                default_value="/black_feature_input_remap_node/image_remapped",
+            ),
             # Automatically use the newest fastmap XML from the config folder.
             DeclareLaunchArgument("use_latest_fastmap", default_value="true"),
             # Explicit fastmap XML path; used when use_latest_fastmap is false.

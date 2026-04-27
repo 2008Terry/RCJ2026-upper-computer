@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -6,6 +7,12 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_shared_launch_params import (
+    camera_control_parameters,
+    declare_camera_control_arguments,
+)
 
 
 def generate_launch_description():
@@ -19,9 +26,23 @@ def generate_launch_description():
     frame_id = LaunchConfiguration("frame_id")
     camera_info_url = LaunchConfiguration("camera_info_url")
     use_node_time = LaunchConfiguration("use_node_time")
+    exposure_time = LaunchConfiguration("exposure_time")
+    exposure_time_mode = LaunchConfiguration("exposure_time_mode")
+    ae_enable = LaunchConfiguration("ae_enable")
+    analogue_gain = LaunchConfiguration("analogue_gain")
+    awb_enable = LaunchConfiguration("awb_enable")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
     robot_mask_path = LaunchConfiguration("robot_mask_path")
+    orange_enable_image_view = LaunchConfiguration("orange_enable_image_view")
+    orange_enable_controls_window = LaunchConfiguration("orange_enable_controls_window")
+    orange_show_input_image = LaunchConfiguration("orange_show_input_image")
+    orange_show_mask = LaunchConfiguration("orange_show_mask")
+    orange_show_overlay_image = LaunchConfiguration("orange_show_overlay_image")
+    orange_publish_debug_images = LaunchConfiguration("orange_publish_debug_images")
+    orange_publish_input_image = LaunchConfiguration("orange_publish_input_image")
+    orange_publish_mask = LaunchConfiguration("orange_publish_mask")
+    orange_publish_overlay_image = LaunchConfiguration("orange_publish_overlay_image")
 
     return LaunchDescription(
         [
@@ -37,6 +58,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_node_time", default_value="false"),
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),
+            *declare_camera_control_arguments(),
             DeclareLaunchArgument(
                 "robot_mask_path",
                 default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "mask.png"),
@@ -47,6 +69,21 @@ def generate_launch_description():
             DeclareLaunchArgument("orange_v_min", default_value="60"),
             DeclareLaunchArgument("enable_morph_open", default_value="true"),
             DeclareLaunchArgument("morph_kernel_size", default_value="3"),
+            DeclareLaunchArgument(
+                "orange_enable_image_view", default_value="false"
+            ),
+            DeclareLaunchArgument(
+                "orange_enable_controls_window", default_value="false"
+            ),
+            DeclareLaunchArgument("orange_show_input_image", default_value="true"),
+            DeclareLaunchArgument("orange_show_mask", default_value="true"),
+            DeclareLaunchArgument("orange_show_overlay_image", default_value="true"),
+            DeclareLaunchArgument(
+                "orange_publish_debug_images", default_value="false"
+            ),
+            DeclareLaunchArgument("orange_publish_input_image", default_value="true"),
+            DeclareLaunchArgument("orange_publish_mask", default_value="true"),
+            DeclareLaunchArgument("orange_publish_overlay_image", default_value="true"),
             Node(
                 package="camera_ros",
                 executable="camera_node",
@@ -69,6 +106,7 @@ def generate_launch_description():
                         "frame_id": frame_id,
                         "camera_info_url": camera_info_url,
                         "use_node_time": ParameterValue(use_node_time, value_type=bool),
+                        **camera_control_parameters(),
                     }
                 ],
             ),
@@ -99,6 +137,33 @@ def generate_launch_description():
                         ),
                         "morph_kernel_size": ParameterValue(
                             LaunchConfiguration("morph_kernel_size"), value_type=int
+                        ),
+                        "enable_image_view": ParameterValue(
+                            orange_enable_image_view, value_type=bool
+                        ),
+                        "enable_controls_window": ParameterValue(
+                            orange_enable_controls_window, value_type=bool
+                        ),
+                        "show_input_image": ParameterValue(
+                            orange_show_input_image, value_type=bool
+                        ),
+                        "show_mask": ParameterValue(
+                            orange_show_mask, value_type=bool
+                        ),
+                        "show_overlay_image": ParameterValue(
+                            orange_show_overlay_image, value_type=bool
+                        ),
+                        "publish_debug_images": ParameterValue(
+                            orange_publish_debug_images, value_type=bool
+                        ),
+                        "publish_input_image": ParameterValue(
+                            orange_publish_input_image, value_type=bool
+                        ),
+                        "publish_mask": ParameterValue(
+                            orange_publish_mask, value_type=bool
+                        ),
+                        "publish_overlay_image": ParameterValue(
+                            orange_publish_overlay_image, value_type=bool
                         ),
                     }
                 ],

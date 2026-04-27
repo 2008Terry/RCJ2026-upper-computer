@@ -421,7 +421,8 @@ public:
   BlackFeatureDetectorNode()
   : Node("black_feature_detector_node")
   {
-    declare_parameter<std::string>("input_topic", "/camera/image_remapped");
+    declare_parameter<std::string>(
+      "input_topic", "/black_feature_input_remap_node/image_remapped");
     declare_parameter<std::string>("black_mask_topic", "/white_line_hsv_white_node/black_mask");
     declare_parameter("enable_image_view", true);
     declare_parameter("publish_debug_image", true);

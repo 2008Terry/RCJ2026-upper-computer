@@ -66,7 +66,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "enable_raw_reply_log",
-                default_value="false",
+                default_value="true",
                 description="Log raw serial chunks and reply lines from STM32.",
             ),
             DeclareLaunchArgument(

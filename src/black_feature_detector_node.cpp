@@ -247,7 +247,8 @@ cv::Mat removeBorderTouchingComponents(const cv::Mat &mask) {
 class BlackFeatureDetectorNode : public rclcpp::Node {
 public:
     BlackFeatureDetectorNode() : Node("black_feature_detector_node") {
-        this->declare_parameter<std::string>("input_topic", "/camera/image_remapped");
+        this->declare_parameter<std::string>(
+            "input_topic", "/black_feature_input_remap_node/image_remapped");
         this->declare_parameter<std::string>("robot_mask_topic", "");
         this->declare_parameter("enable_image_view", false);
         this->declare_parameter("show_input_image", false);
