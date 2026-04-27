@@ -370,10 +370,12 @@ def generate_launch_description():
             ),  # Camera info topic
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
             DeclareLaunchArgument(
-                "remap_topic", default_value="/camera/image_remapped"
+                "remap_topic",
+                default_value="/white_line_hsv_input_remap_node/image_remapped",
             ),  # Remapped image topic
             DeclareLaunchArgument(
-                "white_mask_topic", default_value="/camera/white_mask"
+                "white_mask_topic",
+                default_value="/white_line_hsv_white_node/white_mask",
             ),  # White mask topic
             DeclareLaunchArgument(
                 "apply_mask", default_value="true"
@@ -393,7 +395,7 @@ def generate_launch_description():
             DeclareLaunchArgument("remap_show_input_image", default_value="true"),  # Show remap input window when remap image_view is true
             DeclareLaunchArgument("remap_show_output_image", default_value="true"),  # Show remap output window when remap image_view is true
             DeclareLaunchArgument(
-                "remap_publish_debug_images", default_value="false"
+                "remap_publish_debug_images", default_value="true"
             ),  # Master switch for remap debug image topics
             DeclareLaunchArgument("remap_publish_input_image", default_value="true"),  # Publish remap input debug topic when subscribed
             DeclareLaunchArgument("remap_publish_output_image", default_value="true"),  # Publish remap output debug topic when subscribed

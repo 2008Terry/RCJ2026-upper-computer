@@ -198,7 +198,8 @@ public:
   WhiteLineHsvWhiteNode()
   : Node("white_line_hsv_white_node")
   {
-    declare_parameter<std::string>("input_topic", "/camera/image_remapped");
+    declare_parameter<std::string>(
+      "input_topic", "/white_line_hsv_input_remap_node/image_remapped");
     declare_parameter<std::string>("robot_mask_topic", "");
     declare_parameter("white_h_min", 0);
     declare_parameter("white_h_max", kHueMax);

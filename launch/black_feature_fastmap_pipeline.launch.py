@@ -399,7 +399,10 @@ def generate_launch_description():
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),
             *declare_camera_control_arguments(),
             # Remapped top-down image topic produced by fastmap_remap_node.
-            DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),
+            DeclareLaunchArgument(
+                "output_topic",
+                default_value="/black_feature_input_remap_node/image_remapped",
+            ),
             # Automatically use the newest fastmap XML from the config folder.
             DeclareLaunchArgument("use_latest_fastmap", default_value="true"),
             # Explicit fastmap XML path; used when use_latest_fastmap is false.

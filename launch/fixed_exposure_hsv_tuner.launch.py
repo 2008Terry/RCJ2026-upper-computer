@@ -57,7 +57,8 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
             *declare_camera_control_arguments(),
             DeclareLaunchArgument(
-                "white_mask_topic", default_value="/camera/white_mask"
+                "white_mask_topic",
+                default_value="/white_line_hsv_white_node/white_mask",
             ),  # White mask topic
             DeclareLaunchArgument(
                 "robot_mask_topic", default_value=""

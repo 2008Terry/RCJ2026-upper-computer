@@ -102,7 +102,10 @@ def generate_launch_description():
         DeclareLaunchArgument("frame_id", default_value="camera"),  # Frame id for published images
         DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # Camera info topic
         DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw input image topic
-        DeclareLaunchArgument("output_topic", default_value="/camera/image_remapped"),  # Remapped output image topic
+        DeclareLaunchArgument(
+            "output_topic",
+            default_value="/white_line_lab_input_remap_node/image_remapped",
+        ),  # Remapped output image topic
         DeclareLaunchArgument("robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")),  # Optional remapped-space robot mask image path
         DeclareLaunchArgument("use_latest_fastmap", default_value="true"),  # Auto-select the newest fastmap file
         DeclareLaunchArgument("fastmap_file", default_value=""),  # Fastmap XML path when auto-select is off

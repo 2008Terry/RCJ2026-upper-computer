@@ -205,8 +205,14 @@ def generate_launch_description():
             *declare_camera_ros_arguments(),
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # Camera info topic
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic
-            DeclareLaunchArgument("remap_topic", default_value="/camera/image_remapped"),  # Remapped image topic
-            DeclareLaunchArgument("white_mask_topic", default_value="/camera/white_mask"),  # White mask topic
+            DeclareLaunchArgument(
+                "remap_topic",
+                default_value="/white_line_hsv_input_remap_node/image_remapped",
+            ),  # Remapped image topic
+            DeclareLaunchArgument(
+                "white_mask_topic",
+                default_value="/white_line_hsv_white_node/white_mask",
+            ),  # White mask topic
             DeclareLaunchArgument("robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")),  # Optional remapped-space robot mask image path
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument("fastmap_file", default_value=""),  # Specific Fastmap XML path when auto-select is disabled
