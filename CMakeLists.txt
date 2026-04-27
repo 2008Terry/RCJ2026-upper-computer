@@ -177,12 +177,15 @@ install(PROGRAMS
   "src/camera_fixed_exposure_debug.py"
   "scripts/stm32_command_demo.py"
   "scripts/stm32_square_loop.py"
+  "scripts/task_runner.py"
   "src/image_publisher.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 
 install(FILES
   "src/stm32_command_sender.py"
+  "scripts/goto_point.py"
+  "scripts/task_logic.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 

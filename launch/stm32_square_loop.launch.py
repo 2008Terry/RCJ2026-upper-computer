@@ -25,7 +25,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "side_cm",
-                default_value="30.0",
+                default_value="60.0",
                 description="Square side length in centimeters.",
             ),
             DeclareLaunchArgument(

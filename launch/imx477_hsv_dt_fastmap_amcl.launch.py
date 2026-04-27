@@ -310,37 +310,37 @@ def generate_launch_description():
             ),  # Whether to show final white mask
             DeclareLaunchArgument("ridge_show_debug_image", default_value="true"),  # Whether to show composite debug image
             DeclareLaunchArgument(
-                "ridge_publish_debug_images", default_value="false"
+                "ridge_publish_debug_images", default_value="true"
             ),  # Master switch for ridge debug image topics
-            DeclareLaunchArgument("ridge_publish_morph_mask", default_value="true"),  # Publish ridge input morph mask when subscribed
-            DeclareLaunchArgument("ridge_publish_distance_transform", default_value="true"),  # Publish ridge distance-transform debug image when subscribed
-            DeclareLaunchArgument("ridge_publish_green_mask", default_value="true"),  # Publish ridge input green mask when subscribed
-            DeclareLaunchArgument("ridge_publish_black_mask", default_value="true"),  # Publish ridge input black mask when subscribed
-            DeclareLaunchArgument("ridge_publish_noise_mask", default_value="true"),  # Publish ridge input noise mask when subscribed
-            DeclareLaunchArgument("ridge_publish_ridge_mask", default_value="true"),  # Publish extracted ridge mask when subscribed
+            DeclareLaunchArgument("ridge_publish_morph_mask", default_value="false"),  # Publish ridge input morph mask when subscribed
+            DeclareLaunchArgument("ridge_publish_distance_transform", default_value="false"),  # Publish ridge distance-transform debug image when subscribed
+            DeclareLaunchArgument("ridge_publish_green_mask", default_value="false"),  # Publish ridge input green mask when subscribed
+            DeclareLaunchArgument("ridge_publish_black_mask", default_value="false"),  # Publish ridge input black mask when subscribed
+            DeclareLaunchArgument("ridge_publish_noise_mask", default_value="false"),  # Publish ridge input noise mask when subscribed
+            DeclareLaunchArgument("ridge_publish_ridge_mask", default_value="false"),  # Publish extracted ridge mask when subscribed
             DeclareLaunchArgument(
-                "ridge_publish_candidate_prefilter_mask", default_value="true"
+                "ridge_publish_candidate_prefilter_mask", default_value="false"
             ),  # Publish candidate-prefilter ridge mask when subscribed
             DeclareLaunchArgument(
-                "ridge_publish_orientation_valid_mask", default_value="true"
+                "ridge_publish_orientation_valid_mask", default_value="false"
             ),  # Publish orientation-valid seed mask when subscribed
             DeclareLaunchArgument(
-                "ridge_publish_side_support_seed_mask", default_value="true"
+                "ridge_publish_side_support_seed_mask", default_value="false"
             ),  # Publish supported side-scan seed mask when subscribed
             DeclareLaunchArgument(
-                "ridge_publish_side_support_mask", default_value="true"
+                "ridge_publish_side_support_mask", default_value="false"
             ),  # Publish side-support mask when subscribed
             DeclareLaunchArgument(
-                "ridge_publish_width_supported_ridge_mask", default_value="true"
+                "ridge_publish_width_supported_ridge_mask", default_value="false"
             ),  # Publish width-filtered ridge mask when subscribed
             DeclareLaunchArgument(
-                "ridge_publish_length_filtered_ridge_mask", default_value="true"
+                "ridge_publish_length_filtered_ridge_mask", default_value="false"
             ),  # Publish length-filtered ridge mask when subscribed
             DeclareLaunchArgument(
-                "ridge_publish_reconstructed_mask", default_value="true"
+                "ridge_publish_reconstructed_mask", default_value="false"
             ),  # Publish reconstructed mask when subscribed
             DeclareLaunchArgument(
-                "ridge_publish_white_final_mask", default_value="true"
+                "ridge_publish_white_final_mask", default_value="false"
             ),  # Keep final white mask topic available when subscribed
             DeclareLaunchArgument("ridge_publish_debug_image", default_value="true"),  # Publish composite debug image when subscribed
             DeclareLaunchArgument(
@@ -469,7 +469,7 @@ def generate_launch_description():
                 default_value="/particle_weights",
             ),  # Weighted particle Marker topic
             DeclareLaunchArgument(
-                "particle_weight_marker_scale", default_value="0.035"
+                "particle_weight_marker_scale", default_value="0.01"
             ),  # Weighted particle Marker point size in meters
             DeclareLaunchArgument("num_particles", default_value="1000"),  # Number of particles
             DeclareLaunchArgument("sigma_hit", default_value="0.10"),  # Likelihood-field sigma
