@@ -305,8 +305,8 @@ def generate_launch_description():
                 "fake_yaw_degrees", default_value="0.0"
             ),  # Fixed yaw angle used when use_fake_yaw is true
             DeclareLaunchArgument(
-                "yaw_zero_map_degrees", default_value="90.0"
-            ),  # Map yaw of robot yaw 0 degrees; 90 means forward points toward the top goal
+                "yaw_zero_map_degrees", default_value="0.0"
+            ),  # Field-heading offset for robot yaw 0; 0 means the top side of the field
             DeclareLaunchArgument("odom_topic", default_value="/wheel_odometry"),  # Wheel odometry topic
             DeclareLaunchArgument(
                 "use_stm32_gateway_odometry", default_value="true"
@@ -372,7 +372,7 @@ def generate_launch_description():
                 "stm32_enable_serial_log", default_value="true"
             ),  # Whether the STM32 gateway logs command summaries
             DeclareLaunchArgument(
-                "stm32_enable_raw_reply_log", default_value="false"
+                "stm32_enable_raw_reply_log", default_value="true"
             ),  # Whether the STM32 gateway logs raw serial replies
             DeclareLaunchArgument(
                 "yaw_enable_publish_log", default_value="false"

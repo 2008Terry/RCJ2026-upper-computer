@@ -106,8 +106,17 @@ double degreesToRadians(double angle_deg) { return angle_deg * (M_PI / 180.0); }
 
 double radiansToDegrees(double angle_rad) { return angle_rad * (180.0 / M_PI); }
 
-double yawDegreesToMapRadians(double yaw_degrees, double zero_map_degrees) {
-  return normalizeAngle(degreesToRadians(zero_map_degrees + yaw_degrees));
+double fieldYawDegreesToRosMapRadians(double yaw_degrees,
+                                      double zero_map_degrees) {
+  // Robot yaw is field-relative: 0=top/forward, 90=left, 180=back,
+  // 270=right. ROS map yaw is 0=+X/right, 90=+Y/top.
+  return normalizeAngle(degreesToRadians(90.0 + zero_map_degrees + yaw_degrees));
+}
+
+double stm32XAxisDegreesToRosMapRadians(double zero_map_degrees) {
+  // STM32 dx is robot-left when robot yaw is 0, so it is 90 degrees left of
+  // the robot-forward field yaw.
+  return normalizeAngle(degreesToRadians(180.0 + zero_map_degrees));
 }
 
 void validateAxisMotionNoiseConfig(const rcj_loc::AxisMotionNoiseConfig &config,
@@ -156,7 +165,8 @@ public:
 
       if (use_fake_yaw_) {
         current_yaw_rad_ =
-            yawDegreesToMapRadians(fake_yaw_degrees_, yaw_zero_map_degrees_);
+            fieldYawDegreesToRosMapRadians(fake_yaw_degrees_,
+                                           yaw_zero_map_degrees_);
         yaw_initialized_ = true;
         fake_yaw_pub_ =
             this->create_publisher<std_msgs::msg::Float32>(yaw_topic_, 10);
@@ -952,8 +962,8 @@ private:
   }
 
   void yawCallback(const std_msgs::msg::Float32::SharedPtr msg) {
-    current_yaw_rad_ = yawDegreesToMapRadians(static_cast<double>(msg->data),
-                                              yaw_zero_map_degrees_);
+    current_yaw_rad_ = fieldYawDegreesToRosMapRadians(
+        static_cast<double>(msg->data), yaw_zero_map_degrees_);
     yaw_initialized_ = true;
   }
 
@@ -1106,7 +1116,7 @@ private:
     const double absorbed_dtheta_rad =
         normalizeAngle(latest_failure.theta - last_success.theta);
     const double stm32_x_axis_map_rad =
-        normalizeAngle(degreesToRadians(yaw_zero_map_degrees_));
+        stm32XAxisDegreesToRosMapRadians(yaw_zero_map_degrees_);
     const double cos_axis = std::cos(stm32_x_axis_map_rad);
     const double sin_axis = std::sin(stm32_x_axis_map_rad);
     const double absorbed_stm32_x_m =
@@ -1148,7 +1158,7 @@ private:
     const double delta_y_stm32_m = dy_cm * 0.01;
     const double delta_theta_rad = normalizeAngle(degreesToRadians(dtheta_deg));
     const double stm32_x_axis_map_rad =
-        normalizeAngle(degreesToRadians(yaw_zero_map_degrees_));
+        stm32XAxisDegreesToRosMapRadians(yaw_zero_map_degrees_);
     const double cos_axis = std::cos(stm32_x_axis_map_rad);
     const double sin_axis = std::sin(stm32_x_axis_map_rad);
     const double delta_x_global_m =

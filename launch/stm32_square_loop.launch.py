@@ -18,14 +18,14 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "start_gateway",
-                default_value="true",
+                default_value="false",
                 description=(
                     "Start stm32_serial_gateway_node. Set false if it is already running."
                 ),
             ),
             DeclareLaunchArgument(
                 "side_cm",
-                default_value="20.0",
+                default_value="30.0",
                 description="Square side length in centimeters.",
             ),
             DeclareLaunchArgument(
@@ -50,7 +50,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "retry_on_failure",
-                default_value="true",
+                default_value="false",
                 description="Retry the same side when the gateway motion action reports failure.",
             ),
             DeclareLaunchArgument(
@@ -109,7 +109,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "enable_raw_reply_log",
-                default_value="false",
+                default_value="true",
                 description="Log raw serial chunks and reply lines from STM32.",
             ),
             DeclareLaunchArgument(
