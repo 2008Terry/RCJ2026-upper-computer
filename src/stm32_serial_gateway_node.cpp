@@ -30,12 +30,19 @@ enum class CommandKind
   Distance,
   Turn,
   Request,
+  Suck,
+  Conmotion,
+  Infred,
+  InfredMode,
+  Anglecal,
+  McuReset,
 };
 
 enum class ReplyStatus
 {
   Ok,
   Done,
+  Busy,
   Eror,
 };
 
@@ -44,6 +51,7 @@ struct Command
   CommandKind kind;
   double primary_value;
   double secondary_value;
+  std::string text_value;
 };
 
 struct ParsedReply
@@ -51,6 +59,7 @@ struct ParsedReply
   std::string command_name;
   std::string command_text;
   ReplyStatus status;
+  int channel = 0;
   double dx = 0.0;
   double dy = 0.0;
   double dtheta = 0.0;
@@ -109,6 +118,18 @@ std::string commandName(CommandKind kind)
     return "cmd_turn";
   case CommandKind::Request:
     return "cmd_request";
+  case CommandKind::Suck:
+    return "cmd_suck";
+  case CommandKind::Conmotion:
+    return "cmd_conmotion";
+  case CommandKind::Infred:
+    return "cmd_infred";
+  case CommandKind::InfredMode:
+    return "cmd_infred_mode";
+  case CommandKind::Anglecal:
+    return "cmd_anglecal";
+  case CommandKind::McuReset:
+    return "cmd_mcureset";
   }
   throw std::runtime_error("Unknown STM32 command kind.");
 }
@@ -138,7 +159,63 @@ std::string buildCommandText(const Command &command)
   {
     stream << ' ' << formatNumber(command.primary_value);
   }
+  else if (command.kind == CommandKind::Suck ||
+           command.kind == CommandKind::Conmotion)
+  {
+    stream << ' ' << static_cast<int>(command.primary_value);
+  }
+  else if (command.kind == CommandKind::InfredMode)
+  {
+    stream << ' ' << command.text_value;
+  }
   return stream.str();
+}
+
+int parseIntegerToken(
+    const std::string &token,
+    const std::string &command_name,
+    const std::string &spec)
+{
+  std::size_t consumed = 0;
+  int value = 0;
+  try
+  {
+    value = std::stoi(token, &consumed, 10);
+  }
+  catch (const std::exception &)
+  {
+    throw std::runtime_error(
+        "Invalid " + command_name + " command '" + spec + "'. Expected an integer argument.");
+  }
+
+  if (consumed != token.size())
+  {
+    throw std::runtime_error(
+        "Invalid " + command_name + " command '" + spec + "'. Expected an integer argument.");
+  }
+
+  return value;
+}
+
+std::optional<int> parseIntegerToken(const std::string &token)
+{
+  std::size_t consumed = 0;
+  int value = 0;
+  try
+  {
+    value = std::stoi(token, &consumed, 10);
+  }
+  catch (const std::exception &)
+  {
+    return std::nullopt;
+  }
+
+  if (consumed != token.size())
+  {
+    return std::nullopt;
+  }
+
+  return value;
 }
 
 Command parseCommandSpec(const std::string &spec)
@@ -189,9 +266,109 @@ Command parseCommandSpec(const std::string &spec)
     return command;
   }
 
+  if (command_name == "cmd_suck")
+  {
+    command.kind = CommandKind::Suck;
+    std::string speed_token;
+    if (!(tokens >> speed_token) || (tokens >> extra_token))
+    {
+      throw std::runtime_error(
+          "Invalid cmd_suck command '" + spec + "'. Expected: cmd_suck <speed 0-100>");
+    }
+
+    const int speed = parseIntegerToken(speed_token, command_name, spec);
+    if (speed < 0 || speed > 100)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_suck command '" + spec + "'. Speed must be in range 0-100.");
+    }
+    command.primary_value = static_cast<double>(speed);
+    command.secondary_value = 0.0;
+    return command;
+  }
+
+  if (command_name == "cmd_conmotion")
+  {
+    command.kind = CommandKind::Conmotion;
+    std::string enabled_token;
+    if (!(tokens >> enabled_token) || (tokens >> extra_token))
+    {
+      throw std::runtime_error(
+          "Invalid cmd_conmotion command '" + spec + "'. Expected: cmd_conmotion <0|1>");
+    }
+
+    const int enabled = parseIntegerToken(enabled_token, command_name, spec);
+    if (enabled != 0 && enabled != 1)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_conmotion command '" + spec + "'. Value must be 0 or 1.");
+    }
+    command.primary_value = static_cast<double>(enabled);
+    command.secondary_value = 0.0;
+    return command;
+  }
+
+  if (command_name == "cmd_infred")
+  {
+    command.kind = CommandKind::Infred;
+    if (tokens >> extra_token)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_infred command '" + spec + "'. Expected: cmd_infred");
+    }
+    command.primary_value = 0.0;
+    command.secondary_value = 0.0;
+    return command;
+  }
+
+  if (command_name == "cmd_infred_mode")
+  {
+    command.kind = CommandKind::InfredMode;
+    if (!(tokens >> command.text_value) || (tokens >> extra_token))
+    {
+      throw std::runtime_error(
+          "Invalid cmd_infred_mode command '" + spec + "'. Expected: cmd_infred_mode <pt|tz>");
+    }
+    if (command.text_value != "pt" && command.text_value != "tz")
+    {
+      throw std::runtime_error(
+          "Invalid cmd_infred_mode command '" + spec + "'. Mode must be 'pt' or 'tz'.");
+    }
+    command.primary_value = 0.0;
+    command.secondary_value = 0.0;
+    return command;
+  }
+
+  if (command_name == "cmd_anglecal")
+  {
+    command.kind = CommandKind::Anglecal;
+    if (tokens >> extra_token)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_anglecal command '" + spec + "'. Expected: cmd_anglecal");
+    }
+    command.primary_value = 0.0;
+    command.secondary_value = 0.0;
+    return command;
+  }
+
+  if (command_name == "cmd_mcureset")
+  {
+    command.kind = CommandKind::McuReset;
+    if (tokens >> extra_token)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_mcureset command '" + spec + "'. Expected: cmd_mcureset");
+    }
+    command.primary_value = 0.0;
+    command.secondary_value = 0.0;
+    return command;
+  }
+
   throw std::runtime_error(
       "Unsupported STM32 command '" + command_name +
-      "'. Supported commands: cmd_dis, cmd_turn, cmd_request");
+      "'. Supported commands: cmd_dis, cmd_turn, cmd_request, cmd_suck, "
+      "cmd_conmotion, cmd_infred, cmd_infred_mode, cmd_anglecal, cmd_mcureset");
 }
 
 std::string buildPacket(const Command &command)
@@ -214,6 +391,10 @@ std::optional<ReplyStatus> parseReplyStatus(const std::string &status_text)
   {
     return ReplyStatus::Done;
   }
+  if (status_text == "busy")
+  {
+    return ReplyStatus::Busy;
+  }
   if (status_text == "eror")
   {
     return ReplyStatus::Eror;
@@ -234,6 +415,8 @@ std::string replyStatusText(ReplyStatus status)
     return "ok";
   case ReplyStatus::Done:
     return "done";
+  case ReplyStatus::Busy:
+    return "busy";
   case ReplyStatus::Eror:
     return "eror";
   }
@@ -405,21 +588,87 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
       return reply;
     }
   }
-
-  tokens.clear();
-  tokens.str(command_text);
-  tokens >> reply.command_name;
-  if (!(tokens >> status_text) || (tokens >> extra_token))
+  else if (reply.command_name == "cmd_suck")
   {
-    return std::nullopt;
+    Command command{};
+    command.kind = CommandKind::Suck;
+    int speed = 0;
+    if (tokens >> status_text >> speed && !(tokens >> extra_token))
+    {
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      command.primary_value = static_cast<double>(speed);
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
   }
-
-  const auto status = parseReplyStatus(status_text);
-  if (status.has_value())
+  else if (reply.command_name == "cmd_conmotion")
   {
-    reply.command_text = reply.command_name;
-    reply.status = *status;
-    return reply;
+    Command command{};
+    command.kind = CommandKind::Conmotion;
+    int enabled = 0;
+    if (tokens >> status_text >> enabled && !(tokens >> extra_token))
+    {
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      command.primary_value = static_cast<double>(enabled);
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
+  }
+  else if (reply.command_name == "cmd_infred")
+  {
+    std::string value_text;
+    if (tokens >> value_text && !(tokens >> extra_token))
+    {
+      const auto channel = parseIntegerToken(value_text);
+      if (channel.has_value() && *channel >= 1 && *channel <= 7)
+      {
+        reply.command_text = reply.command_name;
+        reply.status = ReplyStatus::Ok;
+        reply.channel = *channel;
+        return reply;
+      }
+    }
+  }
+  else if (reply.command_name == "cmd_infred_mode")
+  {
+    Command command{};
+    command.kind = CommandKind::InfredMode;
+    if (tokens >> status_text >> command.text_value && !(tokens >> extra_token))
+    {
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
+  }
+  else if (reply.command_name == "cmd_anglecal" ||
+           reply.command_name == "cmd_mcureset")
+  {
+    if (tokens >> status_text && !(tokens >> extra_token))
+    {
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      reply.command_text = reply.command_name;
+      reply.status = *status;
+      return reply;
+    }
   }
 
   return std::nullopt;
@@ -1093,6 +1342,15 @@ private:
               parsed_reply.dtheta,
               parsed_reply.theta);
         }
+        else if (active_command_->command.kind == CommandKind::Infred &&
+                 parsed_reply.channel != 0)
+        {
+          RCLCPP_INFO(
+              get_logger(),
+              "STM32 replied to '%s' with channel=%d.",
+              parsed_reply.command_name.c_str(),
+              parsed_reply.channel);
+        }
         else
         {
           RCLCPP_INFO(
@@ -1119,6 +1377,15 @@ private:
             parsed_reply.dtheta,
             parsed_reply.theta);
       }
+      else if (active_command_->command.kind == CommandKind::Infred &&
+               parsed_reply.channel != 0)
+      {
+        finishActiveCommand(
+            true,
+            "ok",
+            "STM32 infrared channel received: channel=" +
+                std::to_string(parsed_reply.channel) + ".");
+      }
       else
       {
         finishActiveCommand(
@@ -1133,10 +1400,14 @@ private:
     {
       RCLCPP_WARN(
           get_logger(),
-          "STM32 replied 'eror' for '%s'.",
+          "STM32 replied '%s' for '%s'.",
+          replyStatusText(parsed_reply.status).c_str(),
           parsed_reply.command_name.c_str());
     }
-    finishActiveCommand(false, "eror", "STM32 replied eror.");
+    finishActiveCommand(
+        false,
+        replyStatusText(parsed_reply.status),
+        "STM32 replied " + replyStatusText(parsed_reply.status) + ".");
   }
 
   void handleActiveMotionReply(const ParsedReply &parsed_reply)
@@ -1167,10 +1438,15 @@ private:
     {
       RCLCPP_WARN(
           get_logger(),
-          "STM32 replied 'eror' for active motion command '%s'.",
+          "STM32 replied '%s' for active motion command '%s'.",
+          replyStatusText(parsed_reply.status).c_str(),
           active_motion_command_->command_text.c_str());
     }
-    finishActiveMotionCommand(false, "eror", "STM32 replied eror for active motion command.");
+    finishActiveMotionCommand(
+        false,
+        replyStatusText(parsed_reply.status),
+        "STM32 replied " + replyStatusText(parsed_reply.status) +
+            " for active motion command.");
   }
 
   void finishActiveCommand(

@@ -392,7 +392,7 @@ def generate_launch_description():
                 "stm32_command_timeout_ms", default_value="30"
             ),  # STM32 gateway command timeout
             DeclareLaunchArgument(
-                "stm32_motion_timeout_ms", default_value="10000"
+                "stm32_motion_timeout_ms", default_value="6000"
             ),  # STM32 cmd_dis/cmd_turn completion ACK timeout
             DeclareLaunchArgument(
                 "stm32_max_queue_size", default_value="32"
