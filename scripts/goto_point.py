@@ -37,7 +37,6 @@ class GotoNavigator(Node):
         self.declare_parameter("goto_timeout_sec", 30.0)
         self.declare_parameter("pose_wait_timeout_sec", 5.0)
         self.declare_parameter("action_server_wait_sec", 2.0)
-        self.declare_parameter("yaw_zero_map_degrees", 0.0)
 
         self.pose_topic = str(self.get_parameter("pose_topic").value)
         self.motion_action_name = str(self.get_parameter("motion_action_name").value)
@@ -51,9 +50,6 @@ class GotoNavigator(Node):
         )
         self.action_server_wait_sec = float(
             self.get_parameter("action_server_wait_sec").value
-        )
-        self.yaw_zero_map_degrees = float(
-            self.get_parameter("yaw_zero_map_degrees").value
         )
 
         self._validate_parameters()
@@ -73,17 +69,13 @@ class GotoNavigator(Node):
         )
 
         self.get_logger().info(
-            "GotoNavigator ready: pose_topic='%s', motion_action='%s', "
-            "tolerance=%.3f m, max_step=%.3f m, settle=%.3f s, "
-            "max_iterations=%d, timeout=%.3f s, yaw_zero_map_degrees=%.3f",
-            self.pose_topic,
-            self.motion_action_name,
-            self.goal_tolerance_m,
-            self.max_step_m,
-            self.settle_sec,
-            self.max_iterations,
-            self.goto_timeout_sec,
-            self.yaw_zero_map_degrees,
+            f"GotoNavigator ready: pose_topic='{self.pose_topic}', "
+            f"motion_action='{self.motion_action_name}', "
+            f"tolerance={self.goal_tolerance_m:.3f} m, "
+            f"max_step={self.max_step_m:.3f} m, "
+            f"settle={self.settle_sec:.3f} s, "
+            f"max_iterations={self.max_iterations}, "
+            f"timeout={self.goto_timeout_sec:.3f} s"
         )
 
     def goto(
@@ -91,44 +83,81 @@ class GotoNavigator(Node):
         target_x_m: float,
         target_y_m: float,
         tolerance_m: Optional[float] = None,
+        goal_tolerance_m: Optional[float] = None,
+        max_step_m: Optional[float] = None,
+        settle_sec: Optional[float] = None,
+        max_iterations: Optional[int] = None,
+        goto_timeout_sec: Optional[float] = None,
+        pose_wait_timeout_sec: Optional[float] = None,
+        action_server_wait_sec: Optional[float] = None,
     ) -> bool:
         target_x = float(target_x_m)
         target_y = float(target_y_m)
-        tolerance = self.goal_tolerance_m if tolerance_m is None else float(tolerance_m)
+        if tolerance_m is not None and goal_tolerance_m is not None:
+            raise ValueError(
+                "Use either tolerance_m or goal_tolerance_m, not both."
+            )
+        selected_tolerance_m = (
+            goal_tolerance_m if goal_tolerance_m is not None else tolerance_m
+        )
+        goal_tolerance = self._positive_float(
+            "goal_tolerance_m",
+            self.goal_tolerance_m
+            if selected_tolerance_m is None
+            else selected_tolerance_m,
+        )
+        max_step = self._positive_float(
+            "max_step_m", self.max_step_m if max_step_m is None else max_step_m
+        )
+        settle = self._non_negative_float(
+            "settle_sec", self.settle_sec if settle_sec is None else settle_sec
+        )
+        iteration_limit = self._positive_int(
+            "max_iterations",
+            self.max_iterations if max_iterations is None else max_iterations,
+        )
+        goto_timeout = self._positive_float(
+            "goto_timeout_sec",
+            self.goto_timeout_sec if goto_timeout_sec is None else goto_timeout_sec,
+        )
+        pose_wait_timeout = self._positive_float(
+            "pose_wait_timeout_sec",
+            self.pose_wait_timeout_sec
+            if pose_wait_timeout_sec is None
+            else pose_wait_timeout_sec,
+        )
+        action_wait_timeout = self._positive_float(
+            "action_server_wait_sec",
+            self.action_server_wait_sec
+            if action_server_wait_sec is None
+            else action_server_wait_sec,
+        )
         if not math.isfinite(target_x) or not math.isfinite(target_y):
             raise ValueError("goto target coordinates must be finite.")
-        if not math.isfinite(tolerance) or tolerance <= 0.0:
-            raise ValueError("goto tolerance must be a positive finite number.")
 
-        deadline = time.monotonic() + self.goto_timeout_sec
+        deadline = time.monotonic() + goto_timeout
         self.get_logger().info(
-            "Goto target start: target=(%.3f, %.3f) m, tolerance=%.3f m",
-            target_x,
-            target_y,
-            tolerance,
+            f"Goto target start: target=({target_x:.3f}, {target_y:.3f}) m, "
+            f"tolerance={goal_tolerance:.3f} m"
         )
 
-        self._ensure_action_server_ready(deadline)
+        self._ensure_action_server_ready(deadline, action_wait_timeout)
         last_distance = math.inf
 
-        for iteration in range(1, self.max_iterations + 1):
+        for iteration in range(1, iteration_limit + 1):
             current_x, current_y = self.wait_for_pose(
-                timeout_sec=self._bounded_timeout(deadline, self.pose_wait_timeout_sec)
+                timeout_sec=self._bounded_timeout(deadline, pose_wait_timeout)
             )
             dx_map = target_x - current_x
             dy_map = target_y - current_y
             distance = math.hypot(dx_map, dy_map)
             last_distance = distance
 
-            if distance <= tolerance:
+            if distance <= goal_tolerance:
                 self.get_logger().info(
-                    "Goto target reached: target=(%.3f, %.3f) m, "
-                    "current=(%.3f, %.3f) m, error=%.3f m",
-                    target_x,
-                    target_y,
-                    current_x,
-                    current_y,
-                    distance,
+                    f"Goto target reached: target=({target_x:.3f}, "
+                    f"{target_y:.3f}) m, current=({current_x:.3f}, "
+                    f"{current_y:.3f}) m, error={distance:.3f} m"
                 )
                 return True
 
@@ -139,27 +168,26 @@ class GotoNavigator(Node):
                     f"last_error={distance:.3f} m."
                 )
 
-            step_dx_map, step_dy_map = self._limit_step(dx_map, dy_map)
+            step_dx_map, step_dy_map = self._limit_step(dx_map, dy_map, max_step)
             step_dx_stm32_m, step_dy_stm32_m = self._map_delta_to_stm32_delta(
                 step_dx_map, step_dy_map
             )
+            step_dx_stm32_cm = step_dx_stm32_m * 100.0
+            step_dy_stm32_cm = step_dy_stm32_m * 100.0
             command = (
                 "cmd_dis "
-                f"{_format_number(step_dx_stm32_m * 100.0)} "
-                f"{_format_number(step_dy_stm32_m * 100.0)}"
+                f"{_format_number(step_dx_stm32_cm)} "
+                f"{_format_number(step_dy_stm32_cm)}"
             )
 
             self.get_logger().info(
-                "Goto iteration %d/%d: current=(%.3f, %.3f) m, "
-                "target=(%.3f, %.3f) m, error=%.3f m, command='%s'",
-                iteration,
-                self.max_iterations,
-                current_x,
-                current_y,
-                target_x,
-                target_y,
-                distance,
-                command,
+                f"Goto iteration {iteration}/{iteration_limit}: "
+                f"current=({current_x:.3f}, {current_y:.3f}) m, "
+                f"target=({target_x:.3f}, {target_y:.3f}) m, "
+                f"map_delta=({step_dx_map:.3f}, {step_dy_map:.3f}) m, "
+                f"stm32_delta=({step_dx_stm32_cm:.3f}, "
+                f"{step_dy_stm32_cm:.3f}) cm, error={distance:.3f} m, "
+                f"command='{command}'"
             )
 
             motion_ok = self._send_motion_command(
@@ -168,19 +196,18 @@ class GotoNavigator(Node):
             )
             if not motion_ok:
                 self.get_logger().warn(
-                    "Motion command did not succeed; settling for %.3f s "
-                    "before replanning from the latest pose.",
-                    self.settle_sec,
+                    f"Motion command did not succeed; settling for {settle:.3f} s "
+                    "before replanning from the latest pose."
                 )
 
-            self._sleep_with_spin(self.settle_sec)
+            self._sleep_with_spin(settle)
 
         current_x, current_y = self.wait_for_pose(timeout_sec=0.1)
         final_distance = math.hypot(target_x - current_x, target_y - current_y)
-        if final_distance <= tolerance:
+        if final_distance <= goal_tolerance:
             self.get_logger().info(
-                "Goto target reached after final settle: error=%.3f m",
-                final_distance,
+                f"Goto target reached after final settle: "
+                f"error={final_distance:.3f} m"
             )
             return True
 
@@ -244,11 +271,11 @@ class GotoNavigator(Node):
             or self.action_server_wait_sec <= 0.0
         ):
             raise RuntimeError("Parameter 'action_server_wait_sec' must be positive.")
-        if not math.isfinite(self.yaw_zero_map_degrees):
-            raise RuntimeError("Parameter 'yaw_zero_map_degrees' must be finite.")
 
-    def _ensure_action_server_ready(self, deadline: float) -> None:
-        wait_sec = self._bounded_timeout(deadline, self.action_server_wait_sec)
+    def _ensure_action_server_ready(
+        self, deadline: float, action_server_wait_sec: float
+    ) -> None:
+        wait_sec = self._bounded_timeout(deadline, action_server_wait_sec)
         if not self._motion_client.wait_for_server(timeout_sec=wait_sec):
             raise GotoError(
                 f"Timed out waiting for motion action server "
@@ -278,7 +305,7 @@ class GotoNavigator(Node):
 
             goal_handle = goal_future.result()
             if not goal_handle.accepted:
-                self.get_logger().warn("Motion goal rejected: %s", command)
+                self.get_logger().warn(f"Motion goal rejected: {command}")
                 return False
 
             result_future = goal_handle.get_result_async()
@@ -294,41 +321,36 @@ class GotoNavigator(Node):
             result = result_response.result
             if result.success:
                 self.get_logger().info(
-                    "Motion command ok: %s (status=%s, attempts=%d)",
-                    command,
-                    result.status,
-                    result.attempts,
+                    f"Motion command ok: {command} "
+                    f"(status={result.status}, attempts={result.attempts})"
                 )
                 return True
 
             self.get_logger().warn(
-                "Motion command failed: %s (status=%s, attempts=%d, message=%s)",
-                command,
-                result.status,
-                result.attempts,
-                result.message,
+                f"Motion command failed: {command} "
+                f"(status={result.status}, attempts={result.attempts}, "
+                f"message={result.message})"
             )
             return False
         finally:
             self._motion_in_flight = False
 
-    def _limit_step(self, dx_map: float, dy_map: float) -> Tuple[float, float]:
+    def _limit_step(
+        self, dx_map: float, dy_map: float, max_step_m: float
+    ) -> Tuple[float, float]:
         distance = math.hypot(dx_map, dy_map)
-        if distance <= self.max_step_m:
+        if distance <= max_step_m:
             return dx_map, dy_map
-        scale = self.max_step_m / distance
+        scale = max_step_m / distance
         return dx_map * scale, dy_map * scale
 
     def _map_delta_to_stm32_delta(
         self, dx_map_m: float, dy_map_m: float
     ) -> Tuple[float, float]:
-        # Match amcl_fusion.cpp: STM32 dx is a fixed field axis, not current yaw.
-        axis_rad = math.radians(180.0 + self.yaw_zero_map_degrees)
-        cos_axis = math.cos(axis_rad)
-        sin_axis = math.sin(axis_rad)
-        dx_stm32_m = (cos_axis * dx_map_m) + (sin_axis * dy_map_m)
-        dy_stm32_m = (-sin_axis * dx_map_m) + (cos_axis * dy_map_m)
-        return dx_stm32_m, dy_stm32_m
+        # Map frame: +x is right, +y is up.
+        # STM32 cmd_dis frame: +x is map-left, +y is map-down.
+        # Both frames are field-fixed; robot yaw is not part of this conversion.
+        return -dx_map_m, -dy_map_m
 
     def _spin_until_future_done(self, future, timeout_sec: float) -> bool:
         deadline = time.monotonic() + max(0.0, float(timeout_sec))
@@ -354,3 +376,21 @@ class GotoNavigator(Node):
 
     def _remaining_time(self, deadline: float) -> float:
         return max(0.0, deadline - time.monotonic())
+
+    def _positive_float(self, name: str, value: float) -> float:
+        converted = float(value)
+        if not math.isfinite(converted) or converted <= 0.0:
+            raise ValueError(f"{name} must be a positive finite number.")
+        return converted
+
+    def _non_negative_float(self, name: str, value: float) -> float:
+        converted = float(value)
+        if not math.isfinite(converted) or converted < 0.0:
+            raise ValueError(f"{name} must be a non-negative finite number.")
+        return converted
+
+    def _positive_int(self, name: str, value: int) -> int:
+        converted = int(value)
+        if converted <= 0:
+            raise ValueError(f"{name} must be a positive integer.")
+        return converted

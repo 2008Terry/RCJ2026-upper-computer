@@ -1,33 +1,55 @@
 from __future__ import annotations
 
-from typing import Iterable, Tuple
+from collections.abc import Mapping
 
-
-TaskPoint = Tuple[float, float]
-
-
-TASK_POINTS: Iterable[TaskPoint] = (
-    # Fill in absolute map-frame targets, in meters:
-    # (1.20, 0.80),
-    # (0.60, 1.40),
-)
+from task_sequence import TASKS
 
 
 def run_task(nav) -> None:
-    points = list(TASK_POINTS)
-    if not points:
+    tasks = list(TASKS)
+    if not tasks:
         nav.get_logger().warn(
-            "TASK_POINTS is empty; task_runner finished without sending motion. "
-            "Edit scripts/task_logic.py to add map-frame targets."
+            "TASKS is empty; task_runner finished without sending motion. "
+            "Edit scripts/task_sequence.py to add task commands."
         )
         return
 
-    for index, (x_m, y_m) in enumerate(points, start=1):
-        nav.get_logger().info(
-            "Task point %d/%d: goto(%.3f, %.3f)",
-            index,
-            len(points),
-            x_m,
-            y_m,
+    for index, task in enumerate(tasks, start=1):
+        if not isinstance(task, Mapping):
+            raise TypeError(f"Task {index} must be a mapping/dict.")
+
+        command = str(task.get("command", "")).strip().lower()
+        if command == "goto":
+            _run_goto(nav, index, len(tasks), task)
+            continue
+
+        raise ValueError(f"Unsupported task command at index {index}: {command!r}")
+
+
+def _run_goto(nav, index: int, total: int, task: Mapping) -> None:
+    if "x_m" not in task or "y_m" not in task:
+        raise ValueError(
+            f"goto task {index} must use x_m/y_m in meters. "
+            "AMCL pose is meter-based; x_cm/y_cm are not supported."
         )
-        nav.goto(x_m, y_m)
+    x_m = float(task["x_m"])
+    y_m = float(task["y_m"])
+    options = {
+        name: task[name]
+        for name in (
+            "goal_tolerance_m",
+            "tolerance_m",
+            "max_step_m",
+            "settle_sec",
+            "max_iterations",
+            "goto_timeout_sec",
+            "pose_wait_timeout_sec",
+            "action_server_wait_sec",
+        )
+        if name in task
+    }
+    nav.get_logger().info(
+        f"Task {index}/{total}: goto({x_m:.3f}, {y_m:.3f}), "
+        f"options={options}"
+    )
+    nav.goto(x_m, y_m, **options)

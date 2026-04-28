@@ -17,8 +17,6 @@ CAMERA_NODE_DEFAULTS = {
     "exposure_time": "10000",
     "exposure_time_mode": "1",
     "ae_enable": "false",
-    "analogue_gain": "1.0",
-    "awb_enable": "true",
 }
 
 
@@ -32,6 +30,11 @@ HSV_GREEN_WHITE_BLACK_DEFAULTS = {
     "green_h_max": "100",
     "green_s_min": "210",
     "green_v_min": "80",
+}
+
+
+REMAP_DEFAULTS = {
+    "interpolation": "linear",
 }
 
 
@@ -95,14 +98,6 @@ def declare_camera_control_arguments():
             "ae_enable",
             default_value=CAMERA_NODE_DEFAULTS["ae_enable"],
         ),  # Enable auto exposure
-        DeclareLaunchArgument(
-            "analogue_gain",
-            default_value=CAMERA_NODE_DEFAULTS["analogue_gain"],
-        ),  # Sensor analog gain multiplier
-        DeclareLaunchArgument(
-            "awb_enable",
-            default_value=CAMERA_NODE_DEFAULTS["awb_enable"],
-        ),  # Enable auto white balance
     ]
 
 
@@ -142,10 +137,6 @@ def camera_control_parameters():
             LaunchConfiguration("exposure_time_mode"), value_type=int
         ),
         "AeEnable": ParameterValue(LaunchConfiguration("ae_enable"), value_type=bool),
-        "AnalogueGain": ParameterValue(
-            LaunchConfiguration("analogue_gain"), value_type=float
-        ),
-        "AwbEnable": ParameterValue(LaunchConfiguration("awb_enable"), value_type=bool),
     }
 
 
@@ -154,9 +145,14 @@ def camera_control_launch_arguments():
         "exposure_time": LaunchConfiguration("exposure_time"),
         "exposure_time_mode": LaunchConfiguration("exposure_time_mode"),
         "ae_enable": LaunchConfiguration("ae_enable"),
-        "analogue_gain": LaunchConfiguration("analogue_gain"),
-        "awb_enable": LaunchConfiguration("awb_enable"),
     }
+
+
+def declare_remap_interpolation_argument():
+    return DeclareLaunchArgument(
+        "interpolation",
+        default_value=REMAP_DEFAULTS["interpolation"],
+    )  # Remap interpolation mode
 
 
 def declare_hsv_green_white_black_arguments():

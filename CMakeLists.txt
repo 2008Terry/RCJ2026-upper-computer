@@ -186,6 +186,7 @@ install(FILES
   "src/stm32_command_sender.py"
   "scripts/goto_point.py"
   "scripts/task_logic.py"
+  "scripts/task_sequence.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 

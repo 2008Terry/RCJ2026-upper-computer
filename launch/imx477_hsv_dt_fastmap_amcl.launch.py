@@ -13,13 +13,9 @@ from launch_ros.parameter_descriptions import ParameterValue
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rcj_fastmap_hsv_pipeline import build_camera_hsv_dt_ridge_fastmap_nodes
 from rcj_shared_launch_params import (
-    camera_control_launch_arguments,
-    camera_control_parameters,
-    declare_camera_control_arguments,
+    declare_remap_interpolation_argument,
     declare_camera_ros_arguments,
     declare_hsv_green_white_black_arguments,
-    hsv_green_white_black_launch_arguments,
-    hsv_green_white_black_parameters,
 )
 
 
@@ -29,30 +25,6 @@ def generate_launch_description():
         package_share / "launch" / "stm32_serial_gateway.launch.py"
     )
     map_yaml_default = package_share / "maps" / "rcj_map.yaml"
-
-    camera_index = LaunchConfiguration("camera_index")
-    role = LaunchConfiguration("role")
-    image_format = LaunchConfiguration("format")
-    width = LaunchConfiguration("width")
-    height = LaunchConfiguration("height")
-    orientation = LaunchConfiguration("orientation")
-    sensor_mode = LaunchConfiguration("sensor_mode")
-    frame_id = LaunchConfiguration("frame_id")
-    camera_info_url = LaunchConfiguration("camera_info_url")
-    use_node_time = LaunchConfiguration("use_node_time")
-    exposure_time = LaunchConfiguration("exposure_time")
-    exposure_time_mode = LaunchConfiguration("exposure_time_mode")
-    ae_enable = LaunchConfiguration("ae_enable")
-    analogue_gain = LaunchConfiguration("analogue_gain")
-    awb_enable = LaunchConfiguration("awb_enable")
-    camera_info_topic = LaunchConfiguration("camera_info_topic")
-    input_topic = LaunchConfiguration("input_topic")
-    remap_topic = LaunchConfiguration("remap_topic")
-    white_mask_topic = LaunchConfiguration("white_mask_topic")
-    robot_mask_path = LaunchConfiguration("robot_mask_path")
-    fastmap_file = LaunchConfiguration("fastmap_file")
-    input_transport = LaunchConfiguration("input_transport")
-    interpolation = LaunchConfiguration("interpolation")
 
     map_yaml_file = LaunchConfiguration("map_yaml_file")
     use_fake_yaw = LaunchConfiguration("use_fake_yaw")
@@ -71,6 +43,7 @@ def generate_launch_description():
     stm32_command_service = LaunchConfiguration("stm32_command_service")
     stm32_request_timeout_ms = LaunchConfiguration("stm32_request_timeout_ms")
     stm32_enable_odometry_log = LaunchConfiguration("stm32_enable_odometry_log")
+    use_stm32_request_theta = LaunchConfiguration("use_stm32_request_theta")
     use_random_search_when_unlocalized = LaunchConfiguration(
         "use_random_search_when_unlocalized"
     )
@@ -172,7 +145,7 @@ def generate_launch_description():
                 "fastmap_file", default_value=""
             ),  # Specific Fastmap XML path when auto-select is disabled
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
-            DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
+            declare_remap_interpolation_argument(),
             DeclareLaunchArgument(
                 "remap_enable_image_view", default_value="false"
             ),  # Whether to show remap windows
@@ -374,6 +347,9 @@ def generate_launch_description():
                 "stm32_enable_odometry_log", default_value="true"
             ),  # Whether AMCL logs each STM32 odometry dx/dy/dtheta response
             DeclareLaunchArgument(
+                "use_stm32_request_theta", default_value="false"
+            ),  # Whether AMCL uses theta returned by cmd_request instead of fixed fake yaw
+            DeclareLaunchArgument(
                 "use_random_search_when_unlocalized", default_value="false"
             ),  # Whether unlocalized/lost AMCL uses random diffusion and random particle injection
             DeclareLaunchArgument(
@@ -399,10 +375,10 @@ def generate_launch_description():
                 "localized_min_updates", default_value="5"
             ),  # Consecutive concentrated updates required before using odometry
             DeclareLaunchArgument(
-                "lost_alpha_ratio_threshold", default_value="0.45"
+                "lost_alpha_ratio_threshold", default_value="0.33"
             ),  # Alpha-fast/alpha-slow ratio below this re-enters global search
             DeclareLaunchArgument(
-                "lost_min_updates", default_value="3"
+                "lost_min_updates", default_value="5"
             ),  # Consecutive low alpha-ratio updates required to mark lost
             DeclareLaunchArgument("stm32_port", default_value="/dev/ttyUSB0"),  # STM32 serial port
             DeclareLaunchArgument("stm32_baudrate", default_value="115200"),  # STM32 serial baudrate
@@ -416,7 +392,7 @@ def generate_launch_description():
                 "stm32_command_timeout_ms", default_value="30"
             ),  # STM32 gateway command timeout
             DeclareLaunchArgument(
-                "stm32_motion_timeout_ms", default_value="5000"
+                "stm32_motion_timeout_ms", default_value="10000"
             ),  # STM32 cmd_dis/cmd_turn completion ACK timeout
             DeclareLaunchArgument(
                 "stm32_max_queue_size", default_value="32"
@@ -608,6 +584,9 @@ def generate_launch_description():
                         ),
                         "stm32_enable_odometry_log": ParameterValue(
                             stm32_enable_odometry_log, value_type=bool
+                        ),
+                        "use_stm32_request_theta": ParameterValue(
+                            use_stm32_request_theta, value_type=bool
                         ),
                         "enable_global_search": ParameterValue(
                             enable_global_search, value_type=bool

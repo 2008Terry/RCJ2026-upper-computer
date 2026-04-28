@@ -54,6 +54,7 @@ struct ParsedReply
   double dx = 0.0;
   double dy = 0.0;
   double dtheta = 0.0;
+  double theta = 0.0;
 };
 
 speed_t baudrateToSpeed(int baudrate)
@@ -326,7 +327,8 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
   std::string extra_token;
   if (reply.command_name == "cmd_request")
   {
-    if (tokens >> reply.dx >> reply.dy >> reply.dtheta && !(tokens >> extra_token))
+    if (tokens >> reply.dx >> reply.dy >> reply.dtheta >> reply.theta &&
+        !(tokens >> extra_token))
     {
       reply.command_text = reply.command_name;
       reply.status = ReplyStatus::Ok;
@@ -1084,11 +1086,12 @@ private:
         {
           RCLCPP_INFO(
               get_logger(),
-              "STM32 replied to '%s' with dx=%.6f, dy=%.6f, dtheta=%.6f.",
+              "STM32 replied to '%s' with dx=%.6f, dy=%.6f, dtheta=%.6f, theta=%.6f.",
               parsed_reply.command_name.c_str(),
               parsed_reply.dx,
               parsed_reply.dy,
-              parsed_reply.dtheta);
+              parsed_reply.dtheta,
+              parsed_reply.theta);
         }
         else
         {
@@ -1105,14 +1108,16 @@ private:
         std::ostringstream message;
         message << "STM32 request data received: dx=" << formatNumber(parsed_reply.dx)
                 << ", dy=" << formatNumber(parsed_reply.dy)
-                << ", dtheta=" << formatNumber(parsed_reply.dtheta) << ".";
+                << ", dtheta=" << formatNumber(parsed_reply.dtheta)
+                << ", theta=" << formatNumber(parsed_reply.theta) << ".";
         finishActiveCommand(
             true,
             "ok",
             message.str(),
             parsed_reply.dx,
             parsed_reply.dy,
-            parsed_reply.dtheta);
+            parsed_reply.dtheta,
+            parsed_reply.theta);
       }
       else
       {
@@ -1174,7 +1179,8 @@ private:
       const std::string &message,
       double dx = 0.0,
       double dy = 0.0,
-      double dtheta = 0.0)
+      double dtheta = 0.0,
+      double theta = 0.0)
   {
     if (!active_command_.has_value())
     {
@@ -1182,7 +1188,8 @@ private:
     }
 
     const PendingCommand completed_command = *active_command_;
-    sendCommandResult(completed_command, success, status, message, dx, dy, dtheta);
+    sendCommandResult(completed_command, success, status, message, dx, dy,
+                      dtheta, theta);
     active_command_.reset();
   }
 
@@ -1208,7 +1215,8 @@ private:
       const std::string &message,
       double dx = 0.0,
       double dy = 0.0,
-      double dtheta = 0.0)
+      double dtheta = 0.0,
+      double theta = 0.0)
   {
     if (command.motion_goal_handle)
     {
@@ -1230,7 +1238,8 @@ private:
         command.attempts,
         dx,
         dy,
-        dtheta);
+        dtheta,
+        theta);
   }
 
   void sendMotionResult(
@@ -1265,7 +1274,8 @@ private:
       std::uint32_t attempts,
       double dx = 0.0,
       double dy = 0.0,
-      double dtheta = 0.0)
+      double dtheta = 0.0,
+      double theta = 0.0)
   {
     Stm32Command::Response response;
     response.success = success;
@@ -1275,6 +1285,7 @@ private:
     response.dx = dx;
     response.dy = dy;
     response.dtheta = dtheta;
+    response.theta = theta;
     service->send_response(*request_header, response);
   }
 

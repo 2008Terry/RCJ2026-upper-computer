@@ -11,6 +11,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rcj_shared_launch_params import (
+    declare_remap_interpolation_argument,
     camera_control_launch_arguments,
     camera_control_parameters,
     declare_camera_control_arguments,
@@ -198,7 +199,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Auto-select the latest fastmap XML
             DeclareLaunchArgument("fastmap_file", default_value=""),  # Specific fastmap XML path
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
-            DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
+            declare_remap_interpolation_argument(),
             DeclareLaunchArgument("remap_enable_image_view", default_value="false"),  # Show remap debug windows
             DeclareLaunchArgument("morph_enable_image_view", default_value="false"),  # Show morph debug windows
             DeclareLaunchArgument("morph_show_input_image", default_value="false"),  # Show the morph input image

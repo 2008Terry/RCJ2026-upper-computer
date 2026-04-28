@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -6,6 +7,9 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_shared_launch_params import declare_remap_interpolation_argument
 
 def find_latest_fastmap_file():
     config_dir = Path(get_package_share_directory("rcj_localization")) / "config"
@@ -47,7 +51,7 @@ def generate_launch_description():
             DeclareLaunchArgument("fastmap_file", default_value=""),  # Fastmap XML path when auto-select is off
             DeclareLaunchArgument("robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")),  # Optional remapped-space robot mask image path
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Input transport for the remap node
-            DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
+            declare_remap_interpolation_argument(),
             DeclareLaunchArgument("remap_enable_image_view", default_value="true"),  # Show remap debug windows
             DeclareLaunchArgument("remap_show_input_image", default_value="true"),  # Show the remap input image
             DeclareLaunchArgument("remap_show_output_image", default_value="true"),  # Show the remap output image

@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rcj_fastmap_hsv_pipeline import build_camera_hsv_dt_ridge_fastmap_nodes
 from rcj_shared_launch_params import (
+    declare_remap_interpolation_argument,
     declare_camera_ros_arguments,
     declare_hsv_green_white_black_arguments,
 )
@@ -113,7 +114,7 @@ def generate_launch_description():
                 "fastmap_file", default_value=""
             ),  # Specific Fastmap XML path when auto-select is disabled
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
-            DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
+            declare_remap_interpolation_argument(),
             DeclareLaunchArgument(
                 "remap_enable_image_view", default_value="false"
             ),  # Whether to show remap windows

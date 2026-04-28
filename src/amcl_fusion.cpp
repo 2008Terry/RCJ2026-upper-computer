@@ -222,6 +222,7 @@ public:
         "odom_topic='%s', "
         "use_stm32_gateway_odometry=%s, stm32_command_service='%s', "
         "stm32_request_timeout_ms=%d, stm32_enable_odometry_log=%s, "
+        "use_stm32_request_theta=%s, "
         "meters_per_pixel=%.6f, "
         "forward_axis='%s', "
         "left_axis='%s', max_points=%d, num_particles=%d, sigma_hit=%.3f, "
@@ -238,6 +239,7 @@ public:
         use_stm32_gateway_odometry_ ? "true" : "false",
         stm32_command_service_.c_str(), stm32_request_timeout_ms_,
         stm32_enable_odometry_log_ ? "true" : "false",
+        use_stm32_request_theta_ ? "true" : "false",
         meters_per_pixel_, forward_axis_name_.c_str(), left_axis_name_.c_str(),
         max_points_, filter_config_.num_particles, filter_config_.sigma_hit,
         use_weighted_mean_pose_ ? "true" : "false",
@@ -259,6 +261,9 @@ private:
     double dx_cm = 0.0;
     double dy_cm = 0.0;
     double dtheta_deg = 0.0;
+    double theta_deg = 0.0;
+    double theta_rad = 0.0;
+    bool has_theta = false;
     double request_yaw_rad = 0.0;
     std::uint64_t total_request_count = 0;
     std::uint64_t successful_request_count = 0;
@@ -294,6 +299,7 @@ private:
                                          "/stm32/send_command");
     this->declare_parameter("stm32_request_timeout_ms", 200);
     this->declare_parameter("stm32_enable_odometry_log", false);
+    this->declare_parameter("use_stm32_request_theta", false);
     this->declare_parameter("enable_global_search", true);
     this->declare_parameter("global_search_random_ratio", 0.50);
     this->declare_parameter("global_search_noise_xy", 0.12);
@@ -390,6 +396,8 @@ private:
         this->get_parameter("stm32_request_timeout_ms").as_int());
     stm32_enable_odometry_log_ =
         this->get_parameter("stm32_enable_odometry_log").as_bool();
+    use_stm32_request_theta_ =
+        this->get_parameter("use_stm32_request_theta").as_bool();
     if (use_stm32_gateway_odometry_ && stm32_command_service_.empty()) {
       throw std::runtime_error(
           "Parameter 'stm32_command_service' must not be empty when "
@@ -778,6 +786,7 @@ private:
                  name == "yaw_zero_map_degrees" || name == "odom_topic" ||
                  name == "use_stm32_gateway_odometry" ||
                  name == "stm32_command_service" ||
+                 name == "use_stm32_request_theta" ||
                  name == "publish_particle_weight_markers" ||
                  name == "particle_weight_marker_topic" ||
                  name == "particle_weight_marker_scale" ||
@@ -1180,6 +1189,20 @@ private:
     const double delta_x_stm32_m = dx_cm * 0.01;
     const double delta_y_stm32_m = dy_cm * 0.01;
     const double delta_theta_rad = normalizeAngle(degreesToRadians(dtheta_deg));
+    double absolute_yaw_rad = current_yaw_rad_;
+    if (use_stm32_request_theta_) {
+      if (!result.has_theta || !std::isfinite(result.theta_rad)) {
+        RCLCPP_WARN(this->get_logger(),
+                    "Ignoring STM32 odometry response %" PRIu64
+                    " because request theta is not available.",
+                    result.request_id);
+        return false;
+      }
+      absolute_yaw_rad = result.theta_rad;
+      request_yaw_rad = normalizeAngle(result.theta_rad - delta_theta_rad);
+      current_yaw_rad_ = result.theta_rad;
+      yaw_initialized_ = true;
+    }
     const double stm32_x_axis_map_rad =
         stm32XAxisDegreesToRosMapRadians(yaw_zero_map_degrees_);
     const double cos_axis = std::cos(stm32_x_axis_map_rad);
@@ -1192,6 +1215,7 @@ private:
     if (!std::isfinite(delta_x_stm32_m) || !std::isfinite(delta_y_stm32_m) ||
         !std::isfinite(delta_x_global_m) || !std::isfinite(delta_y_global_m) ||
         !std::isfinite(delta_theta_rad) ||
+        !std::isfinite(absolute_yaw_rad) ||
         !std::isfinite(request_yaw_rad)) {
       RCLCPP_WARN(this->get_logger(),
                   "Ignoring STM32 odometry response %" PRIu64
@@ -1200,7 +1224,7 @@ private:
       return false;
     }
 
-    pf_->predict(current_yaw_rad_, request_yaw_rad, delta_x_global_m,
+    pf_->predict(absolute_yaw_rad, request_yaw_rad, delta_x_global_m,
                  delta_y_global_m, delta_theta_rad);
     return true;
   }
@@ -1222,6 +1246,10 @@ private:
       result.dx_cm = response->dx;
       result.dy_cm = response->dy;
       result.dtheta_deg = response->dtheta;
+      result.theta_deg = response->theta;
+      result.theta_rad = fieldYawDegreesToRosMapRadians(
+          result.theta_deg, yaw_zero_map_degrees_);
+      result.has_theta = true;
     } catch (const std::exception &ex) {
       result.success = false;
       result.status = "future_error";
@@ -1412,12 +1440,13 @@ private:
               this->get_logger(),
               "STM32 odometry response %" PRIu64
               ": success=%s, status='%s', dx=%.6f cm, dy=%.6f cm, "
-              "dtheta=%.6f deg, total_requests=%" PRIu64
+              "dtheta=%.6f deg, theta=%.6f deg, total_requests=%" PRIu64
               ", successful_requests=%" PRIu64 ", success_rate=%.2f%%.",
               gateway_result->request_id,
               gateway_result->success ? "true" : "false",
               gateway_result->status.c_str(), gateway_result->dx_cm,
               gateway_result->dy_cm, gateway_result->dtheta_deg,
+              gateway_result->theta_deg,
               gateway_result->total_request_count,
               gateway_result->successful_request_count,
               gateway_result->success_rate_percent);
@@ -1690,6 +1719,7 @@ private:
   std::string stm32_command_service_;
   int stm32_request_timeout_ms_ = 200;
   bool stm32_enable_odometry_log_ = false;
+  bool use_stm32_request_theta_ = false;
   bool enable_global_search_ = true;
   double global_search_random_ratio_ = 0.50;
   double global_search_noise_xy_ = 0.12;

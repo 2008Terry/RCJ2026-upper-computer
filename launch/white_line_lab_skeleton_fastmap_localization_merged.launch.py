@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -8,6 +9,9 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_shared_launch_params import declare_remap_interpolation_argument
 
 def find_latest_fastmap_file():
     config_dir = Path(get_package_share_directory("rcj_localization")) / "config"
@@ -109,7 +113,7 @@ def generate_launch_description():
         DeclareLaunchArgument("use_latest_fastmap", default_value="true"),  # Auto-select the newest fastmap file
         DeclareLaunchArgument("fastmap_file", default_value=""),  # Fastmap XML path when auto-select is off
         DeclareLaunchArgument("input_transport", default_value="raw"),  # Input transport for the remap node
-        DeclareLaunchArgument("interpolation", default_value="linear"),  # Remap interpolation mode
+        declare_remap_interpolation_argument(),
         DeclareLaunchArgument("map_yaml_file", default_value=map_yaml_default),  # Map YAML file path
         DeclareLaunchArgument("use_fake_yaw", default_value="false"),  # Publish fake yaw instead of subscribing
         DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Yaw topic

@@ -95,7 +95,7 @@ def generate_launch_description() -> LaunchDescription:
                 "hsv_show_overlay_image", default_value="true"
             ),  # Show the HSV overlay window
             DeclareLaunchArgument(
-                "hsv_publish_debug_images", default_value="false"
+                "hsv_publish_debug_images", default_value="true"
             ),  # Master switch for HSV debug image topics
             DeclareLaunchArgument(
                 "hsv_publish_input_image", default_value="true"

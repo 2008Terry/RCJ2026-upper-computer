@@ -48,7 +48,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "motion_timeout_ms",
-                default_value="5000",
+                default_value="10000",
                 description=(
                     "Timeout for cmd_dis/cmd_turn completion ACK after the motion command "
                     "has been sent, in milliseconds."

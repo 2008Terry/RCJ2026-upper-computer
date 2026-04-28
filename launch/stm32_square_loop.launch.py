@@ -25,7 +25,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "side_cm",
-                default_value="60.0",
+                default_value="20.8411",
                 description="Square side length in centimeters.",
             ),
             DeclareLaunchArgument(
@@ -92,7 +92,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "motion_timeout_ms",
-                default_value="5000",
+                default_value="10000",
                 description=(
                     "Gateway timeout for cmd_dis/cmd_turn completion ACK in milliseconds."
                 ),
