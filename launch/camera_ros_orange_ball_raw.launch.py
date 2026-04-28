@@ -73,8 +73,8 @@ def generate_launch_description():
             DeclareLaunchArgument("min_blob_area_px", default_value="30"),  # Minimum accepted blob area in pixels
             DeclareLaunchArgument("max_blob_area_px", default_value="1500"),  # Maximum accepted blob area in pixels
             DeclareLaunchArgument("enable_distance_aware_area_prior", default_value="true"),  # Whether to enable the distance-aware ball-area prior optimization
-            DeclareLaunchArgument("area_prior_near_min_ratio", default_value="0.75"),  # Minimum allowed area/expected-area ratio at the nearest LUT distance
-            DeclareLaunchArgument("area_prior_near_max_ratio", default_value="1.25"),  # Maximum allowed area/expected-area ratio at the nearest LUT distance
+            DeclareLaunchArgument("area_prior_near_min_ratio", default_value="0.66"),  # Minimum allowed area/expected-area ratio at the nearest LUT distance
+            DeclareLaunchArgument("area_prior_near_max_ratio", default_value="1.5"),  # Maximum allowed area/expected-area ratio at the nearest LUT distance
             DeclareLaunchArgument("area_prior_far_min_ratio", default_value="0.50"),  # Minimum allowed area/expected-area ratio at the farthest LUT distance
             DeclareLaunchArgument("area_prior_far_max_ratio", default_value="2.00"),  # Maximum allowed area/expected-area ratio at the farthest LUT distance
             DeclareLaunchArgument("min_aspect_ratio", default_value="0.3"),  # Minimum accepted blob width/height ratio
@@ -93,6 +93,18 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "processing_time_topic", default_value="/orange_ball_detector/processing_time_ms"
             ),  # Topic for published processing time in milliseconds
+            DeclareLaunchArgument(
+                "publish_debug_images", default_value="false"
+            ),  # Master switch for detector debug image topics
+            DeclareLaunchArgument(
+                "publish_raw_mask", default_value="true"
+            ),  # Publish the detector raw orange mask when publish_debug_images is true and subscribed
+            DeclareLaunchArgument(
+                "publish_filtered_mask", default_value="true"
+            ),  # Publish the accepted connected-component mask when publish_debug_images is true and subscribed
+            DeclareLaunchArgument(
+                "publish_overlay_image", default_value="true"
+            ),  # Publish the annotated overlay image when publish_debug_images is true and subscribed
             DeclareLaunchArgument(
                 "enable_image_view", default_value="true"
             ),  # Master switch for all OpenCV debug windows
@@ -272,6 +284,18 @@ def generate_launch_description():
                             LaunchConfiguration("publish_processing_time"), value_type=bool
                         ),
                         "processing_time_topic": LaunchConfiguration("processing_time_topic"),
+                        "publish_debug_images": ParameterValue(
+                            LaunchConfiguration("publish_debug_images"), value_type=bool
+                        ),
+                        "publish_raw_mask": ParameterValue(
+                            LaunchConfiguration("publish_raw_mask"), value_type=bool
+                        ),
+                        "publish_filtered_mask": ParameterValue(
+                            LaunchConfiguration("publish_filtered_mask"), value_type=bool
+                        ),
+                        "publish_overlay_image": ParameterValue(
+                            LaunchConfiguration("publish_overlay_image"), value_type=bool
+                        ),
                         "enable_image_view": ParameterValue(
                             LaunchConfiguration("enable_image_view"), value_type=bool
                         ),

@@ -3,9 +3,11 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 #if __has_include(<cv_bridge/cv_bridge.hpp>)
@@ -20,6 +22,7 @@
 #include <std_msgs/msg/header.hpp>
 
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 namespace {
@@ -42,6 +45,37 @@ using TimePoint = SteadyClock::time_point;
 long long elapsedUs(const TimePoint & start, const TimePoint & end)
 {
   return std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+}
+
+std::filesystem::path resolvePath(const std::string & raw_path)
+{
+  if (raw_path.empty()) {
+    return {};
+  }
+
+  std::filesystem::path resolved_path;
+  if (raw_path.front() == '~') {
+    const char * home = std::getenv("HOME");
+    if (home == nullptr || std::string(home).empty()) {
+      throw std::runtime_error("HOME is not set; cannot resolve '~' in robot_mask_path");
+    }
+
+    if (raw_path.size() == 1) {
+      resolved_path = std::filesystem::path(home);
+    } else if (raw_path[1] == '/') {
+      resolved_path = std::filesystem::path(home) / raw_path.substr(2);
+    } else {
+      throw std::runtime_error("Only '~' and '~/' are supported in robot_mask_path");
+    }
+  } else {
+    resolved_path = std::filesystem::path(raw_path);
+  }
+
+  if (resolved_path.is_relative()) {
+    resolved_path = std::filesystem::absolute(resolved_path);
+  }
+
+  return resolved_path.lexically_normal();
 }
 
 enum class HsvTimingStage : std::size_t
@@ -312,6 +346,7 @@ public:
     declare_parameter<std::string>(
       "input_topic", "/white_line_hsv_input_remap_node/image_remapped");
     declare_parameter<std::string>("robot_mask_topic", "");
+    declare_parameter<std::string>("robot_mask_path", "");
     declare_parameter("white_h_min", 0);
     declare_parameter("white_h_max", kHueMax);
     declare_parameter("white_s_max", 60);
@@ -356,7 +391,8 @@ public:
 
     const auto input_topic = get_parameter("input_topic").as_string();
     const auto robot_mask_topic = get_parameter("robot_mask_topic").as_string();
-    robot_mask_enabled_ = !robot_mask_topic.empty();
+    const auto robot_mask_path = get_parameter("robot_mask_path").as_string();
+    robot_mask_enabled_ = !robot_mask_topic.empty() || !robot_mask_path.empty();
     image_sub_ = create_subscription<sensor_msgs::msg::Image>(
       input_topic,
       rclcpp::SensorDataQoS(),
@@ -366,6 +402,8 @@ public:
         robot_mask_topic,
         rclcpp::QoS(1).reliable().transient_local(),
         std::bind(&WhiteLineHsvWhiteNode::robotMaskCallback, this, std::placeholders::_1));
+    } else if (!robot_mask_path.empty()) {
+      loadRobotMask(robot_mask_path);
     }
 
     white_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/white_mask", 10);
@@ -381,7 +419,7 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "white_line_hsv_white_node started. input_topic=%s, robot_mask_topic=%s, "
+      "white_line_hsv_white_node started. input_topic=%s, robot_mask_topic=%s, robot_mask_path=%s, "
       "white_h_min=%d, white_h_max=%d, "
       "white_s_max=%d, white_v_min=%d, black_h_min=%d, black_h_max=%d, "
       "black_s_min=%d, black_s_max=%d, black_v_min=%d, black_v_max=%d, "
@@ -391,6 +429,7 @@ public:
       "enable_image_view=%s, enable_controls_window=%s",
       input_topic.c_str(),
       robot_mask_topic.empty() ? "<disabled>" : robot_mask_topic.c_str(),
+      robot_mask_path.empty() ? "<disabled>" : robot_mask_path.c_str(),
       white_h_min_,
       white_h_max_,
       white_s_max_,
@@ -419,6 +458,19 @@ public:
   }
 
 private:
+  void loadRobotMask(const std::string & robot_mask_path)
+  {
+    const std::filesystem::path resolved_path = resolvePath(robot_mask_path);
+    const cv::Mat loaded_mask = cv::imread(resolved_path.string(), cv::IMREAD_GRAYSCALE);
+    if (loaded_mask.empty()) {
+      throw std::runtime_error("Cannot open robot mask image: " + resolved_path.string());
+    }
+
+    cv::compare(loaded_mask, 0, robot_allowed_mask_, cv::CMP_GT);
+    robot_mask_received_ = true;
+    robot_mask_validated_ = false;
+  }
+
   void robotMaskCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
   {
     try {
@@ -446,7 +498,7 @@ private:
         get_logger(),
         *get_clock(),
         2000,
-        "robot_mask_topic is configured but no robot mask has been received yet; dropping frame.");
+        "robot mask is enabled but no robot mask has been received or loaded yet; dropping frame.");
       return false;
     }
 

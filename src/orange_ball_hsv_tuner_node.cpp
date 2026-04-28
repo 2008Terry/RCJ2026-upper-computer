@@ -22,24 +22,14 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "rcj_localization/orange_ball_hsv.hpp"
+
 namespace {
 
-constexpr int kHueMax = 179;
-constexpr int kByteMax = 255;
 constexpr char kControlsWindowName[] = "Orange Ball HSV Controls";
 constexpr char kInputWindowName[] = "Orange Ball HSV Input";
 constexpr char kMaskWindowName[] = "Orange Ball HSV Mask";
 constexpr char kOverlayWindowName[] = "Orange Ball HSV Overlay";
-
-int clampHue(int value)
-{
-  return std::clamp(value, 0, kHueMax);
-}
-
-int clampByte(int value)
-{
-  return std::clamp(value, 0, kByteMax);
-}
 
 std::filesystem::path resolvePath(const std::string & raw_path)
 {
@@ -109,14 +99,18 @@ public:
 
     input_topic_ = get_parameter("input_topic").as_string();
     robot_mask_path_ = get_parameter("robot_mask_path").as_string();
-    orange_h_min_ = clampHue(static_cast<int>(get_parameter("orange_h_min").as_int()));
-    orange_h_max_ = clampHue(static_cast<int>(get_parameter("orange_h_max").as_int()));
-    orange_s_min_ = clampByte(static_cast<int>(get_parameter("orange_s_min").as_int()));
-    orange_v_min_ = clampByte(static_cast<int>(get_parameter("orange_v_min").as_int()));
+    orange_h_min_ =
+      rcj_localization::clampOrangeHue(static_cast<int>(get_parameter("orange_h_min").as_int()));
+    orange_h_max_ =
+      rcj_localization::clampOrangeHue(static_cast<int>(get_parameter("orange_h_max").as_int()));
+    orange_s_min_ =
+      rcj_localization::clampOrangeByte(static_cast<int>(get_parameter("orange_s_min").as_int()));
+    orange_v_min_ =
+      rcj_localization::clampOrangeByte(static_cast<int>(get_parameter("orange_v_min").as_int()));
     enable_morph_open_ = get_parameter("enable_morph_open").as_bool();
     morph_open_trackbar_ = enable_morph_open_ ? 1 : 0;
-    morph_kernel_size_ =
-      std::max(1, static_cast<int>(get_parameter("morph_kernel_size").as_int()));
+    morph_kernel_size_ = rcj_localization::normalizeOrangeBallMorphKernelSize(
+      static_cast<int>(get_parameter("morph_kernel_size").as_int()));
     loadRuntimeParameters();
     loadRobotMask();
 
@@ -183,10 +177,18 @@ private:
   {
     if (should_show && !controls_window_created_) {
       cv::namedWindow(kControlsWindowName, cv::WINDOW_AUTOSIZE);
-      cv::createTrackbar("orange_h_min", kControlsWindowName, &orange_h_min_, kHueMax);
-      cv::createTrackbar("orange_h_max", kControlsWindowName, &orange_h_max_, kHueMax);
-      cv::createTrackbar("orange_s_min", kControlsWindowName, &orange_s_min_, kByteMax);
-      cv::createTrackbar("orange_v_min", kControlsWindowName, &orange_v_min_, kByteMax);
+      cv::createTrackbar(
+        "orange_h_min", kControlsWindowName, &orange_h_min_,
+        rcj_localization::kOrangeBallHueMax);
+      cv::createTrackbar(
+        "orange_h_max", kControlsWindowName, &orange_h_max_,
+        rcj_localization::kOrangeBallHueMax);
+      cv::createTrackbar(
+        "orange_s_min", kControlsWindowName, &orange_s_min_,
+        rcj_localization::kOrangeBallByteMax);
+      cv::createTrackbar(
+        "orange_v_min", kControlsWindowName, &orange_v_min_,
+        rcj_localization::kOrangeBallByteMax);
       cv::createTrackbar("enable_morph_open", kControlsWindowName, &morph_open_trackbar_, 1);
       cv::createTrackbar("morph_kernel_size", kControlsWindowName, &morph_kernel_size_, 15);
       controls_window_created_ = true;
@@ -263,15 +265,6 @@ private:
     return true;
   }
 
-  void applyRobotMask(cv::Mat & mask) const
-  {
-    if (!robot_mask_enabled_ || mask.empty()) {
-      return;
-    }
-
-    cv::bitwise_and(mask, robot_allowed_mask_, mask);
-  }
-
   void printCurrentParameters() const
   {
     RCLCPP_INFO(
@@ -288,40 +281,23 @@ private:
 
   void buildMask(const cv::Mat & frame, cv::Mat & mask)
   {
-    cv::Mat hsv;
-    cv::cvtColor(frame, hsv, cv::COLOR_BGR2HSV);
+    rcj_localization::buildOrangeBallMask(
+      frame,
+      currentHsvConfig(),
+      mask,
+      robot_mask_enabled_ ? robot_allowed_mask_ : cv::Mat());
+  }
 
-    if (orange_h_min_ <= orange_h_max_) {
-      cv::inRange(
-        hsv,
-        cv::Scalar(orange_h_min_, orange_s_min_, orange_v_min_),
-        cv::Scalar(orange_h_max_, kByteMax, kByteMax),
-        mask);
-    } else {
-      cv::Mat low_mask;
-      cv::Mat high_mask;
-      cv::inRange(
-        hsv,
-        cv::Scalar(0, orange_s_min_, orange_v_min_),
-        cv::Scalar(orange_h_max_, kByteMax, kByteMax),
-        low_mask);
-      cv::inRange(
-        hsv,
-        cv::Scalar(orange_h_min_, orange_s_min_, orange_v_min_),
-        cv::Scalar(kHueMax, kByteMax, kByteMax),
-        high_mask);
-      cv::bitwise_or(low_mask, high_mask, mask);
-    }
-
-    applyRobotMask(mask);
-
-    if (enable_morph_open_ && morph_kernel_size_ > 1) {
-      const int kernel_size = std::max(1, morph_kernel_size_ | 1);
-      const cv::Mat kernel = cv::getStructuringElement(
-        cv::MORPH_ELLIPSE,
-        cv::Size(kernel_size, kernel_size));
-      cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
-    }
+  rcj_localization::OrangeBallHsvConfig currentHsvConfig() const
+  {
+    return rcj_localization::sanitizeOrangeBallHsvConfig(
+      rcj_localization::OrangeBallHsvConfig{
+        orange_h_min_,
+        orange_h_max_,
+        orange_s_min_,
+        orange_v_min_,
+        enable_morph_open_,
+        morph_kernel_size_});
   }
 
   template<typename PublisherT>
@@ -402,23 +378,31 @@ private:
     }
 
     if (controls_window_created_) {
-      orange_h_min_ = clampHue(cv::getTrackbarPos("orange_h_min", kControlsWindowName));
-      orange_h_max_ = clampHue(cv::getTrackbarPos("orange_h_max", kControlsWindowName));
-      orange_s_min_ = clampByte(cv::getTrackbarPos("orange_s_min", kControlsWindowName));
-      orange_v_min_ = clampByte(cv::getTrackbarPos("orange_v_min", kControlsWindowName));
+      orange_h_min_ =
+        rcj_localization::clampOrangeHue(cv::getTrackbarPos("orange_h_min", kControlsWindowName));
+      orange_h_max_ =
+        rcj_localization::clampOrangeHue(cv::getTrackbarPos("orange_h_max", kControlsWindowName));
+      orange_s_min_ =
+        rcj_localization::clampOrangeByte(cv::getTrackbarPos("orange_s_min", kControlsWindowName));
+      orange_v_min_ =
+        rcj_localization::clampOrangeByte(cv::getTrackbarPos("orange_v_min", kControlsWindowName));
       morph_open_trackbar_ = cv::getTrackbarPos("enable_morph_open", kControlsWindowName);
       enable_morph_open_ = morph_open_trackbar_ > 0;
-      morph_kernel_size_ =
-        std::max(1, cv::getTrackbarPos("morph_kernel_size", kControlsWindowName));
+      morph_kernel_size_ = rcj_localization::normalizeOrangeBallMorphKernelSize(
+        cv::getTrackbarPos("morph_kernel_size", kControlsWindowName));
     } else {
-      orange_h_min_ = clampHue(static_cast<int>(get_parameter("orange_h_min").as_int()));
-      orange_h_max_ = clampHue(static_cast<int>(get_parameter("orange_h_max").as_int()));
-      orange_s_min_ = clampByte(static_cast<int>(get_parameter("orange_s_min").as_int()));
-      orange_v_min_ = clampByte(static_cast<int>(get_parameter("orange_v_min").as_int()));
+      orange_h_min_ = rcj_localization::clampOrangeHue(
+        static_cast<int>(get_parameter("orange_h_min").as_int()));
+      orange_h_max_ = rcj_localization::clampOrangeHue(
+        static_cast<int>(get_parameter("orange_h_max").as_int()));
+      orange_s_min_ = rcj_localization::clampOrangeByte(
+        static_cast<int>(get_parameter("orange_s_min").as_int()));
+      orange_v_min_ = rcj_localization::clampOrangeByte(
+        static_cast<int>(get_parameter("orange_v_min").as_int()));
       enable_morph_open_ = get_parameter("enable_morph_open").as_bool();
       morph_open_trackbar_ = enable_morph_open_ ? 1 : 0;
-      morph_kernel_size_ =
-        std::max(1, static_cast<int>(get_parameter("morph_kernel_size").as_int()));
+      morph_kernel_size_ = rcj_localization::normalizeOrangeBallMorphKernelSize(
+        static_cast<int>(get_parameter("morph_kernel_size").as_int()));
     }
 
     cv::Mat mask;

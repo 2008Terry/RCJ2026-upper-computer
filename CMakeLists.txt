@@ -71,6 +71,14 @@ target_link_libraries(white_line_preprocessing
   ${OpenCV_LIBRARIES}
 )
 
+add_library(orange_ball_hsv
+  src/orange_ball_hsv.cpp
+)
+
+target_link_libraries(orange_ball_hsv
+  ${OpenCV_LIBRARIES}
+)
+
 # --- Add Your Executable ---
 # This tells cmake to build an executable file named "localization_node"
 # from your source file "src/main_node.cpp"
@@ -451,6 +459,7 @@ ament_target_dependencies(orange_ball_detector_node
   cv_bridge
 )
 target_link_libraries(orange_ball_detector_node
+  orange_ball_hsv
   ${OpenCV_LIBRARIES}
 )
 
@@ -462,6 +471,7 @@ ament_target_dependencies(orange_ball_hsv_tuner_node
   cv_bridge
 )
 target_link_libraries(orange_ball_hsv_tuner_node
+  orange_ball_hsv
   ${OpenCV_LIBRARIES}
 )
 

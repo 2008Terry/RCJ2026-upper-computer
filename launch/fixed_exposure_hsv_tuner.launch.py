@@ -1,8 +1,9 @@
 from pathlib import Path
 import sys
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -32,6 +33,19 @@ def generate_launch_description() -> LaunchDescription:
     input_topic = LaunchConfiguration("input_topic")
     white_mask_topic = LaunchConfiguration("white_mask_topic")
     robot_mask_topic = LaunchConfiguration("robot_mask_topic")
+    apply_mask = LaunchConfiguration("apply_mask")
+    robot_mask_path = LaunchConfiguration("robot_mask_path")
+    apply_mask_enabled_expr = [
+        "'",
+        apply_mask,
+        "'.strip().lower() in ('1', 'true', 'yes', 'on')",
+    ]
+    masked_robot_mask_topic = PythonExpression(
+        ["'", robot_mask_topic, "' if ", *apply_mask_enabled_expr, " else ''"]
+    )
+    masked_robot_mask_path = PythonExpression(
+        ["'", robot_mask_path, "' if ", *apply_mask_enabled_expr, " else ''"]
+    )
 
     exposure_time = LaunchConfiguration("exposure_time")
     exposure_time_mode = LaunchConfiguration("exposure_time_mode")
@@ -63,6 +77,13 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "robot_mask_topic", default_value=""
             ),  # Optional robot mask topic
+            DeclareLaunchArgument(
+                "apply_mask", default_value="true"
+            ),  # Whether to apply the raw-space robot mask in the HSV node
+            DeclareLaunchArgument(
+                "robot_mask_path",
+                default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "mask.png"),
+            ),  # Raw-space robot allow-mask image path
             *declare_hsv_green_white_black_arguments(),
             DeclareLaunchArgument(
                 "hsv_enable_timing_log", default_value="true"
@@ -157,7 +178,8 @@ def generate_launch_description() -> LaunchDescription:
                 parameters=[
                     {
                         "input_topic": input_topic,
-                        "robot_mask_topic": robot_mask_topic,
+                        "robot_mask_topic": masked_robot_mask_topic,
+                        "robot_mask_path": masked_robot_mask_path,
                         **hsv_green_white_black_parameters(),
                         "enable_timing_log": ParameterValue(
                             LaunchConfiguration("hsv_enable_timing_log"),

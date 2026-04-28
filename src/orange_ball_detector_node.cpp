@@ -35,13 +35,13 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "rcj_localization/orange_ball_hsv.hpp"
+
 namespace {
 
 using SteadyClock = std::chrono::steady_clock;
 using TimePoint = SteadyClock::time_point;
 
-constexpr int kHueMax = 179;
-constexpr int kByteMax = 255;
 constexpr char kInputWindowName[] = "Orange Ball Input";
 constexpr char kThresholdMaskWindowName[] = "Orange Ball Threshold Mask";
 constexpr char kMorphMaskWindowName[] = "Orange Ball Morph Mask";
@@ -104,12 +104,7 @@ double clamp01(double value)
 
 int clampToByte(int value)
 {
-  return std::clamp(value, 0, kByteMax);
-}
-
-int clampHue(int value)
-{
-  return std::clamp(value, 0, kHueMax);
+  return rcj_localization::clampOrangeByte(value);
 }
 
 cv::Rect clampRectToImage(const cv::Rect & rect, const cv::Size & image_size)
@@ -523,6 +518,10 @@ private:
     declare_parameter("timing_log_interval", 30);
     declare_parameter("publish_processing_time", true);
     declare_parameter<std::string>("processing_time_topic", "~/processing_time_ms");
+    declare_parameter("publish_debug_images", false);
+    declare_parameter("publish_raw_mask", true);
+    declare_parameter("publish_filtered_mask", true);
+    declare_parameter("publish_overlay_image", true);
     declare_parameter("enable_image_view", false);
     declare_parameter("show_input_image", true);
     declare_parameter("show_threshold_mask", false);
@@ -551,13 +550,15 @@ private:
     input_topic_ = get_parameter("input_topic").as_string();
     lut_file_ = get_parameter("lut_file").as_string();
     robot_mask_path_ = get_parameter("robot_mask_path").as_string();
-    orange_h_min_ = clampHue(static_cast<int>(get_parameter("orange_h_min").as_int()));
-    orange_h_max_ = clampHue(static_cast<int>(get_parameter("orange_h_max").as_int()));
+    orange_h_min_ =
+      rcj_localization::clampOrangeHue(static_cast<int>(get_parameter("orange_h_min").as_int()));
+    orange_h_max_ =
+      rcj_localization::clampOrangeHue(static_cast<int>(get_parameter("orange_h_max").as_int()));
     orange_s_min_ = clampToByte(static_cast<int>(get_parameter("orange_s_min").as_int()));
     orange_v_min_ = clampToByte(static_cast<int>(get_parameter("orange_v_min").as_int()));
     enable_morph_open_ = get_parameter("enable_morph_open").as_bool();
-    morph_kernel_size_ =
-      std::max(1, static_cast<int>(get_parameter("morph_kernel_size").as_int()));
+    morph_kernel_size_ = rcj_localization::normalizeOrangeBallMorphKernelSize(
+      static_cast<int>(get_parameter("morph_kernel_size").as_int()));
     search_downsample_scale_ = get_parameter("search_downsample_scale").as_double();
     min_blob_area_px_ =
       std::max(1, static_cast<int>(get_parameter("min_blob_area_px").as_int()));
@@ -589,6 +590,10 @@ private:
       std::max(1, static_cast<int>(get_parameter("timing_log_interval").as_int()));
     publish_processing_time_ = get_parameter("publish_processing_time").as_bool();
     processing_time_topic_ = get_parameter("processing_time_topic").as_string();
+    publish_debug_images_ = get_parameter("publish_debug_images").as_bool();
+    publish_raw_mask_ = get_parameter("publish_raw_mask").as_bool();
+    publish_filtered_mask_ = get_parameter("publish_filtered_mask").as_bool();
+    publish_overlay_image_ = get_parameter("publish_overlay_image").as_bool();
     enable_image_view_ = get_parameter("enable_image_view").as_bool();
     show_input_image_ = get_parameter("show_input_image").as_bool();
     show_threshold_mask_ = get_parameter("show_threshold_mask").as_bool();
@@ -720,18 +725,17 @@ private:
     return resized_robot_allowed_mask_;
   }
 
-  void applyRobotMask(cv::Mat & mask, const cv::Rect * roi = nullptr)
+  cv::Mat robotMaskForDetection(const cv::Size & target_size, const cv::Rect * roi = nullptr)
   {
-    if (!robot_mask_enabled_ || mask.empty()) {
-      return;
+    if (!robot_mask_enabled_) {
+      return {};
     }
 
     if (roi != nullptr) {
-      cv::bitwise_and(mask, robot_allowed_mask_(*roi), mask);
-      return;
+      return robot_allowed_mask_(*roi);
     }
 
-    cv::bitwise_and(mask, getRobotMaskForSize(mask.size()), mask);
+    return getRobotMaskForSize(target_size);
   }
 
   void loadLutFile()
@@ -1179,10 +1183,13 @@ private:
   {
     DebugRequest request;
     request.publish_raw_mask =
+      publish_debug_images_ && publish_raw_mask_ &&
       debug_mask_pub_ && debug_mask_pub_->get_subscription_count() > 0U;
     request.publish_filtered_mask =
+      publish_debug_images_ && publish_filtered_mask_ &&
       debug_mask_filtered_pub_ && debug_mask_filtered_pub_->get_subscription_count() > 0U;
     request.publish_overlay =
+      publish_debug_images_ && publish_overlay_image_ &&
       debug_image_pub_ && debug_image_pub_->get_subscription_count() > 0U;
     request.show_input_image = input_window_created_;
     request.show_threshold_mask = threshold_mask_window_created_;
@@ -1242,48 +1249,37 @@ private:
 
   void buildThresholdMask(const cv::Mat & bgr, cv::Mat & mask, const cv::Rect * roi = nullptr)
   {
-    cv::Mat hsv;
-    cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
-
-    if (orange_h_min_ <= orange_h_max_) {
-      cv::inRange(
-        hsv,
-        cv::Scalar(orange_h_min_, orange_s_min_, orange_v_min_),
-        cv::Scalar(orange_h_max_, kByteMax, kByteMax),
-        mask);
-    } else {
-      cv::Mat low_mask;
-      cv::Mat high_mask;
-      cv::inRange(
-        hsv,
-        cv::Scalar(0, orange_s_min_, orange_v_min_),
-        cv::Scalar(orange_h_max_, kByteMax, kByteMax),
-        low_mask);
-      cv::inRange(
-        hsv,
-        cv::Scalar(orange_h_min_, orange_s_min_, orange_v_min_),
-        cv::Scalar(kHueMax, kByteMax, kByteMax),
-        high_mask);
-      cv::bitwise_or(low_mask, high_mask, mask);
-    }
-
-    applyRobotMask(mask, roi);
+    rcj_localization::buildOrangeBallThresholdMask(
+      bgr,
+      currentHsvConfig(),
+      mask,
+      robotMaskForDetection(bgr.size(), roi));
   }
 
   void applyMorphOpen(cv::Mat & mask) const
   {
-    if (enable_morph_open_ && morph_kernel_size_ > 1) {
-      const cv::Mat kernel = cv::getStructuringElement(
-        cv::MORPH_ELLIPSE,
-        cv::Size(morph_kernel_size_, morph_kernel_size_));
-      cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
-    }
+    rcj_localization::applyOrangeBallMorphOpen(mask, currentHsvConfig());
   }
 
   void buildOrangeMask(const cv::Mat & bgr, cv::Mat & mask, const cv::Rect * roi = nullptr)
   {
-    buildThresholdMask(bgr, mask, roi);
-    applyMorphOpen(mask);
+    rcj_localization::buildOrangeBallMask(
+      bgr,
+      currentHsvConfig(),
+      mask,
+      robotMaskForDetection(bgr.size(), roi));
+  }
+
+  rcj_localization::OrangeBallHsvConfig currentHsvConfig() const
+  {
+    return rcj_localization::sanitizeOrangeBallHsvConfig(
+      rcj_localization::OrangeBallHsvConfig{
+        orange_h_min_,
+        orange_h_max_,
+        orange_s_min_,
+        orange_v_min_,
+        enable_morph_open_,
+        morph_kernel_size_});
   }
 
   std::vector<CoarseCandidate> findCoarseCandidates(
@@ -2426,6 +2422,10 @@ private:
   int timing_log_interval_ = 30;
   bool publish_processing_time_ = true;
   std::string processing_time_topic_;
+  bool publish_debug_images_ = false;
+  bool publish_raw_mask_ = true;
+  bool publish_filtered_mask_ = true;
+  bool publish_overlay_image_ = true;
   bool enable_image_view_ = false;
   bool show_input_image_ = true;
   bool show_threshold_mask_ = false;
