@@ -179,7 +179,7 @@ private:
     void declareParameters() {
         this->declare_parameter<std::string>(
             "mask_topic",
-            "/white_line_skeleton_filter_node/white_final_mask");
+            "/white_line_dt_ridge_filter_node/white_final_mask");
         this->declare_parameter("meters_per_pixel", 0.0025);
         this->declare_parameter<std::string>("forward_axis", "v+");
         this->declare_parameter<std::string>("left_axis", "u-");

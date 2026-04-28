@@ -79,33 +79,6 @@ target_link_libraries(orange_ball_hsv
   ${OpenCV_LIBRARIES}
 )
 
-# --- Add Your Executable ---
-# This tells cmake to build an executable file named "localization_node"
-# from your source file "src/main_node.cpp"
-add_executable(localization_node 
-  src/main_node.cpp
-  src/particle_filter.cpp
-)
-
-# --- Link Libraries ---
-# This is the most important part. It connects your code to the ROS 2 and OpenCV libraries.
-ament_target_dependencies(localization_node
-  "rclcpp"
-  "std_msgs"
-  "sensor_msgs"
-  "geometry_msgs"
-  "nav_msgs"
-  "tf2_ros"
-  "cv_bridge"
-  "visualization_msgs"
-)
-
-target_link_libraries(localization_node 
-  vision_processor
-  ${OpenCV_LIBRARIES}
-  OpenMP::OpenMP_CXX
-)
-
 # Standalone vision debug node
 add_executable(vision_processor_node
   src/vision_processor_node.cpp
@@ -169,7 +142,6 @@ target_link_libraries(stm32_serial_gateway_node
 # --- Installation Rules ---
 # This tells colcon where to put the files so `ros2 run` can find them.
 install(TARGETS
-  localization_node
   vision_processor_node
   fastmap_remap_node
   stm32_behavior_node
@@ -181,12 +153,10 @@ install(TARGETS
 install(PROGRAMS
   "scripts/create_robot_mask.py"
   "scripts/test_robot_mask.py"
-  "scripts/yaw_publisher.py"
   "src/camera_fixed_exposure_debug.py"
   "scripts/stm32_command_demo.py"
   "scripts/stm32_square_loop.py"
   "scripts/task_runner.py"
-  "src/image_publisher.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -278,17 +248,6 @@ target_link_libraries(white_line_hsv_white_node
   ${OpenCV_LIBRARIES}
 )
 
-add_executable(white_line_hsv_white_mask_node src/white_line_hsv_white_mask_node.cpp)
-ament_target_dependencies(white_line_hsv_white_mask_node
-  ament_index_cpp
-  rclcpp
-  sensor_msgs
-  cv_bridge
-)
-target_link_libraries(white_line_hsv_white_mask_node
-  ${OpenCV_LIBRARIES}
-)
-
 add_executable(white_line_lab_cluster_node src/white_line_lab_cluster_node.cpp)
 ament_target_dependencies(white_line_lab_cluster_node
   rclcpp
@@ -297,30 +256,6 @@ ament_target_dependencies(white_line_lab_cluster_node
 )
 target_link_libraries(white_line_lab_cluster_node
   white_line_preprocessing
-  white_line_debug_utils
-  ${OpenCV_LIBRARIES}
-)
-
-add_executable(white_line_lab_morph_node src/white_line_lab_morph_node.cpp)
-ament_target_dependencies(white_line_lab_morph_node
-  rclcpp
-  sensor_msgs
-  cv_bridge
-)
-target_link_libraries(white_line_lab_morph_node
-  white_line_preprocessing
-  white_line_debug_utils
-  ${OpenCV_LIBRARIES}
-)
-
-add_executable(white_line_skeleton_filter_node src/white_line_skeleton_filter_node.cpp)
-ament_target_dependencies(white_line_skeleton_filter_node
-  rclcpp
-  sensor_msgs
-  cv_bridge
-  message_filters
-)
-target_link_libraries(white_line_skeleton_filter_node
   white_line_debug_utils
   ${OpenCV_LIBRARIES}
 )
@@ -334,51 +269,6 @@ ament_target_dependencies(white_line_dt_ridge_filter_node
 )
 target_link_libraries(white_line_dt_ridge_filter_node
   white_line_debug_utils
-  ${OpenCV_LIBRARIES}
-  OpenMP::OpenMP_CXX
-)
-
-add_executable(topdown_mask_points_node src/topdown_mask_points_node.cpp)
-ament_target_dependencies(topdown_mask_points_node
-  rclcpp
-  sensor_msgs
-  geometry_msgs
-  cv_bridge
-)
-target_link_libraries(topdown_mask_points_node
-  ${OpenCV_LIBRARIES}
-)
-
-add_executable(pf_localization_node
-  src/pf_localization_node.cpp
-  src/particle_filter.cpp
-)
-ament_target_dependencies(pf_localization_node
-  rclcpp
-  std_msgs
-  geometry_msgs
-  nav_msgs
-  tf2_ros
-)
-target_link_libraries(pf_localization_node
-  ${OpenCV_LIBRARIES}
-  OpenMP::OpenMP_CXX
-)
-
-add_executable(topdown_pf_localization_node
-  src/topdown_pf_localization_node.cpp
-  src/particle_filter.cpp
-)
-ament_target_dependencies(topdown_pf_localization_node
-  rclcpp
-  std_msgs
-  sensor_msgs
-  geometry_msgs
-  nav_msgs
-  tf2_ros
-  cv_bridge
-)
-target_link_libraries(topdown_pf_localization_node
   ${OpenCV_LIBRARIES}
   OpenMP::OpenMP_CXX
 )
@@ -488,14 +378,8 @@ install(TARGETS
   white_line_cluster_node
   white_line_hsv_cluster_node
   white_line_hsv_white_node
-  white_line_hsv_white_mask_node
   white_line_lab_cluster_node
-  white_line_lab_morph_node
-  white_line_skeleton_filter_node
   white_line_dt_ridge_filter_node
-  topdown_mask_points_node
-  pf_localization_node
-  topdown_pf_localization_node
   topdown_pf_localization_node_v2
   amcl_fusion
   white_line_probability_node
