@@ -375,7 +375,7 @@ def generate_launch_description():
                 "localized_min_updates", default_value="5"
             ),  # Consecutive concentrated updates required before using odometry
             DeclareLaunchArgument(
-                "lost_alpha_ratio_threshold", default_value="0.33"
+                "lost_alpha_ratio_threshold", default_value="0.25"
             ),  # Alpha-fast/alpha-slow ratio below this re-enters global search
             DeclareLaunchArgument(
                 "lost_min_updates", default_value="5"
