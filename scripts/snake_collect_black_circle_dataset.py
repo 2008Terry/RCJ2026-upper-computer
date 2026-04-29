@@ -373,18 +373,17 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
                 self._sleep_with_spin(self.waypoint_capture_delay_sec)
             self.save_latest_image(f"waypoint_{image_index + 1}")
 
-    def run(self) -> None:
-        if self.dry_run:
-            for index, (x_m, y_m) in enumerate(self.waypoints):
-                self.get_logger().info(
-                    "Dry-run waypoint %03d/%03d: x=%.3f y=%.3f",
-                    index + 1,
-                    len(self.waypoints),
-                    x_m,
-                    y_m,
-                )
-            return
+    def log_dry_run_path(self) -> None:
+        for index, (x_m, y_m) in enumerate(self.waypoints):
+            self.get_logger().info(
+                "Dry-run waypoint %03d/%03d: x=%.3f y=%.3f",
+                index + 1,
+                len(self.waypoints),
+                x_m,
+                y_m,
+            )
 
+    def prepare_for_motion(self) -> None:
         self.get_logger().info("Waiting %.3f s before starting.", self.start_delay_sec)
         self._sleep_with_spin(self.start_delay_sec)
 
@@ -396,6 +395,7 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         if self.reset_yaw_on_start:
             self.reset_yaw()
 
+    def run_snake_path(self) -> None:
         self.capture_active = True
         try:
             for index, (x_m, y_m) in enumerate(self.waypoints):
@@ -434,13 +434,24 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         )
 
 
+def run_task(robot: SnakeBlackCircleDatasetCollector) -> None:
+    """Run the black-circle dataset collection task."""
+
+    if robot.dry_run:
+        robot.log_dry_run_path()
+        return
+
+    robot.prepare_for_motion()
+    robot.run_snake_path()
+
+
 def main(args: Optional[list[str]] = None) -> int:
     rclpy.init(args=args)
     node = None
     exit_code = 0
     try:
         node = SnakeBlackCircleDatasetCollector()
-        node.run()
+        run_task(node)
     except KeyboardInterrupt:
         exit_code = 130
     except (GotoError, RuntimeError, ValueError) as error:
