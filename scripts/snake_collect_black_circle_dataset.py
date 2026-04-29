@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -81,11 +82,16 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         self.declare_parameter("stop_on_exit", True)
         self.declare_parameter("dry_run", False)
 
+        self.declare_parameter("capture_images", True)
         self.declare_parameter("capture_while_moving", True)
         self.declare_parameter("moving_capture_interval_sec", 0.75)
         self.declare_parameter("images_per_waypoint", 2)
         self.declare_parameter("waypoint_capture_delay_sec", 0.15)
         self.declare_parameter("image_wait_timeout_sec", 3.0)
+        self.declare_parameter("enable_camera_view", True)
+        self.declare_parameter("camera_view_window_name", "Snake camera")
+        self.declare_parameter("camera_view_max_width", 960)
+        self.declare_parameter("camera_view_max_height", 720)
 
         self.image_topic = str(self.get_parameter("image_topic").value)
         self.output_dir = Path(str(self.get_parameter("output_dir").value)).expanduser()
@@ -131,6 +137,7 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         self.stop_on_exit = bool(self.get_parameter("stop_on_exit").value)
         self.dry_run = bool(self.get_parameter("dry_run").value)
 
+        self.capture_images = bool(self.get_parameter("capture_images").value)
         self.capture_while_moving = bool(self.get_parameter("capture_while_moving").value)
         self.moving_capture_interval_sec = self._positive_param(
             "moving_capture_interval_sec"
@@ -140,6 +147,26 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
             "waypoint_capture_delay_sec"
         )
         self.image_wait_timeout_sec = self._positive_param("image_wait_timeout_sec")
+        self.enable_camera_view = bool(self.get_parameter("enable_camera_view").value)
+        self.camera_view_window_name = str(
+            self.get_parameter("camera_view_window_name").value
+        )
+        self.camera_view_max_width = max(
+            1,
+            int(self.get_parameter("camera_view_max_width").value),
+        )
+        self.camera_view_max_height = max(
+            1,
+            int(self.get_parameter("camera_view_max_height").value),
+        )
+        self.camera_view_window_created = False
+
+        if self.enable_camera_view and not self._display_available():
+            self.get_logger().warn(
+                "enable_camera_view=true but no DISPLAY/WAYLAND_DISPLAY is "
+                "available; disabling camera preview."
+            )
+            self.enable_camera_view = False
 
         if self.x_min_m > self.x_max_m:
             self.x_min_m, self.x_max_m = self.x_max_m, self.x_min_m
@@ -151,32 +178,39 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
                 "or increase map_width_m/map_height_m."
             )
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
-        self.metadata_file = self.metadata_path.open("a", newline="", encoding="utf-8")
-        self.metadata_writer = csv.DictWriter(
-            self.metadata_file,
-            fieldnames=[
-                "filename",
-                "capture_index",
-                "reason",
-                "waypoint_index",
-                "target_x_m",
-                "target_y_m",
-                "amcl_x_m",
-                "amcl_y_m",
-                "image_stamp_sec",
-                "image_stamp_nanosec",
-                "wall_time_utc",
-                "image_topic",
-                "encoding",
-                "width",
-                "height",
-            ],
-        )
-        if self.metadata_path.stat().st_size == 0:
-            self.metadata_writer.writeheader()
-            self.metadata_file.flush()
+        self.metadata_file = None
+        self.metadata_writer = None
+        if self.capture_images:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            self.metadata_file = self.metadata_path.open(
+                "a",
+                newline="",
+                encoding="utf-8",
+            )
+            self.metadata_writer = csv.DictWriter(
+                self.metadata_file,
+                fieldnames=[
+                    "filename",
+                    "capture_index",
+                    "reason",
+                    "waypoint_index",
+                    "target_x_m",
+                    "target_y_m",
+                    "amcl_x_m",
+                    "amcl_y_m",
+                    "image_stamp_sec",
+                    "image_stamp_nanosec",
+                    "wall_time_utc",
+                    "image_topic",
+                    "encoding",
+                    "width",
+                    "height",
+                ],
+            )
+            if self.metadata_path.stat().st_size == 0:
+                self.metadata_writer.writeheader()
+                self.metadata_file.flush()
 
         self.bridge = CvBridge()
         self.latest_image_msg: Optional[Image] = None
@@ -187,19 +221,21 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         self.active_target: Optional[tuple[float, float]] = None
         self.capture_active = False
 
-        sensor_qos = QoSProfile(
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10,
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-        )
-        self.image_sub = self.create_subscription(
-            Image,
-            self.image_topic,
-            self.image_callback,
-            sensor_qos,
-        )
+        self.image_sub = None
+        if self.capture_images or self.enable_camera_view:
+            sensor_qos = QoSProfile(
+                history=HistoryPolicy.KEEP_LAST,
+                depth=10,
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+            )
+            self.image_sub = self.create_subscription(
+                Image,
+                self.image_topic,
+                self.image_callback,
+                sensor_qos,
+            )
         self.capture_timer = None
-        if self.capture_while_moving:
+        if self.capture_images and self.capture_while_moving:
             self.capture_timer = self.create_timer(
                 self.moving_capture_interval_sec,
                 self.timer_capture_callback,
@@ -207,25 +243,32 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
 
         self.waypoints = self.build_snake_waypoints()
         self.get_logger().info(
-            "Snake collector ready: %d waypoints, x=[%.3f, %.3f], y=[%.3f, %.3f], "
-            "wall_margin=%.3f, column_spacing=%.3f, waypoint_spacing=%.3f, "
-            "image_topic='%s'",
-            len(self.waypoints),
-            self.x_min_m,
-            self.x_max_m,
-            self.y_min_m,
-            self.y_max_m,
-            self.path_wall_margin_m,
-            self.column_spacing_m,
-            self.waypoint_spacing_m,
-            self.image_topic,
+            f"Snake collector ready: {len(self.waypoints)} waypoints, "
+            f"x=[{self.x_min_m:.3f}, {self.x_max_m:.3f}], "
+            f"y=[{self.y_min_m:.3f}, {self.y_max_m:.3f}], "
+            f"wall_margin={self.path_wall_margin_m:.3f}, "
+            f"column_spacing={self.column_spacing_m:.3f}, "
+            f"waypoint_spacing={self.waypoint_spacing_m:.3f}, "
+            f"capture_images={self.capture_images}, "
+            f"enable_camera_view={self.enable_camera_view}, "
+            f"image_topic='{self.image_topic}'"
         )
 
     def destroy_node(self) -> bool:
-        if hasattr(self, "metadata_file") and not self.metadata_file.closed:
+        if self.camera_view_window_created:
+            try:
+                cv2.destroyWindow(self.camera_view_window_name)
+            except cv2.error as error:
+                self.get_logger().warn(f"Failed to close camera preview: {error}")
+            self.camera_view_window_created = False
+        if self.metadata_file is not None and not self.metadata_file.closed:
             self.metadata_file.flush()
             self.metadata_file.close()
         return super().destroy_node()
+
+    @staticmethod
+    def _display_available() -> bool:
+        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
     @staticmethod
     def _normalize_image_format(value: str) -> str:
@@ -282,6 +325,37 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
             return
         self.latest_image_msg = msg
         self.latest_image_receive_time = time.monotonic()
+        self.show_camera_view(self.latest_image_bgr)
+
+    def show_camera_view(self, image) -> None:
+        if not self.enable_camera_view or image is None:
+            return
+
+        try:
+            if not self.camera_view_window_created:
+                cv2.namedWindow(self.camera_view_window_name, cv2.WINDOW_NORMAL)
+                self.camera_view_window_created = True
+
+            height, width = image.shape[:2]
+            if width > 0 and height > 0:
+                scale = min(
+                    self.camera_view_max_width / float(width),
+                    self.camera_view_max_height / float(height),
+                    1.0,
+                )
+                cv2.resizeWindow(
+                    self.camera_view_window_name,
+                    max(1, int(round(width * scale))),
+                    max(1, int(round(height * scale))),
+                )
+
+            cv2.imshow(self.camera_view_window_name, image)
+            cv2.waitKey(1)
+        except cv2.error as error:
+            self.get_logger().warn(
+                f"Camera preview failed; disabling enable_camera_view: {error}"
+            )
+            self.enable_camera_view = False
 
     def timer_capture_callback(self) -> None:
         if not self.capture_active:
@@ -297,12 +371,14 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         return self.latest_image_msg is not None
 
     def save_latest_image(self, reason: str) -> bool:
+        if not self.capture_images:
+            return False
+
         if self.latest_image_msg is None or self.latest_image_bgr is None:
             if not self.wait_for_image(self.image_wait_timeout_sec):
                 self.get_logger().warn(
-                    "No image received on '%s'; skipped %s capture.",
-                    self.image_topic,
-                    reason,
+                    f"No image received on '{self.image_topic}'; "
+                    f"skipped {reason} capture."
                 )
                 return False
 
@@ -343,6 +419,11 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
             amcl_y = f"{self._latest_pose_xy[1]:.9f}"
 
         height, width = image.shape[:2]
+        if self.metadata_writer is None or self.metadata_file is None:
+            self.get_logger().error("Metadata writer is unavailable.")
+            self.capture_index -= 1
+            return False
+
         self.metadata_writer.writerow(
             {
                 "filename": filename,
@@ -364,10 +445,13 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         )
         self.metadata_file.flush()
 
-        self.get_logger().info("Saved %s", str(output_path))
+        self.get_logger().info(f"Saved {output_path}")
         return True
 
     def capture_at_waypoint(self) -> None:
+        if not self.capture_images:
+            return
+
         for image_index in range(self.images_per_waypoint):
             if self.waypoint_capture_delay_sec > 0.0:
                 self._sleep_with_spin(self.waypoint_capture_delay_sec)
@@ -376,18 +460,20 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
     def log_dry_run_path(self) -> None:
         for index, (x_m, y_m) in enumerate(self.waypoints):
             self.get_logger().info(
-                "Dry-run waypoint %03d/%03d: x=%.3f y=%.3f",
-                index + 1,
-                len(self.waypoints),
-                x_m,
-                y_m,
+                f"Dry-run waypoint {index + 1:03d}/{len(self.waypoints):03d}: "
+                f"x={x_m:.3f} y={y_m:.3f}"
             )
 
     def prepare_for_motion(self) -> None:
-        self.get_logger().info("Waiting %.3f s before starting.", self.start_delay_sec)
+        self.get_logger().info(
+            f"Waiting {self.start_delay_sec:.3f} s before starting."
+        )
         self._sleep_with_spin(self.start_delay_sec)
 
-        if not self.wait_for_image(self.image_wait_timeout_sec):
+        if (
+            (self.capture_images or self.enable_camera_view)
+            and not self.wait_for_image(self.image_wait_timeout_sec)
+        ):
             raise RuntimeError(f"No images received on '{self.image_topic}'.")
 
         if self.motion_enable_on_start:
@@ -402,11 +488,8 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
                 self.active_waypoint_index = index
                 self.active_target = (x_m, y_m)
                 self.get_logger().info(
-                    "Snake waypoint %03d/%03d: target=(%.3f, %.3f) m",
-                    index + 1,
-                    len(self.waypoints),
-                    x_m,
-                    y_m,
+                    f"Snake waypoint {index + 1:03d}/{len(self.waypoints):03d}: "
+                    f"target=({x_m:.3f}, {y_m:.3f}) m"
                 )
                 self.goto(
                     x_m,
@@ -429,8 +512,7 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
                     self.get_logger().warn(f"Failed to send stop command: {error}")
 
         self.get_logger().info(
-            "Snake collection complete: %d captures saved.",
-            self.capture_index,
+            f"Snake collection complete: {self.capture_index} captures saved."
         )
 
 

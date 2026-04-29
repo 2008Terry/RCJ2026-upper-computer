@@ -3,6 +3,7 @@ import sys
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -19,6 +20,7 @@ from rcj_shared_launch_params import (
 
 
 def generate_launch_description() -> LaunchDescription:
+    start_camera = LaunchConfiguration("start_camera")
     camera_index = LaunchConfiguration("camera_index")
     role = LaunchConfiguration("role")
     image_format = LaunchConfiguration("format")
@@ -55,6 +57,9 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                "start_camera", default_value="true"
+            ),  # Start camera_ros camera_node; set false to consume an existing input_topic publisher.
             DeclareLaunchArgument("camera_index", default_value="0"),  # Camera index
             DeclareLaunchArgument("role", default_value="viewfinder"),  # camera_ros role
             DeclareLaunchArgument("format", default_value="RGB888"),  # Camera pixel format
@@ -147,6 +152,7 @@ def generate_launch_description() -> LaunchDescription:
                 executable="camera_node",
                 name="camera",
                 output="screen",
+                condition=IfCondition(start_camera),
                 arguments=["--ros-args", "--log-level", "info"],
                 remappings=[
                     ("~/image_raw", input_topic),
