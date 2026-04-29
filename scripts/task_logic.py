@@ -3,6 +3,7 @@ from __future__ import annotations
 
 
 # Edit only run_task(robot) for normal competition programming.
+# Full API documentation: docs/task_logic_api.md
 # Prefer keyword arguments such as x_m=-0.40 and angle_deg=90, so each number
 # keeps its meaning at the call site.
 #
@@ -55,11 +56,27 @@ from __future__ import annotations
 #     if ball is not None:
 #         pose = robot.get_pose()
 #         robot.goto(x_m=pose.x_m + ball.x_m, y_m=pose.y_m + ball.y_m)
+# - robot.move(x_cm=..., y_cm=..., retry_delay_sec=None, timeout_sec=None)
+#     Send STM32 cmd_dis directly. x_cm/y_cm are relative odometry-frame
+#     centimeters, matching the firmware interface document.
 # - robot.sleep(duration_sec=...)
 #     First calls robot.stop(), waits for the cmd_juststop ACK, then waits for
 #     duration_sec while still spinning ROS callbacks. run_task does not execute
 #     the next command during this wait. The chassis should stay in STM32 IDLE:
 #     yaw hold remains active, but no translation command is active.
+# - robot.drive(speed_percent=..., move_angle_deg=..., head_lock=None,
+#               retry_delay_sec=None, timeout_sec=None)
+#     Send STM32 cmd_dkmotor for continuous velocity control. speed_percent is
+#     0-100, move_angle_deg is 0 front / 90 left, head_lock can be True/False.
+#     Stop it with robot.stop() or robot.drive(speed_percent=0, move_angle_deg=0).
+# - robot.read_infrared()
+#     Send cmd_infred and return an object with channel/attempts/message.
+# - robot.infrared_channel()
+#     Send cmd_infred and return only the strongest infrared channel, 1-7.
+# - robot.set_infrared_mode(mode="pt" or "tz")
+#     Send cmd_infred_mode. "pt" is plain mode, "tz" is modulated mode.
+# - robot.infrared_plain_mode() / robot.infrared_modulated_mode()
+#     Convenience wrappers for cmd_infred_mode pt/tz.
 #
 
 

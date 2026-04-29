@@ -29,6 +29,7 @@ enum class CommandKind
 {
   Distance,
   Turn,
+  DkMotor,
   Request,
   Suck,
   Conmotion,
@@ -52,6 +53,8 @@ struct Command
   CommandKind kind;
   double primary_value;
   double secondary_value;
+  double tertiary_value = 0.0;
+  bool has_tertiary_value = false;
   std::string text_value;
 };
 
@@ -117,6 +120,8 @@ std::string commandName(CommandKind kind)
     return "cmd_dis";
   case CommandKind::Turn:
     return "cmd_turn";
+  case CommandKind::DkMotor:
+    return "cmd_dkmotor";
   case CommandKind::Request:
     return "cmd_request";
   case CommandKind::Suck:
@@ -157,6 +162,15 @@ std::string buildCommandText(const Command &command)
   {
     stream << ' ' << formatNumber(command.primary_value)
            << ' ' << formatNumber(command.secondary_value);
+  }
+  else if (command.kind == CommandKind::DkMotor)
+  {
+    stream << ' ' << static_cast<int>(command.primary_value)
+           << ' ' << formatNumber(command.secondary_value);
+    if (command.has_tertiary_value)
+    {
+      stream << ' ' << static_cast<int>(command.tertiary_value);
+    }
   }
   else if (command.kind == CommandKind::Turn)
   {
@@ -253,6 +267,48 @@ Command parseCommandSpec(const std::string &spec)
           "Invalid cmd_turn command '" + spec + "'. Expected: cmd_turn <degrees>");
     }
     command.secondary_value = 0.0;
+    return command;
+  }
+
+  if (command_name == "cmd_dkmotor")
+  {
+    command.kind = CommandKind::DkMotor;
+    std::string speed_token;
+    std::string head_lock_token;
+    if (!(tokens >> speed_token >> command.secondary_value))
+    {
+      throw std::runtime_error(
+          "Invalid cmd_dkmotor command '" + spec +
+          "'. Expected: cmd_dkmotor <speed 0-100> <move_angle_deg> [head_lock]");
+    }
+
+    const int speed = parseIntegerToken(speed_token, command_name, spec);
+    if (speed < 0 || speed > 100)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_dkmotor command '" + spec + "'. Speed must be in range 0-100.");
+    }
+    command.primary_value = static_cast<double>(speed);
+
+    if (tokens >> head_lock_token)
+    {
+      if (tokens >> extra_token)
+      {
+        throw std::runtime_error(
+            "Invalid cmd_dkmotor command '" + spec +
+            "'. Expected: cmd_dkmotor <speed 0-100> <move_angle_deg> [head_lock]");
+      }
+
+      const int head_lock = parseIntegerToken(head_lock_token, command_name, spec);
+      if (head_lock != 0 && head_lock != 1)
+      {
+        throw std::runtime_error(
+            "Invalid cmd_dkmotor command '" + spec + "'. head_lock must be 0 or 1.");
+      }
+      command.tertiary_value = static_cast<double>(head_lock);
+      command.has_tertiary_value = true;
+    }
+    command.text_value.clear();
     return command;
   }
 
@@ -383,7 +439,7 @@ Command parseCommandSpec(const std::string &spec)
 
   throw std::runtime_error(
       "Unsupported STM32 command '" + command_name +
-      "'. Supported commands: cmd_dis, cmd_turn, cmd_request, cmd_suck, "
+      "'. Supported commands: cmd_dis, cmd_turn, cmd_dkmotor, cmd_request, cmd_suck, "
       "cmd_conmotion, cmd_infred, cmd_infred_mode, cmd_anglecal, cmd_mcureset, "
       "cmd_juststop");
 }
@@ -564,6 +620,22 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
     tokens.clear();
     tokens.str(command_text);
     tokens >> reply.command_name;
+    if (tokens >> status_text >> command.primary_value >> command.secondary_value &&
+        !(tokens >> extra_token))
+    {
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
+
+    tokens.clear();
+    tokens.str(command_text);
+    tokens >> reply.command_name;
     if (tokens >> command.primary_value >> command.secondary_value >> status_text &&
         !(tokens >> extra_token))
     {
@@ -593,6 +665,21 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
     tokens.clear();
     tokens.str(command_text);
     tokens >> reply.command_name;
+    if (tokens >> status_text >> command.primary_value && !(tokens >> extra_token))
+    {
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
+
+    tokens.clear();
+    tokens.str(command_text);
+    tokens >> reply.command_name;
     if (tokens >> command.primary_value >> status_text && !(tokens >> extra_token))
     {
       const auto status = parseReplyStatus(status_text);
@@ -600,6 +687,40 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
       {
         return std::nullopt;
       }
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
+  }
+  else if (reply.command_name == "cmd_dkmotor")
+  {
+    Command command{};
+    command.kind = CommandKind::DkMotor;
+    int speed = 0;
+    std::string head_lock_token;
+    if (tokens >> status_text >> speed >> command.secondary_value)
+    {
+      if (tokens >> head_lock_token)
+      {
+        if (tokens >> extra_token)
+        {
+          return std::nullopt;
+        }
+        const auto head_lock = parseIntegerToken(head_lock_token);
+        if (!head_lock.has_value() || (*head_lock != 0 && *head_lock != 1))
+        {
+          return std::nullopt;
+        }
+        command.tertiary_value = static_cast<double>(*head_lock);
+        command.has_tertiary_value = true;
+      }
+
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value() || speed < 0 || speed > 100)
+      {
+        return std::nullopt;
+      }
+      command.primary_value = static_cast<double>(speed);
       reply.command_text = buildCommandText(command);
       reply.status = *status;
       return reply;
@@ -644,8 +765,19 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
   else if (reply.command_name == "cmd_infred")
   {
     std::string value_text;
-    if (tokens >> value_text && !(tokens >> extra_token))
+    if (tokens >> value_text)
     {
+      if (value_text == "busy")
+      {
+        reply.command_text = reply.command_name;
+        reply.status = ReplyStatus::Busy;
+        return reply;
+      }
+
+      if (tokens >> extra_token)
+      {
+        return std::nullopt;
+      }
       const auto channel = parseIntegerToken(value_text);
       if (channel.has_value() && *channel >= 1 && *channel <= 7)
       {
@@ -660,10 +792,18 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
   {
     Command command{};
     command.kind = CommandKind::InfredMode;
-    if (tokens >> status_text >> command.text_value && !(tokens >> extra_token))
+    if (tokens >> status_text >> command.text_value)
     {
       const auto status = parseReplyStatus(status_text);
       if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      if (*status != ReplyStatus::Busy && (tokens >> extra_token))
+      {
+        return std::nullopt;
+      }
+      if (command.text_value != "pt" && command.text_value != "tz")
       {
         return std::nullopt;
       }

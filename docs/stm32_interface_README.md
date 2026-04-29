@@ -477,7 +477,7 @@ err arg *....
 - 如果底盘方向或角度闭环相反，检查 `BSP_CHASSIS_*_DIR`、`BSP_CHASSIS_YAW_CTRL_DIR`、`BSP_CHASSIS_GYRO_Z_DIR` 等方向宏。
 - 如果里程计距离偏差较大，调整 `BSP_CHASSIS_ODOM_FORWARD_SCALE` 和 `BSP_CHASSIS_ODOM_LEFT_SCALE`。
 
-## 维护注意事项
+## 维护注意事项 
 
 - `Core/` 下多数文件由 STM32CubeMX 生成，重新生成代码时注意保留 `USER CODE` 区域内的用户代码。
 - 新增业务逻辑优先放在 `App/` 或 `Bsp/`，避免和 CubeMX 生成代码混在一起。
