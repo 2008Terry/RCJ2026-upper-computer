@@ -36,6 +36,7 @@ enum class CommandKind
   InfredMode,
   Anglecal,
   McuReset,
+  JustStop,
 };
 
 enum class ReplyStatus
@@ -130,6 +131,8 @@ std::string commandName(CommandKind kind)
     return "cmd_anglecal";
   case CommandKind::McuReset:
     return "cmd_mcureset";
+  case CommandKind::JustStop:
+    return "cmd_juststop";
   }
   throw std::runtime_error("Unknown STM32 command kind.");
 }
@@ -365,10 +368,24 @@ Command parseCommandSpec(const std::string &spec)
     return command;
   }
 
+  if (command_name == "cmd_juststop")
+  {
+    command.kind = CommandKind::JustStop;
+    if (tokens >> extra_token)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_juststop command '" + spec + "'. Expected: cmd_juststop");
+    }
+    command.primary_value = 0.0;
+    command.secondary_value = 0.0;
+    return command;
+  }
+
   throw std::runtime_error(
       "Unsupported STM32 command '" + command_name +
       "'. Supported commands: cmd_dis, cmd_turn, cmd_request, cmd_suck, "
-      "cmd_conmotion, cmd_infred, cmd_infred_mode, cmd_anglecal, cmd_mcureset");
+      "cmd_conmotion, cmd_infred, cmd_infred_mode, cmd_anglecal, cmd_mcureset, "
+      "cmd_juststop");
 }
 
 std::string buildPacket(const Command &command)
@@ -656,7 +673,8 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
     }
   }
   else if (reply.command_name == "cmd_anglecal" ||
-           reply.command_name == "cmd_mcureset")
+           reply.command_name == "cmd_mcureset" ||
+           reply.command_name == "cmd_juststop")
   {
     if (tokens >> status_text && !(tokens >> extra_token))
     {
@@ -1417,7 +1435,7 @@ private:
       return;
     }
 
-    if (isSuccessStatus(parsed_reply.status))
+    if (parsed_reply.status == ReplyStatus::Done)
     {
       if (enable_serial_log_)
       {
@@ -1430,7 +1448,19 @@ private:
       finishActiveMotionCommand(
           true,
           replyStatusText(parsed_reply.status),
-          "STM32 command acknowledged.");
+          "STM32 motion command completed.");
+      return;
+    }
+
+    if (parsed_reply.status == ReplyStatus::Ok)
+    {
+      if (enable_serial_log_)
+      {
+        RCLCPP_INFO(
+            get_logger(),
+            "STM32 accepted motion command '%s'; waiting for done.",
+            active_motion_command_->command_text.c_str());
+      }
       return;
     }
 

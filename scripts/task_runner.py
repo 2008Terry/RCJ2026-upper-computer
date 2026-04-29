@@ -6,25 +6,25 @@ from typing import Optional
 
 import rclpy
 
-from goto_point import GotoNavigator
+from competition_robot import CompetitionRobot
 from task_logic import run_task
 
 
 def main(args: Optional[list[str]] = None) -> int:
     rclpy.init(args=args)
-    nav = GotoNavigator()
+    robot = CompetitionRobot()
     exit_code = 0
 
     try:
-        run_task(nav)
+        run_task(robot)
     except KeyboardInterrupt:
-        nav.get_logger().warn("Task interrupted by user.")
+        robot.get_logger().warn("Task interrupted by user.")
         exit_code = 130
     except Exception as error:
-        nav.get_logger().error(f"Task failed: {error}")
+        robot.get_logger().error(f"Task failed: {error}")
         exit_code = 1
     finally:
-        nav.destroy_node()
+        robot.destroy_node()
         rclpy.shutdown()
 
     return exit_code
