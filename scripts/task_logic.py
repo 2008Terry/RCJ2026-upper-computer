@@ -77,7 +77,7 @@ def run_task(robot) -> None:
     # pose = robot.get_pose()
     # print(pose.x_m, pose.y_m, pose.yaw_deg)
     
-    robot.suck_on(speed_percent=15)
+    robot.suck_on(speed_percent=0)
     robot.motion_disable()
     
     
