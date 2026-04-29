@@ -35,16 +35,22 @@ For the full coordinate-frame contract and conversion formulas, see
 refer to that document.
 
 `CompetitionRobot` also accepts `yaw_zero_map_degrees` as a ROS parameter. Keep
-it equal to the `amcl_fusion` value so `ball.turn_angle_deg` matches STM32 yaw.
+it equal to the `amcl_fusion` value so `ball.absolute_angle_deg` matches STM32
+yaw.
+With the default `0.0`, STM32 yaw `0 deg` means the robot faces map-up,
+`90 deg` means map-left, and `-90 deg` means map-right.
 
 - `robot.goto(...)` uses the ROS map frame in meters.
 - `robot.get_pose()` returns the current ROS map-frame pose in meters and yaw in
-  ROS map convention: `0 deg` is `+x`, `90 deg` is `+y`.
+  ROS map convention: `0 deg` is map `+x`/right, `90 deg` is map `+y`/up. This
+  is not STM32 yaw.
 - `robot.move(...)` sends STM32 `cmd_dis` directly, so its `x_cm` and `y_cm`
-  values are STM32 odometry-frame relative centimeters.
+  values are field-fixed STM32 centimeters: `x_cm > 0` moves map-left and
+  `y_cm > 0` moves map-down.
 - `robot.drive(...)` sends STM32 `cmd_dkmotor` directly. Its motion angle uses
   the firmware convention: `0 deg` is robot front, `90 deg` is robot left.
-- STM32 yaw angles used by `robot.turn(...)` are firmware yaw angles in degrees.
+- STM32 yaw angles used by `robot.turn(...)` are firmware yaw angles in degrees:
+  `0 deg` is map-up, `90 deg` is map-left, and `-90 deg` is map-right.
 
 ## Navigation And Motion
 
@@ -95,8 +101,9 @@ robot.move(x_cm=10, y_cm=0, retry_delay_sec=None, timeout_sec=None, wait_sec=0.0
 ```
 
 Sends STM32 `cmd_dis <x_cm> <y_cm>` directly through the `/stm32/motion` action.
-This is a relative movement in the STM32 odometry frame, in centimeters. During
-the movement, the STM32 firmware holds the current yaw.
+This is a field-fixed relative movement in centimeters: `x_cm > 0` is map-left
+and `y_cm > 0` is map-down. It is not robot-front/left body motion. During the
+movement, the STM32 firmware holds the current yaw.
 
 Use this when you want the exact firmware-level relative movement command. Use
 `robot.goto(...)` when you want absolute map-frame navigation using AMCL pose
@@ -113,8 +120,8 @@ robot.turn(angle_deg=90, retry_delay_sec=None, timeout_sec=None, wait_sec=0.0)
 ```
 
 Sends STM32 `cmd_turn <angle_deg>` through the `/stm32/motion` action. The target
-is an absolute STM32 yaw angle in degrees. The firmware normalizes the target
-angle.
+is an absolute STM32 yaw angle in degrees: `0 deg` is map-up, `90 deg` is
+map-left, and `-90 deg` is map-right. The firmware normalizes the target angle.
 
 Returns `True` after the STM32 reports the turn is done. Retries until success
 or ROS shutdown.
@@ -245,6 +252,10 @@ Sends STM32 `cmd_request` and returns a `Stm32State` object:
 - `state.attempts`: gateway send attempts used for this command.
 - `state.message`: gateway summary text.
 
+`state.dx/state.dy` use the same field-fixed axes as `cmd_dis`: positive `dx`
+is map-left and positive `dy` is map-down. `state.theta` is STM32 yaw, not ROS
+map yaw.
+
 The firmware defines the first request as the reference point, so its deltas are
 normally zero.
 
@@ -315,7 +326,8 @@ Reads the latest `/amcl_pose` pose and returns a `RobotPose` object:
 - `pose.x_m`: map-frame x position in meters.
 - `pose.y_m`: map-frame y position in meters.
 - `pose.yaw_rad`: map-frame yaw in radians.
-- `pose.yaw_deg`: map-frame yaw in degrees.
+- `pose.yaw_deg`: ROS map-frame yaw in degrees. `0 deg` is map-right/+x and
+  `90 deg` is map-up/+y; this is not STM32 yaw.
 
 If no pose is available before `timeout_sec`, the function raises `GotoError`.
 If `timeout_sec` is omitted, it waits until a pose is available.
@@ -347,16 +359,15 @@ Returns a `BallDetection` object:
 - `ball.absolute_x_m`, `ball.absolute_y_m`, `ball.absolute_z_m`: ball position
   in the map frame, in meters.
 - `ball.local_x_m`, `ball.local_y_m`, `ball.local_z_m`: raw orange-ball detector
-  coordinates, in meters. Detector `+x` is camera-image down, and detector `+y`
-  is camera-image left.
+  coordinates, in meters. Detector `+x` is camera-image down / robot rear, and
+  detector `+y` is camera-image left / robot left.
 - `ball.base_x_m`, `ball.base_y_m`, `ball.base_z_m`: ball position converted to
   robot `base_link`, in meters. `+x` is robot front, and `+y` is robot left.
 - `ball.angle_deg`: relative ball bearing in the robot/base-link frame, in degrees.
   `0 deg` is robot front, `90 deg` is robot left, and `-90 deg` is robot right.
-- `ball.absolute_map_angle_deg`: ROS map-frame yaw toward the ball, in degrees.
-  This is not the angle to pass to `robot.turn(...)`.
-- `ball.turn_angle_deg`: STM32 firmware yaw target toward the ball, in degrees.
-  Use this with `robot.turn(angle_deg=ball.turn_angle_deg)`.
+- `ball.absolute_angle_deg`: STM32 firmware yaw target toward the ball, in degrees.
+  This is the competition "absolute angle"; use it with
+  `robot.turn(angle_deg=ball.absolute_angle_deg)`.
 - `ball.confidence`: detector confidence.
 - `ball.stamp_sec`: detection message timestamp in seconds.
 

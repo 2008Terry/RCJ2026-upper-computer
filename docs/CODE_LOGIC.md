@@ -178,8 +178,10 @@ CRC 使用 CRC16-CCITT，初值 `0xFFFF`，计算范围是 `*` 前面的 payload
 
 主要命令：
 
-- `cmd_dis x y`：相对当前位置移动，单位 cm。
-- `cmd_turn yaw`：转到指定 yaw 角度。
+- `cmd_dis x y`：按场地固定 STM32 位移轴相对移动，单位 cm；`x>0` 为地图左边，
+  `y>0` 为地图下边。
+- `cmd_turn yaw`：转到指定 STM32 yaw 角度；默认 `0` 为地图上方，`90` 为地图左边，
+  `-90` 为地图右边。
 - `cmd_dkmotor speed angle [head_lock]`：持续速度模式，速度为 `0-100` 映射值，角度为运动方向，`head_lock` 默认 `1`。
 - `cmd_juststop`：停止持续运动，但保持转向环。
 - `cmd_conmotion 0/1`：禁用/使能底盘运动功能。
@@ -188,7 +190,8 @@ CRC 使用 CRC16-CCITT，初值 `0xFFFF`，计算范围是 `*` 前面的 payload
 - `cmd_mcureset`：回复后复位 MCU。
 - `cmd_infred`：读取 BE-1732 当前最强红外通道。
 - `cmd_infred_mode pt/tz`：切换 BE-1732 普通检测/调制检测模式。
-- `cmd_request`：返回最近一次运动请求相对当前的偏差。
+- `cmd_request`：返回最近一次查询以来的 STM32 位移/yaw 增量；`dx>0` 为地图左边，
+  `dy>0` 为地图下边。
 
 `cmd_dis` 和 `cmd_turn` 是有完成事件的命令。底盘任务完成后，`AppChassisTask_ConsumeDoneEvent()` 被 `AppPiComm_Task()` 消费，然后串口发送 `done`。
 

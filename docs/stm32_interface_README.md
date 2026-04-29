@@ -177,7 +177,11 @@ uint16_t crc16_ccitt(const uint8_t *data, uint16_t size)
 
 ### `cmd_dis`
 
-控制底盘按当前里程计坐标做相对位移，单位为 cm。执行过程中保持当前 yaw。
+控制底盘按场地固定 STM32 位移轴做相对位移，单位为 cm。执行过程中保持当前
+yaw。这里的 `x/y` 不是机器人自身前后左右，也不是 ROS map `x/y`：
+
+- `x_cm > 0`：地图左边。
+- `y_cm > 0`：地图下边。
 
 ```text
 cmd_dis <x_cm> <y_cm> *<CRC16>
@@ -189,7 +193,7 @@ cmd_dis <x_cm> <y_cm> *<CRC16>
 cmd_dis 10 0 *B37E
 ```
 
-含义：向里程计 x 方向移动 10 cm，y 方向不变。
+含义：向地图左边移动 10 cm，y 方向不变。
 
 可能回复：
 
@@ -203,6 +207,7 @@ err arg *....
 ### `cmd_turn`
 
 控制底盘转到绝对目标 yaw 角，单位为度。目标角会被归一化到 0-360 度。
+默认 yaw 约定是 `0 deg` 朝地图上方，`90 deg` 朝地图左边，`-90 deg` 朝地图右边。
 
 ```text
 cmd_turn <target_yaw_deg> *<CRC16>
@@ -341,10 +346,11 @@ cmd_request <dx_cm> <dy_cm> <dyaw_deg> <yaw_deg> *<CRC16>
 
 字段说明：
 
-- `dx_cm`：距离上次查询的 x 位移，单位 cm。
-- `dy_cm`：距离上次查询的 y 位移，单位 cm。
+- `dx_cm`：距离上次查询的 x 位移，单位 cm。正方向为地图左边。
+- `dy_cm`：距离上次查询的 y 位移，单位 cm。正方向为地图下边。
 - `dyaw_deg`：距离上次查询的 yaw 变化，单位度。
-- `yaw_deg`：当前 yaw，单位度。
+- `yaw_deg`：当前 STM32 yaw，单位度。默认 `0 deg` 朝地图上方，
+  `90 deg` 朝地图左边，`-90 deg` 朝地图右边。
 
 第一次查询时，`dx_cm`、`dy_cm`、`dyaw_deg` 返回 0，随后建立增量参考点。
 

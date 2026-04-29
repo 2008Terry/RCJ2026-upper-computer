@@ -87,6 +87,23 @@ bool isValidDistanceTransformMaskSize(int value) {
     return value == 3 || value == 5;
 }
 
+double normalizeAngle(double angle_rad) {
+    while (angle_rad > M_PI) {
+        angle_rad -= 2.0 * M_PI;
+    }
+    while (angle_rad < -M_PI) {
+        angle_rad += 2.0 * M_PI;
+    }
+    return angle_rad;
+}
+
+double fieldYawDegreesToRosMapRadians(
+    double yaw_degrees,
+    double zero_map_degrees) {
+    return normalizeAngle(
+        (90.0 + zero_map_degrees + yaw_degrees) * (M_PI / 180.0));
+}
+
 }  // namespace
 
 class TopdownPfLocalizationNodeV2 : public rclcpp::Node {
@@ -116,7 +133,10 @@ public:
             pf_ = std::make_unique<rcj_loc::ParticleFilterV2>(filter_config_);
 
             if (use_fake_yaw_) {
-                current_yaw_rad_ = fake_yaw_degrees_ * (M_PI / 180.0);
+                current_yaw_rad_ =
+                    fieldYawDegreesToRosMapRadians(
+                        fake_yaw_degrees_,
+                        yaw_zero_map_degrees_);
                 fake_yaw_pub_ =
                     this->create_publisher<std_msgs::msg::Float32>(yaw_topic_, 10);
                 fake_yaw_timer_ = this->create_wall_timer(
@@ -125,7 +145,7 @@ public:
                 publishFakeYaw();
                 RCLCPP_INFO(
                     this->get_logger(),
-                    "Using fixed fake yaw: %.3f degrees on '%s'.",
+                    "Using fixed fake STM32 yaw: %.3f degrees on '%s'.",
                     fake_yaw_degrees_,
                     yaw_topic_.c_str());
             } else {
@@ -194,6 +214,7 @@ private:
         this->declare_parameter<std::string>("yaw_topic", "/robot/yaw");
         this->declare_parameter("use_fake_yaw", false);
         this->declare_parameter("fake_yaw_degrees", 0.0);
+        this->declare_parameter("yaw_zero_map_degrees", 0.0);
 
         this->declare_parameter("sigma_hit", 0.10);
         this->declare_parameter("noise_xy", 0.05);
@@ -226,9 +247,15 @@ private:
         yaw_topic_ = this->get_parameter("yaw_topic").as_string();
         use_fake_yaw_ = this->get_parameter("use_fake_yaw").as_bool();
         fake_yaw_degrees_ = this->get_parameter("fake_yaw_degrees").as_double();
+        yaw_zero_map_degrees_ =
+            this->get_parameter("yaw_zero_map_degrees").as_double();
         if (!std::isfinite(fake_yaw_degrees_)) {
             throw std::runtime_error(
                 "Parameter 'fake_yaw_degrees' must be a finite number.");
+        }
+        if (!std::isfinite(yaw_zero_map_degrees_)) {
+            throw std::runtime_error(
+                "Parameter 'yaw_zero_map_degrees' must be a finite number.");
         }
 
         filter_config_.num_particles =
@@ -422,6 +449,7 @@ private:
                 name == "publish_debug_pointcloud" || name == "debug_pointcloud_topic" ||
                 name == "map_topic" || name == "yaw_topic" ||
                 name == "use_fake_yaw" || name == "fake_yaw_degrees" ||
+                name == "yaw_zero_map_degrees" ||
                 name == "publish_processing_time" || name == "processing_time_topic") {
                 result.successful = false;
                 result.reason = "Parameter '" + name + "' requires restarting the node.";
@@ -491,7 +519,10 @@ private:
     }
 
     void yawCallback(const std_msgs::msg::Float32::SharedPtr msg) {
-        current_yaw_rad_ = static_cast<double>(msg->data) * (M_PI / 180.0);
+        current_yaw_rad_ =
+            fieldYawDegreesToRosMapRadians(
+                static_cast<double>(msg->data),
+                yaw_zero_map_degrees_);
     }
 
     void publishFakeYaw() {
@@ -725,6 +756,7 @@ private:
     std::string yaw_topic_;
     bool use_fake_yaw_ = false;
     double fake_yaw_degrees_ = 0.0;
+    double yaw_zero_map_degrees_ = 0.0;
     double current_yaw_rad_ = 0.0;
     bool map_received_ = false;
     int filter_period_ms_ = 100;

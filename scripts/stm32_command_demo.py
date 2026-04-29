@@ -41,9 +41,24 @@ def main() -> int:
     parser.add_argument("--port", default="/dev/ttyACM0")
     parser.add_argument("--baudrate", type=int, default=115200)
     parser.add_argument("--timeout-sec", type=float, default=1.0)
-    parser.add_argument("--x-coord", type=float, default=100.0)
-    parser.add_argument("--y-coord", type=float, default=-100.0)
-    parser.add_argument("--degrees", type=float, default=90.0)
+    parser.add_argument(
+        "--x-coord",
+        type=float,
+        default=100.0,
+        help="cmd_dis x in cm; positive is map-left.",
+    )
+    parser.add_argument(
+        "--y-coord",
+        type=float,
+        default=-100.0,
+        help="cmd_dis y in cm; positive is map-down.",
+    )
+    parser.add_argument(
+        "--degrees",
+        type=float,
+        default=90.0,
+        help="cmd_turn STM32 yaw in degrees; 0 is map-up, 90 is map-left.",
+    )
     parser.add_argument(
         "--send",
         action="store_true",

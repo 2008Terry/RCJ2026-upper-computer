@@ -55,8 +55,7 @@ class BallDetection:
     local_y_m: float
     local_z_m: float
     angle_deg: float
-    absolute_map_angle_deg: float
-    turn_angle_deg: float
+    absolute_angle_deg: float
     confidence: float
     stamp_sec: float
 
@@ -433,11 +432,10 @@ class CompetitionRobot(GotoNavigator):
             local_y_m=local_y_m,
             local_z_m=local_z_m,
             angle_deg=self._ball_angle_deg(base_x_m, base_y_m),
-            absolute_map_angle_deg=self._ball_absolute_map_angle_deg(
+            absolute_angle_deg=self._ball_absolute_angle_deg(
                 base_x_m,
                 base_y_m,
             ),
-            turn_angle_deg=self._ball_turn_angle_deg(base_x_m, base_y_m),
             confidence=float(msg.confidence),
             stamp_sec=float(msg.header.stamp.sec)
             + float(msg.header.stamp.nanosec) * 1e-9,
@@ -455,7 +453,7 @@ class CompetitionRobot(GotoNavigator):
     def _ball_angle_deg(base_x_m: float, base_y_m: float) -> float:
         return math.degrees(math.atan2(base_y_m, base_x_m))
 
-    def _ball_absolute_map_angle_deg(self, base_x_m: float, base_y_m: float) -> float:
+    def _ball_ros_map_angle_deg(self, base_x_m: float, base_y_m: float) -> float:
         if self._latest_pose_yaw_rad is None:
             return math.nan
         robot_yaw_deg = math.degrees(self._latest_pose_yaw_rad)
@@ -463,13 +461,13 @@ class CompetitionRobot(GotoNavigator):
             robot_yaw_deg + self._ball_angle_deg(base_x_m, base_y_m)
         )
 
-    def _ball_turn_angle_deg(self, base_x_m: float, base_y_m: float) -> float:
-        absolute_map_angle_deg = self._ball_absolute_map_angle_deg(
+    def _ball_absolute_angle_deg(self, base_x_m: float, base_y_m: float) -> float:
+        ros_map_angle_deg = self._ball_ros_map_angle_deg(
             base_x_m,
             base_y_m,
         )
         return self._normalize_angle_deg(
-            absolute_map_angle_deg - 90.0 - self.yaw_zero_map_degrees
+            ros_map_angle_deg - 90.0 - self.yaw_zero_map_degrees
         )
 
     @staticmethod

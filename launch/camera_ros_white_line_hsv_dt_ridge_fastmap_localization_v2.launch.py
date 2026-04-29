@@ -51,6 +51,7 @@ def generate_launch_description():
     use_fake_yaw = LaunchConfiguration("use_fake_yaw")
     yaw_topic = LaunchConfiguration("yaw_topic")
     fake_yaw_degrees = LaunchConfiguration("fake_yaw_degrees")
+    yaw_zero_map_degrees = LaunchConfiguration("yaw_zero_map_degrees")
     map_topic = LaunchConfiguration("map_topic")
     enable_localization = LaunchConfiguration("enable_localization")
     enable_map_server = LaunchConfiguration("enable_map_server")
@@ -248,7 +249,10 @@ def generate_launch_description():
             DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Robot yaw topic
             DeclareLaunchArgument(
                 "fake_yaw_degrees", default_value="0.0"
-            ),  # Fixed yaw angle used when use_fake_yaw is true
+            ),  # Fixed STM32 yaw angle used when use_fake_yaw is true
+            DeclareLaunchArgument(
+                "yaw_zero_map_degrees", default_value="0.0"
+            ),  # STM32 yaw zero offset relative to map-up
             DeclareLaunchArgument(
                 "yaw_enable_publish_log", default_value="false"
             ),  # Deprecated: fake yaw is handled inside the localization node
@@ -366,7 +370,10 @@ def generate_launch_description():
                         ),  # Whether to use fixed yaw instead of yaw topic
                         "fake_yaw_degrees": ParameterValue(
                             fake_yaw_degrees, value_type=float
-                        ),  # Fixed yaw angle when use_fake_yaw is true
+                        ),  # Fixed STM32 yaw angle when use_fake_yaw is true
+                        "yaw_zero_map_degrees": ParameterValue(
+                            yaw_zero_map_degrees, value_type=float
+                        ),  # STM32 yaw zero offset relative to map-up
                         "sigma_hit": ParameterValue(
                             sigma_hit, value_type=float
                         ),  # Likelihood-field sigma
