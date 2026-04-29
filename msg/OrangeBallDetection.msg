@@ -1,0 +1,6 @@
+std_msgs/Header header
+bool detected
+float32 confidence
+geometry_msgs/Point ball_center_m
+geometry_msgs/Point ball_center_raw_px
+geometry_msgs/Point ball_top_raw_px

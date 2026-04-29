@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 from typing import Optional
 
 import rclpy
 
 from goto_point import GotoError, GotoNavigator, _format_number
+from rcj_localization.msg import OrangeBallDetection
 from rcj_localization.srv import Stm32Command
 
 
@@ -22,6 +24,18 @@ class Stm32State:
     message: str
 
 
+@dataclass(frozen=True)
+class BallDetection:
+    x_m: float
+    y_m: float
+    z_m: float
+    local_x_m: float
+    local_y_m: float
+    local_z_m: float
+    confidence: float
+    stamp_sec: float
+
+
 class CompetitionRobot(GotoNavigator):
     """High-level API for writing competition task logic in Python."""
 
@@ -29,6 +43,7 @@ class CompetitionRobot(GotoNavigator):
         super().__init__()
 
         self.declare_parameter("stm32_command_service", "/stm32/send_command")
+        self.declare_parameter("ball_detection_topic", "/orange_ball_detector/detection")
         self.declare_parameter("command_call_timeout_sec", 1.0)
         self.declare_parameter("command_retry_delay_sec", 0.1)
         self.declare_parameter("command_service_wait_sec", 1.0)
@@ -36,6 +51,9 @@ class CompetitionRobot(GotoNavigator):
 
         self.stm32_command_service = str(
             self.get_parameter("stm32_command_service").value
+        )
+        self.ball_detection_topic = str(
+            self.get_parameter("ball_detection_topic").value
         )
         self.command_call_timeout_sec = self._positive_float(
             "command_call_timeout_sec",
@@ -56,53 +74,66 @@ class CompetitionRobot(GotoNavigator):
 
         if not self.stm32_command_service:
             raise RuntimeError("Parameter 'stm32_command_service' must not be empty.")
+        if not self.ball_detection_topic:
+            raise RuntimeError("Parameter 'ball_detection_topic' must not be empty.")
 
         self._command_client = self.create_client(
             Stm32Command, self.stm32_command_service
         )
+        self._latest_ball_detection: Optional[OrangeBallDetection] = None
+        self._latest_ball_detection_time: Optional[float] = None
+        self._ball_detection_sub = self.create_subscription(
+            OrangeBallDetection,
+            self.ball_detection_topic,
+            self._ball_detection_callback,
+            10,
+        )
         self.get_logger().info(
             "CompetitionRobot ready: "
             f"command_service='{self.stm32_command_service}', "
-            f"motion_action='{self.motion_action_name}'"
+            f"motion_action='{self.motion_action_name}', "
+            f"ball_detection_topic='{self.ball_detection_topic}'"
         )
 
     def turn(
         self,
-        degrees: float,
+        *,
+        angle_deg: float,
         retry_delay_sec: Optional[float] = None,
-        motion_timeout_sec: Optional[float] = None,
+        timeout_sec: Optional[float] = None,
     ) -> bool:
-        yaw_degrees = float(degrees)
-        if not math.isfinite(yaw_degrees):
-            raise ValueError("turn degrees must be finite.")
-        command = f"cmd_turn {_format_number(yaw_degrees)}"
+        target_angle_deg = float(angle_deg)
+        if not math.isfinite(target_angle_deg):
+            raise ValueError("angle_deg must be finite.")
+        command = f"cmd_turn {_format_number(target_angle_deg)}"
         return self._send_motion_until_success(
             command,
             retry_delay_sec=retry_delay_sec,
-            motion_timeout_sec=motion_timeout_sec,
+            timeout_sec=timeout_sec,
         )
 
     def suck(
         self,
-        speed: int,
+        *,
+        speed_percent: int,
         retry_delay_sec: Optional[float] = None,
         timeout_sec: Optional[float] = None,
     ) -> bool:
-        speed_int = int(speed)
-        if speed_int < 0 or speed_int > 100:
-            raise ValueError("suck speed must be in range 0-100.")
+        speed_percent_int = int(speed_percent)
+        if speed_percent_int < 0 or speed_percent_int > 100:
+            raise ValueError("speed_percent must be in range 0-100.")
         self._send_command_until_success(
-            f"cmd_suck {speed_int}",
+            f"cmd_suck {speed_percent_int}",
             retry_delay_sec=retry_delay_sec,
             timeout_sec=timeout_sec,
         )
         return True
 
-    def suck_on(self, speed: int = 100) -> bool:
-        return self.suck(speed)
+    def suck_on(self, *, speed_percent: int = 100) -> bool:
+        return self.suck(speed_percent=speed_percent)
 
     def suck_off(self) -> bool:
-        return self.suck(0)
+        return self.suck(speed_percent=0)
 
     def reset_yaw(self) -> bool:
         self._send_command_until_success("cmd_anglecal")
@@ -135,21 +166,100 @@ class CompetitionRobot(GotoNavigator):
             message=str(response.message),
         )
 
-    def sleep(self, seconds: float) -> None:
-        self._sleep_with_spin(self._non_negative_float("seconds", seconds))
+    def find_ball(
+        self,
+        *,
+        timeout_sec: float = 1.0,
+        min_confidence: float = 0.0,
+    ) -> Optional[BallDetection]:
+        timeout = self._non_negative_float("timeout_sec", timeout_sec)
+        min_confidence_value = self._non_negative_float(
+            "min_confidence", min_confidence
+        )
+        start_time = time.monotonic()
+        deadline = time.monotonic() + timeout
+        min_detection_time = None if timeout == 0.0 else start_time
+
+        while rclpy.ok():
+            detection = self._current_ball_detection(
+                min_confidence_value, min_detection_time=min_detection_time
+            )
+            if detection is not None:
+                return detection
+            if timeout == 0.0 or time.monotonic() >= deadline:
+                return None
+            self._spin_once_until(deadline)
+
+        raise RuntimeError("ROS shutdown while waiting for orange ball detection.")
+
+    def sleep(self, *, duration_sec: float) -> None:
+        self.stop()
+        self._sleep_with_spin(
+            self._non_negative_float("duration_sec", duration_sec)
+        )
+
+    def _ball_detection_callback(self, msg: OrangeBallDetection) -> None:
+        self._latest_ball_detection = msg
+        self._latest_ball_detection_time = time.monotonic()
+
+    def _current_ball_detection(
+        self,
+        min_confidence: float,
+        min_detection_time: Optional[float] = None,
+    ) -> Optional[BallDetection]:
+        msg = self._latest_ball_detection
+        if (
+            msg is None
+            or self._latest_ball_detection_time is None
+            or self._latest_pose_yaw_rad is None
+            or not msg.detected
+            or float(msg.confidence) < min_confidence
+            or (
+                min_detection_time is not None
+                and self._latest_ball_detection_time < min_detection_time
+            )
+        ):
+            return None
+
+        return BallDetection(
+            *self._ball_base_link_to_map_delta(
+                float(msg.ball_center_m.x),
+                float(msg.ball_center_m.y),
+                float(msg.ball_center_m.z),
+            ),
+            local_x_m=float(msg.ball_center_m.x),
+            local_y_m=float(msg.ball_center_m.y),
+            local_z_m=float(msg.ball_center_m.z),
+            confidence=float(msg.confidence),
+            stamp_sec=float(msg.header.stamp.sec)
+            + float(msg.header.stamp.nanosec) * 1e-9,
+        )
+
+    def _ball_base_link_to_map_delta(
+        self, local_x_m: float, local_y_m: float, local_z_m: float
+    ) -> tuple[float, float, float]:
+        if self._latest_pose_yaw_rad is None:
+            return math.nan, math.nan, math.nan
+        cos_yaw = math.cos(self._latest_pose_yaw_rad)
+        sin_yaw = math.sin(self._latest_pose_yaw_rad)
+        return (
+            (local_x_m * cos_yaw) - (local_y_m * sin_yaw),
+            (local_x_m * sin_yaw) + (local_y_m * cos_yaw),
+            local_z_m,
+        )
 
     def _send_motion_until_success(
         self,
         command: str,
         retry_delay_sec: Optional[float] = None,
-        motion_timeout_sec: Optional[float] = None,
+        timeout_sec: Optional[float] = None,
     ) -> bool:
         retry_delay = self._retry_delay(retry_delay_sec)
         command_timeout = self._positive_float(
-            "motion_timeout_sec",
+            "timeout_sec",
             self.motion_retry_timeout_sec
-            if motion_timeout_sec is None
-            else motion_timeout_sec,
+            if timeout_sec is None
+            else timeout_sec,
         )
         attempt = 1
 

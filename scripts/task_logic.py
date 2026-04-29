@@ -1,14 +1,83 @@
 from __future__ import annotations
 
 
+# Edit only run_task(robot) for normal competition programming.
+# Prefer keyword arguments such as x_m=-0.40 and angle_deg=90, so each number
+# keeps its meaning at the call site.
+#
+# Available functions:
+# - robot.goto(x_m=..., y_m=..., goal_tolerance_m=None, max_step_m=None,
+#              settle_sec=None, max_iterations=None, goto_timeout_sec=None,
+#              pose_wait_timeout_sec=None, action_server_wait_sec=None)
+#     Go to an absolute map-frame target. x_m/y_m are meters from /amcl_pose.
+#     If the optional parameters are omitted, defaults match the old
+#     task_sequence.py settings:
+#     goal_tolerance_m=0.02, max_step_m=0.8, settle_sec=0.7,
+#     max_iterations=25, goto_timeout_sec=40.0,
+#     pose_wait_timeout_sec=5.0, action_server_wait_sec=10.0.
+#     Override per call when needed, for example:
+#     robot.goto(x_m=0.40, y_m=-0.60, goal_tolerance_m=0.03, max_step_m=0.5)
+# - robot.turn(angle_deg=..., retry_delay_sec=None, timeout_sec=None)
+#     Turn to an STM32 yaw angle in degrees. Retries until the gateway reports
+#     motion done.
+# - robot.suck(speed_percent=..., retry_delay_sec=None, timeout_sec=None)
+#     Set suction speed. speed_percent is 0-100. Returns after a successful ACK.
+# - robot.suck_on(speed_percent=100)
+#     Turn suction on. Default is 100%.
+# - robot.suck_off()
+#     Turn suction off. Equivalent to robot.suck(speed_percent=0).
+# - robot.reset_yaw()
+#     Reset STM32 yaw zero. Sends cmd_anglecal.
+# - robot.reset_mcu()
+#     Reset the STM32. Sends cmd_mcureset.
+# - robot.motion_enable() / robot.motion_disable()
+#     Enable or disable STM32 chassis motion. Sends cmd_conmotion 1/0.
+# - robot.stop()
+#     Stop continuous chassis motion while keeping the yaw-hold loop active.
+#     Sends cmd_juststop.
+# - robot.request_state()
+#     Read the latest STM32 motion error/state. Returns
+#     state.dx/state.dy/state.dtheta/state.theta.
+# - robot.find_ball(timeout_sec=1.0, min_confidence=0.0)
+#     Reads /orange_ball_detector/detection, where detected/confidence/position
+#     are published together from the same camera frame. Returns the latest valid
+#     detection, or None if no ball is detected before timeout_sec. The returned
+#     object has ball.x_m/ball.y_m/ball.z_m as map-axis relative offsets from
+#     the robot. Add them to the current /amcl_pose x/y to get the ball's
+#     absolute map position. ball.local_x_m/local_y_m/local_z_m keep the raw
+#     base_link detection, and ball.confidence is the detector confidence.
+#     Example: ball = robot.find_ball(timeout_sec=1.0)
+#     if ball is not None:
+#         robot_x, robot_y = robot.wait_for_pose()
+#         robot.goto(x_m=robot_x + ball.x_m, y_m=robot_y + ball.y_m)
+# - robot.sleep(duration_sec=...)
+#     First calls robot.stop(), waits for the cmd_juststop ACK, then waits for
+#     duration_sec while still spinning ROS callbacks. run_task does not execute
+#     the next command during this wait. The chassis should stay in STM32 IDLE:
+#     yaw hold remains active, but no translation command is active.
+#
+
+
 def run_task(robot) -> None:
     """Edit this function to write the competition task sequence."""
 
-    robot.reset_yaw()
-    robot.motion_enable()
+    # robot.reset_yaw()
+    # robot.motion_enable()
 
     # Example task sequence. Coordinates are absolute map-frame meters.
-    robot.suck_on(100)
-    robot.goto(-0.40, -0.60)
-    robot.turn(90)
-    robot.suck_off()
+    # ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5)
+    # if ball is not None:
+    #     print(ball.x_m, ball.y_m, ball.z_m, ball.confidence)
+
+    robot.suck_on(speed_percent=10)
+    # robot.motion_disable()
+    # robot.sleep(duration_sec=1.0)
+    # robot.suck_on(speed_percent=0)
+    
+    # robot.goto(x_m=-0.40, y_m=-0.60)
+    # robot.goto(x_m=0.40, y_m=-0.60)
+    # robot.goto(x_m=-0.40, y_m=0.60)
+    # robot.goto(x_m=0.40, y_m=0.60)
+    
+    # robot.turn(angle_deg=-90)
+    # robot.suck_off()

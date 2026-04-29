@@ -30,13 +30,13 @@ class GotoNavigator(Node):
 
         self.declare_parameter("pose_topic", "/amcl_pose")
         self.declare_parameter("motion_action_name", "/stm32/motion")
-        self.declare_parameter("goal_tolerance_m", 0.03)
-        self.declare_parameter("max_step_m", 0.40)
-        self.declare_parameter("settle_sec", 0.5)
-        self.declare_parameter("max_iterations", 20)
-        self.declare_parameter("goto_timeout_sec", 30.0)
+        self.declare_parameter("goal_tolerance_m", 0.02)
+        self.declare_parameter("max_step_m", 0.80)
+        self.declare_parameter("settle_sec", 0.7)
+        self.declare_parameter("max_iterations", 25)
+        self.declare_parameter("goto_timeout_sec", 40.0)
         self.declare_parameter("pose_wait_timeout_sec", 5.0)
-        self.declare_parameter("action_server_wait_sec", 2.0)
+        self.declare_parameter("action_server_wait_sec", 10.0)
 
         self.pose_topic = str(self.get_parameter("pose_topic").value)
         self.motion_action_name = str(self.get_parameter("motion_action_name").value)
@@ -55,6 +55,7 @@ class GotoNavigator(Node):
         self._validate_parameters()
 
         self._latest_pose_xy: Optional[Tuple[float, float]] = None
+        self._latest_pose_yaw_rad: Optional[float] = None
         self._latest_pose_received_time: Optional[float] = None
         self._motion_in_flight = False
 
@@ -80,8 +81,9 @@ class GotoNavigator(Node):
 
     def goto(
         self,
-        target_x_m: float,
-        target_y_m: float,
+        *,
+        x_m: float,
+        y_m: float,
         tolerance_m: Optional[float] = None,
         goal_tolerance_m: Optional[float] = None,
         max_step_m: Optional[float] = None,
@@ -91,8 +93,8 @@ class GotoNavigator(Node):
         pose_wait_timeout_sec: Optional[float] = None,
         action_server_wait_sec: Optional[float] = None,
     ) -> bool:
-        target_x = float(target_x_m)
-        target_y = float(target_y_m)
+        target_x = float(x_m)
+        target_y = float(y_m)
         if tolerance_m is not None and goal_tolerance_m is not None:
             raise ValueError(
                 "Use either tolerance_m or goal_tolerance_m, not both."
@@ -238,13 +240,28 @@ class GotoNavigator(Node):
 
     def _pose_callback(self, msg: PoseWithCovarianceStamped) -> None:
         position = msg.pose.pose.position
+        orientation = msg.pose.pose.orientation
         x = float(position.x)
         y = float(position.y)
-        if not math.isfinite(x) or not math.isfinite(y):
-            self.get_logger().warn("Ignoring non-finite /amcl_pose position.")
+        yaw_rad = self._quaternion_to_yaw_rad(
+            float(orientation.x),
+            float(orientation.y),
+            float(orientation.z),
+            float(orientation.w),
+        )
+        if not math.isfinite(x) or not math.isfinite(y) or not math.isfinite(yaw_rad):
+            self.get_logger().warn("Ignoring non-finite /amcl_pose.")
             return
         self._latest_pose_xy = (x, y)
+        self._latest_pose_yaw_rad = yaw_rad
         self._latest_pose_received_time = time.monotonic()
+
+    def _quaternion_to_yaw_rad(
+        self, x: float, y: float, z: float, w: float
+    ) -> float:
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        return math.atan2(siny_cosp, cosy_cosp)
 
     def _validate_parameters(self) -> None:
         if not self.pose_topic:

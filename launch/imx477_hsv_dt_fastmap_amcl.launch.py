@@ -38,7 +38,6 @@ def generate_launch_description():
     enable_topdown_pf_localization_node_v2 = LaunchConfiguration(
         "enable_topdown_pf_localization_node_v2"
     )
-    odom_topic = LaunchConfiguration("odom_topic")
     use_stm32_gateway_odometry = LaunchConfiguration("use_stm32_gateway_odometry")
     stm32_command_service = LaunchConfiguration("stm32_command_service")
     stm32_request_timeout_ms = LaunchConfiguration("stm32_request_timeout_ms")
@@ -333,7 +332,6 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "yaw_zero_map_degrees", default_value="0.0"
             ),  # Field-heading offset for robot yaw 0; 0 means the top side of the field
-            DeclareLaunchArgument("odom_topic", default_value="/wheel_odometry"),  # Wheel odometry topic
             DeclareLaunchArgument(
                 "use_stm32_gateway_odometry", default_value="true"
             ),  # Whether AMCL requests odometry from the STM32 gateway
@@ -574,7 +572,6 @@ def generate_launch_description():
                         "yaw_zero_map_degrees": ParameterValue(
                             yaw_zero_map_degrees, value_type=float
                         ),
-                        "odom_topic": odom_topic,
                         "use_stm32_gateway_odometry": ParameterValue(
                             use_stm32_gateway_odometry, value_type=bool
                         ),

@@ -35,6 +35,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "rcj_localization/msg/orange_ball_detection.hpp"
 #include "rcj_localization/orange_ball_hsv.hpp"
 
 namespace {
@@ -452,6 +453,8 @@ public:
       "~/ball_top_raw_px", 10);
     detected_pub_ = create_publisher<std_msgs::msg::Bool>("~/detected", 10);
     confidence_pub_ = create_publisher<std_msgs::msg::Float32>("~/confidence", 10);
+    detection_pub_ = create_publisher<rcj_localization::msg::OrangeBallDetection>(
+      "~/detection", 10);
     debug_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug_mask", 10);
     debug_mask_filtered_pub_ = create_publisher<sensor_msgs::msg::Image>(
       "~/debug_mask_filtered", 10);
@@ -1950,6 +1953,31 @@ private:
     ball_top_raw_pub_->publish(top_msg);
   }
 
+  void publishUnifiedDetection(
+    const std_msgs::msg::Header & header,
+    bool detected,
+    double confidence,
+    const cv::Point2d & filtered_raw_center_px = cv::Point2d(),
+    const cv::Point2d & filtered_ground_center_m = cv::Point2d(),
+    const cv::Point2d & top_point_px = cv::Point2d())
+  {
+    rcj_localization::msg::OrangeBallDetection msg;
+    msg.header = header;
+    msg.header.frame_id = "base_link";
+    msg.detected = detected;
+    msg.confidence = static_cast<float>(confidence);
+    if (detected) {
+      msg.ball_center_m.x = filtered_ground_center_m.x;
+      msg.ball_center_m.y = filtered_ground_center_m.y;
+      msg.ball_center_m.z = lut_.ball_diameter_m * 0.5;
+      msg.ball_center_raw_px.x = filtered_raw_center_px.x;
+      msg.ball_center_raw_px.y = filtered_raw_center_px.y;
+      msg.ball_top_raw_px.x = top_point_px.x;
+      msg.ball_top_raw_px.y = top_point_px.y;
+    }
+    detection_pub_->publish(msg);
+  }
+
   void publishDebugImages(
     const sensor_msgs::msg::Image::ConstSharedPtr & msg,
     const cv::Mat & frame,
@@ -2337,12 +2365,20 @@ private:
       lost_frame_count_ = 0;
       publishStatus(true, outputs.candidate.confidence);
       publishDetection(msg->header, outputs.candidate, filtered_raw_center_px_, filtered_ground_center_m_);
+      publishUnifiedDetection(
+        msg->header,
+        true,
+        outputs.candidate.confidence,
+        filtered_raw_center_px_,
+        filtered_ground_center_m_,
+        outputs.candidate.top_point_px);
     } else {
       ++lost_frame_count_;
       if (lost_frame_count_ >= lost_frame_tolerance_) {
         has_filtered_state_ = false;
       }
       publishStatus(false, 0.0);
+      publishUnifiedDetection(msg->header, false, 0.0);
     }
     stage_us[static_cast<std::size_t>(TimingStage::Publish)] =
       elapsedUs(stage_start, SteadyClock::now());
@@ -2386,6 +2422,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr ball_top_raw_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr detected_pub_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr confidence_pub_;
+  rclcpp::Publisher<rcj_localization::msg::OrangeBallDetection>::SharedPtr detection_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_mask_filtered_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;

@@ -32,6 +32,7 @@ include_directories(include)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BlackFeatureDetection.msg"
   "msg/BlackFeatureDetectionArray.msg"
+  "msg/OrangeBallDetection.msg"
   "action/Stm32Motion.action"
   "srv/Stm32Command.srv"
   DEPENDENCIES
@@ -165,7 +166,6 @@ install(FILES
   "scripts/competition_robot.py"
   "scripts/goto_point.py"
   "scripts/task_logic.py"
-  "scripts/task_sequence.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -351,6 +351,7 @@ ament_target_dependencies(orange_ball_detector_node
 )
 target_link_libraries(orange_ball_detector_node
   orange_ball_hsv
+  "${cpp_typesupport_target}"
   ${OpenCV_LIBRARIES}
 )
 
