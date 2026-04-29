@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -20,6 +21,13 @@ class Stm32State:
     dy: float
     dtheta: float
     theta: float
+    attempts: int
+    message: str
+
+
+@dataclass(frozen=True)
+class Stm32Infrared:
+    channel: int
     attempts: int
     message: str
 
@@ -103,6 +111,29 @@ class CompetitionRobot(GotoNavigator):
             f"ball_detection_topic='{self.ball_detection_topic}'"
         )
 
+    def move(
+        self,
+        *,
+        x_cm: float,
+        y_cm: float,
+        retry_delay_sec: Optional[float] = None,
+        timeout_sec: Optional[float] = None,
+    ) -> bool:
+        x_cm_value = float(x_cm)
+        y_cm_value = float(y_cm)
+        if not math.isfinite(x_cm_value) or not math.isfinite(y_cm_value):
+            raise ValueError("x_cm and y_cm must be finite.")
+        command = (
+            "cmd_dis "
+            f"{_format_number(x_cm_value)} "
+            f"{_format_number(y_cm_value)}"
+        )
+        return self._send_motion_until_success(
+            command,
+            retry_delay_sec=retry_delay_sec,
+            timeout_sec=timeout_sec,
+        )
+
     def turn(
         self,
         *,
@@ -120,6 +151,43 @@ class CompetitionRobot(GotoNavigator):
             timeout_sec=timeout_sec,
         )
 
+    def drive(
+        self,
+        *,
+        speed_percent: int,
+        move_angle_deg: float,
+        head_lock: Optional[bool] = None,
+        retry_delay_sec: Optional[float] = None,
+        timeout_sec: Optional[float] = None,
+    ) -> bool:
+        speed_percent_int = int(speed_percent)
+        move_angle_deg_value = float(move_angle_deg)
+        if speed_percent_int < 0 or speed_percent_int > 100:
+            raise ValueError("speed_percent must be in range 0-100.")
+        if not math.isfinite(move_angle_deg_value):
+            raise ValueError("move_angle_deg must be finite.")
+
+        command = (
+            "cmd_dkmotor "
+            f"{speed_percent_int} "
+            f"{_format_number(move_angle_deg_value)}"
+        )
+        if head_lock is not None:
+            if isinstance(head_lock, bool):
+                head_lock_value = 1 if head_lock else 0
+            else:
+                head_lock_value = int(head_lock)
+                if head_lock_value not in (0, 1):
+                    raise ValueError("head_lock must be True/False or 0/1.")
+            command += f" {head_lock_value}"
+
+        self._send_command_until_success(
+            command,
+            retry_delay_sec=retry_delay_sec,
+            timeout_sec=timeout_sec,
+        )
+        return True
+
     def suck(
         self,
         *,
@@ -136,6 +204,39 @@ class CompetitionRobot(GotoNavigator):
             timeout_sec=timeout_sec,
         )
         return True
+
+    def read_infrared(self) -> Stm32Infrared:
+        response = self._send_command_until_success("cmd_infred")
+        match = re.search(r"channel=(\d+)", str(response.message))
+        if match is None:
+            raise RuntimeError(
+                "STM32 infrared response did not include a channel: "
+                f"{response.message}"
+            )
+        channel = int(match.group(1))
+        if channel < 1 or channel > 7:
+            raise RuntimeError(f"STM32 infrared channel out of range: {channel}")
+        return Stm32Infrared(
+            channel=channel,
+            attempts=int(response.attempts),
+            message=str(response.message),
+        )
+
+    def infrared_channel(self) -> int:
+        return self.read_infrared().channel
+
+    def set_infrared_mode(self, *, mode: str) -> bool:
+        mode_text = str(mode).strip().lower()
+        if mode_text not in ("pt", "tz"):
+            raise ValueError("mode must be 'pt' or 'tz'.")
+        self._send_command_until_success(f"cmd_infred_mode {mode_text}")
+        return True
+
+    def infrared_plain_mode(self) -> bool:
+        return self.set_infrared_mode(mode="pt")
+
+    def infrared_modulated_mode(self) -> bool:
+        return self.set_infrared_mode(mode="tz")
 
     def suck_on(self, *, speed_percent: int = 100) -> bool:
         return self.suck(speed_percent=speed_percent)

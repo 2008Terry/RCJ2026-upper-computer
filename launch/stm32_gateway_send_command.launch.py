@@ -70,7 +70,7 @@ def generate_launch_description():
                 default_value="cmd_request",
                 description=(
                     "One non-motion STM32 command to send through /stm32/send_command, "
-                    "for example cmd_request, cmd_suck, cmd_conmotion, cmd_infred, "
+                    "for example cmd_request, cmd_dkmotor, cmd_suck, cmd_conmotion, cmd_infred, "
                     "cmd_infred_mode, cmd_anglecal, or cmd_mcureset. "
                     "cmd_dis/cmd_turn use the /stm32/motion action."
                 ),

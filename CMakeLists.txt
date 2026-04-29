@@ -55,6 +55,11 @@ add_library(white_line_debug_utils
   src/white_line_debug_utils.cpp
 )
 
+ament_target_dependencies(white_line_debug_utils
+  sensor_msgs
+  std_msgs
+)
+
 target_link_libraries(white_line_debug_utils
   ${OpenCV_LIBRARIES}
 )
@@ -111,6 +116,22 @@ ament_target_dependencies(fastmap_remap_node
 )
 
 target_link_libraries(fastmap_remap_node
+  white_line_debug_utils
+  ${OpenCV_LIBRARIES}
+)
+
+add_executable(camera_compressed_debug_relay_node
+  src/camera_compressed_debug_relay_node.cpp
+)
+
+ament_target_dependencies(camera_compressed_debug_relay_node
+  "rclcpp"
+  "sensor_msgs"
+  "cv_bridge"
+)
+
+target_link_libraries(camera_compressed_debug_relay_node
+  white_line_debug_utils
   ${OpenCV_LIBRARIES}
 )
 
@@ -145,6 +166,7 @@ target_link_libraries(stm32_serial_gateway_node
 install(TARGETS
   vision_processor_node
   fastmap_remap_node
+  camera_compressed_debug_relay_node
   stm32_behavior_node
   stm32_serial_gateway_node
   DESTINATION lib/${PROJECT_NAME}
@@ -154,6 +176,7 @@ install(TARGETS
 install(PROGRAMS
   "scripts/create_robot_mask.py"
   "scripts/test_robot_mask.py"
+  "scripts/show_map_coordinates.py"
   "src/camera_fixed_exposure_debug.py"
   "scripts/stm32_command_demo.py"
   "scripts/stm32_square_loop.py"
@@ -246,6 +269,7 @@ ament_target_dependencies(white_line_hsv_white_node
   cv_bridge
 )
 target_link_libraries(white_line_hsv_white_node
+  white_line_debug_utils
   ${OpenCV_LIBRARIES}
 )
 
@@ -351,6 +375,7 @@ ament_target_dependencies(orange_ball_detector_node
 )
 target_link_libraries(orange_ball_detector_node
   orange_ball_hsv
+  white_line_debug_utils
   "${cpp_typesupport_target}"
   ${OpenCV_LIBRARIES}
 )

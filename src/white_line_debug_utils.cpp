@@ -1,6 +1,9 @@
 #include "rcj_localization/white_line_debug_utils.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <vector>
 namespace rcj_loc::vision::debug {
 
 int makeOdd(int value, int minimum) {
@@ -9,6 +12,25 @@ int makeOdd(int value, int minimum) {
         ++clamped;
     }
     return clamped;
+}
+
+bool consumeFpsGate(
+    double max_fps,
+    std::chrono::steady_clock::time_point now,
+    std::chrono::steady_clock::time_point &last_publish_time) {
+    if (max_fps <= 0.0 || !std::isfinite(max_fps)) {
+        last_publish_time = now;
+        return true;
+    }
+
+    const auto min_interval = std::chrono::duration<double>(1.0 / max_fps);
+    if (last_publish_time != std::chrono::steady_clock::time_point{} &&
+        now - last_publish_time < min_interval) {
+        return false;
+    }
+
+    last_publish_time = now;
+    return true;
 }
 
 cv::Mat filterComponentsByStats(const cv::Mat &binary, const ComponentStatsFilter &filter) {
@@ -54,6 +76,41 @@ cv::Mat createMaskOverlay(const cv::Mat &frame, const cv::Mat &mask, const cv::S
     cv::addWeighted(frame, 1.0 - alpha, solid, alpha, 0.0, blended);
     blended.copyTo(overlay, mask);
     return overlay;
+}
+
+std::optional<sensor_msgs::msg::CompressedImage> encodeJpegCompressedImage(
+    const std_msgs::msg::Header &header,
+    const std::string &encoding,
+    const cv::Mat &image,
+    int jpeg_quality,
+    long long *encode_duration_us) {
+    if (encode_duration_us != nullptr) {
+        *encode_duration_us = 0;
+    }
+    if (image.empty()) {
+        return std::nullopt;
+    }
+
+    const int clamped_quality = std::clamp(jpeg_quality, 1, 100);
+    std::vector<int> encode_params = {cv::IMWRITE_JPEG_QUALITY, clamped_quality};
+    std::vector<uchar> encoded;
+
+    const auto start = std::chrono::steady_clock::now();
+    const bool ok = cv::imencode(".jpg", image, encoded, encode_params);
+    const auto end = std::chrono::steady_clock::now();
+    if (encode_duration_us != nullptr) {
+        *encode_duration_us =
+            std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    }
+    if (!ok) {
+        return std::nullopt;
+    }
+
+    sensor_msgs::msg::CompressedImage msg;
+    msg.header = header;
+    msg.format = encoding + "; jpeg compressed " + encoding;
+    msg.data = std::move(encoded);
+    return msg;
 }
 
 }  // namespace rcj_loc::vision::debug

@@ -22,6 +22,7 @@ def generate_launch_description():
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     enable_amcl_stack = LaunchConfiguration("enable_amcl_stack")
     enable_orange_ball_detector = LaunchConfiguration("enable_orange_ball_detector")
+    enable_camera_compressed_debug = LaunchConfiguration("enable_camera_compressed_debug")
     lut_file = LaunchConfiguration("lut_file")
     orange_robot_mask_path = LaunchConfiguration("orange_robot_mask_path")
 
@@ -46,6 +47,21 @@ def generate_launch_description():
                 "input_topic",
                 default_value="/camera/image_raw",
                 description="Shared raw image topic published by the single camera node.",
+            ),
+            DeclareLaunchArgument(
+                "debug_jpeg_quality",
+                default_value="80",
+                description="JPEG quality for compressed debug image topics.",
+            ),
+            DeclareLaunchArgument(
+                "debug_image_max_fps",
+                default_value="5.0",
+                description="Maximum publish rate for lazy debug image topics.",
+            ),
+            DeclareLaunchArgument(
+                "enable_camera_compressed_debug",
+                default_value="true",
+                description="Start the lazy /camera/image_raw/compressed_debug relay.",
             ),
             DeclareLaunchArgument(
                 "lut_file",
@@ -121,7 +137,31 @@ def generate_launch_description():
                 launch_arguments={
                     "input_topic": input_topic,
                     "camera_info_topic": camera_info_topic,
+                    "debug_jpeg_quality": LaunchConfiguration("debug_jpeg_quality"),
+                    "debug_image_max_fps": LaunchConfiguration("debug_image_max_fps"),
                 }.items(),
+            ),
+            Node(
+                package="rcj_localization",
+                executable="camera_compressed_debug_relay_node",
+                name="camera_compressed_debug_relay",
+                output="screen",
+                condition=IfCondition(enable_camera_compressed_debug),
+                arguments=["--ros-args", "--log-level", "info"],
+                parameters=[
+                    {
+                        "input_topic": input_topic,
+                        "output_topic": "/camera/image_raw/compressed_debug",
+                        "debug_jpeg_quality": ParameterValue(
+                            LaunchConfiguration("debug_jpeg_quality"),
+                            value_type=int,
+                        ),
+                        "debug_image_max_fps": ParameterValue(
+                            LaunchConfiguration("debug_image_max_fps"),
+                            value_type=float,
+                        ),
+                    }
+                ],
             ),
             Node(
                 package="rcj_localization",
@@ -237,6 +277,14 @@ def generate_launch_description():
                         "publish_debug_images": ParameterValue(
                             LaunchConfiguration("orange_publish_debug_images"),
                             value_type=bool,
+                        ),
+                        "debug_jpeg_quality": ParameterValue(
+                            LaunchConfiguration("debug_jpeg_quality"),
+                            value_type=int,
+                        ),
+                        "debug_image_max_fps": ParameterValue(
+                            LaunchConfiguration("debug_image_max_fps"),
+                            value_type=float,
                         ),
                         "publish_raw_mask": ParameterValue(
                             LaunchConfiguration("publish_raw_mask"), value_type=bool

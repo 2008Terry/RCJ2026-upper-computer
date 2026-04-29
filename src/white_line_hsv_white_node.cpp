@@ -21,6 +21,8 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/header.hpp>
 
+#include "rcj_localization/white_line_debug_utils.hpp"
+
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -87,6 +89,7 @@ enum class HsvTimingStage : std::size_t
   BlackThreshold,
   GreenThreshold,
   ContextResolve,
+  DebugCompression,
   PublishOutputs,
   GuiDisplay,
   UnaccountedOverhead,
@@ -103,6 +106,7 @@ constexpr std::array<const char *, static_cast<std::size_t>(HsvTimingStage::Coun
     "black_threshold",
     "green_threshold",
     "context_resolve",
+    "debug_compression",
     "publish_outputs",
     "gui_display",
     "unaccounted_overhead",
@@ -382,6 +386,8 @@ public:
     declare_parameter("publish_black_mask", true);
     declare_parameter("publish_noise_mask", true);
     declare_parameter("publish_overlay_image", true);
+    declare_parameter("debug_jpeg_quality", 80);
+    declare_parameter("debug_image_max_fps", 5.0);
     declare_parameter("display_max_width", 960);
     declare_parameter("display_max_height", 720);
 
@@ -410,12 +416,32 @@ public:
     green_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/green_mask", 10);
     black_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/black_mask", 10);
     noise_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/noise_mask", 10);
+    white_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/white_mask/compressed", 10);
+    green_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/green_mask/compressed", 10);
+    black_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/black_mask/compressed", 10);
+    noise_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/noise_mask/compressed", 10);
     debug_input_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/input_image", 10);
     debug_white_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/white_mask", 10);
     debug_green_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/green_mask", 10);
     debug_black_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/black_mask", 10);
     debug_noise_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/noise_mask", 10);
     debug_overlay_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/overlay_image", 10);
+    debug_input_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/input_image/compressed", 10);
+    debug_white_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/white_mask/compressed", 10);
+    debug_green_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/green_mask/compressed", 10);
+    debug_black_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/black_mask/compressed", 10);
+    debug_noise_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/noise_mask/compressed", 10);
+    debug_overlay_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/overlay_image/compressed", 10);
 
     RCLCPP_INFO(
       get_logger(),
@@ -565,6 +591,9 @@ private:
     publish_black_mask_ = get_parameter("publish_black_mask").as_bool();
     publish_noise_mask_ = get_parameter("publish_noise_mask").as_bool();
     publish_overlay_image_ = get_parameter("publish_overlay_image").as_bool();
+    debug_jpeg_quality_ =
+      std::clamp(static_cast<int>(get_parameter("debug_jpeg_quality").as_int()), 1, 100);
+    debug_image_max_fps_ = std::max(0.0, get_parameter("debug_image_max_fps").as_double());
     display_max_width_ =
       std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
     display_max_height_ =
@@ -871,17 +900,67 @@ private:
            publisher->get_subscription_count() > 0U;
   }
 
+  template<typename PublisherT>
+  bool shouldPublishDebugImage(
+    const std::shared_ptr<PublisherT> & publisher,
+    bool image_enabled,
+    std::chrono::steady_clock::time_point & last_publish_time,
+    std::chrono::steady_clock::time_point now) const
+  {
+    return shouldPublishDebugImage(publisher, image_enabled) &&
+           rcj_loc::vision::debug::consumeFpsGate(
+             debug_image_max_fps_,
+             now,
+             last_publish_time);
+  }
+
   bool publishDebugImageIfNeeded(
     const rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr & publisher,
     bool image_enabled,
     const std_msgs::msg::Header & header,
     const std::string & encoding,
-    const cv::Mat & image)
+    const cv::Mat & image,
+    std::chrono::steady_clock::time_point & last_publish_time,
+    std::chrono::steady_clock::time_point now)
   {
-    if (!shouldPublishDebugImage(publisher, image_enabled)) {
+    if (!shouldPublishDebugImage(publisher, image_enabled, last_publish_time, now)) {
       return false;
     }
     publisher->publish(*cv_bridge::CvImage(header, encoding, image).toImageMsg());
+    return true;
+  }
+
+  bool publishCompressedDebugImageIfNeeded(
+    const rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr & publisher,
+    bool image_enabled,
+    const std_msgs::msg::Header & header,
+    const std::string & encoding,
+    const cv::Mat & image,
+    std::chrono::steady_clock::time_point & last_publish_time,
+    std::chrono::steady_clock::time_point now,
+    long long & compressed_debug_us)
+  {
+    if (!shouldPublishDebugImage(publisher, image_enabled, last_publish_time, now)) {
+      return false;
+    }
+    long long encode_us = 0;
+    auto compressed_msg = rcj_loc::vision::debug::encodeJpegCompressedImage(
+      header,
+      encoding,
+      image,
+      debug_jpeg_quality_,
+      &encode_us);
+    compressed_debug_us += encode_us;
+    if (!compressed_msg.has_value()) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        2000,
+        "Failed to JPEG-compress HSV debug image with encoding '%s'.",
+        encoding.c_str());
+      return false;
+    }
+    publisher->publish(*compressed_msg);
     return true;
   }
 
@@ -891,24 +970,81 @@ private:
     const cv::Mat & white_mask,
     const cv::Mat & green_mask,
     const cv::Mat & black_mask,
-    const cv::Mat & noise_mask)
+    const cv::Mat & noise_mask,
+    long long & compressed_debug_us)
   {
+    const auto now = std::chrono::steady_clock::now();
     bool published_any = false;
     published_any |= publishDebugImageIfNeeded(
-      debug_input_pub_, publish_input_image_, header, "bgr8", frame);
+      debug_input_pub_, publish_input_image_, header, "bgr8", frame, debug_input_last_publish_time_, now);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      debug_input_compressed_pub_, publish_input_image_, header, "bgr8", frame,
+      debug_input_compressed_last_publish_time_, now, compressed_debug_us);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      white_mask_compressed_pub_, publish_white_mask_, header, "mono8", white_mask,
+      white_mask_compressed_last_publish_time_, now, compressed_debug_us);
     published_any |= publishDebugImageIfNeeded(
-      debug_white_mask_pub_, publish_white_mask_, header, "mono8", white_mask);
+      debug_white_mask_pub_, publish_white_mask_, header, "mono8", white_mask,
+      debug_white_mask_last_publish_time_, now);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      debug_white_mask_compressed_pub_, publish_white_mask_, header, "mono8", white_mask,
+      debug_white_mask_compressed_last_publish_time_, now, compressed_debug_us);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      green_mask_compressed_pub_, publish_green_mask_, header, "mono8", green_mask,
+      green_mask_compressed_last_publish_time_, now, compressed_debug_us);
     published_any |= publishDebugImageIfNeeded(
-      debug_green_mask_pub_, publish_green_mask_, header, "mono8", green_mask);
+      debug_green_mask_pub_, publish_green_mask_, header, "mono8", green_mask,
+      debug_green_mask_last_publish_time_, now);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      debug_green_mask_compressed_pub_, publish_green_mask_, header, "mono8", green_mask,
+      debug_green_mask_compressed_last_publish_time_, now, compressed_debug_us);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      black_mask_compressed_pub_, publish_black_mask_, header, "mono8", black_mask,
+      black_mask_compressed_last_publish_time_, now, compressed_debug_us);
     published_any |= publishDebugImageIfNeeded(
-      debug_black_mask_pub_, publish_black_mask_, header, "mono8", black_mask);
+      debug_black_mask_pub_, publish_black_mask_, header, "mono8", black_mask,
+      debug_black_mask_last_publish_time_, now);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      debug_black_mask_compressed_pub_, publish_black_mask_, header, "mono8", black_mask,
+      debug_black_mask_compressed_last_publish_time_, now, compressed_debug_us);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      noise_mask_compressed_pub_, publish_noise_mask_, header, "mono8", noise_mask,
+      noise_mask_compressed_last_publish_time_, now, compressed_debug_us);
     published_any |= publishDebugImageIfNeeded(
-      debug_noise_mask_pub_, publish_noise_mask_, header, "mono8", noise_mask);
+      debug_noise_mask_pub_, publish_noise_mask_, header, "mono8", noise_mask,
+      debug_noise_mask_last_publish_time_, now);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      debug_noise_mask_compressed_pub_, publish_noise_mask_, header, "mono8", noise_mask,
+      debug_noise_mask_compressed_last_publish_time_, now, compressed_debug_us);
 
-    if (shouldPublishDebugImage(debug_overlay_pub_, publish_overlay_image_)) {
+    const bool publish_overlay_raw = shouldPublishDebugImage(
+      debug_overlay_pub_, publish_overlay_image_, debug_overlay_last_publish_time_, now);
+    const bool publish_overlay_compressed =
+      shouldPublishDebugImage(
+        debug_overlay_compressed_pub_,
+        publish_overlay_image_,
+        debug_overlay_compressed_last_publish_time_,
+        now);
+    if (publish_overlay_raw || publish_overlay_compressed) {
       cv::Mat overlay = frame.clone();
       overlay.setTo(cv::Scalar(0, 255, 0), white_mask);
-      debug_overlay_pub_->publish(*cv_bridge::CvImage(header, "bgr8", overlay).toImageMsg());
+      if (publish_overlay_raw) {
+        debug_overlay_pub_->publish(*cv_bridge::CvImage(header, "bgr8", overlay).toImageMsg());
+      }
+      if (publish_overlay_compressed) {
+        long long encode_us = 0;
+        auto compressed_msg = rcj_loc::vision::debug::encodeJpegCompressedImage(
+          header,
+          "bgr8",
+          overlay,
+          debug_jpeg_quality_,
+          &encode_us);
+        compressed_debug_us += encode_us;
+        if (compressed_msg.has_value()) {
+          debug_overlay_compressed_pub_->publish(*compressed_msg);
+          published_any = true;
+        }
+      }
       published_any = true;
     }
     return published_any;
@@ -1143,13 +1279,14 @@ private:
     green_mask_pub_->publish(*cv_bridge::CvImage(msg->header, "mono8", green_mask).toImageMsg());
     black_mask_pub_->publish(*cv_bridge::CvImage(msg->header, "mono8", black_mask).toImageMsg());
     noise_mask_pub_->publish(*cv_bridge::CvImage(msg->header, "mono8", noise_mask).toImageMsg());
-    publishDebugImages(msg->header, frame, white_mask, green_mask, black_mask, noise_mask);
+    long long compressed_debug_us = 0;
+    publishDebugImages(msg->header, frame, white_mask, green_mask, black_mask, noise_mask, compressed_debug_us);
     if (timing_enabled) {
-      recordStageDuration(
-        timing.stage_us,
-        HsvTimingStage::PublishOutputs,
-        stage_start,
-        SteadyClock::now());
+      const long long publish_total_us = elapsedUs(stage_start, SteadyClock::now());
+      timing.stage_us[static_cast<std::size_t>(HsvTimingStage::DebugCompression)] =
+        compressed_debug_us;
+      timing.stage_us[static_cast<std::size_t>(HsvTimingStage::PublishOutputs)] =
+        std::max(0LL, publish_total_us - compressed_debug_us);
     }
 
     const bool gui_enabled =
@@ -1191,12 +1328,22 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr green_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr black_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr noise_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr white_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr green_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr black_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr noise_mask_compressed_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_input_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_white_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_green_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_black_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_noise_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_overlay_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_input_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_white_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_green_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_black_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_noise_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_overlay_compressed_pub_;
 
   int white_h_min_{0};
   int white_h_max_{kHueMax};
@@ -1233,6 +1380,24 @@ private:
   bool publish_black_mask_{true};
   bool publish_noise_mask_{true};
   bool publish_overlay_image_{true};
+  int debug_jpeg_quality_{80};
+  double debug_image_max_fps_{5.0};
+  std::chrono::steady_clock::time_point white_mask_compressed_last_publish_time_;
+  std::chrono::steady_clock::time_point green_mask_compressed_last_publish_time_;
+  std::chrono::steady_clock::time_point black_mask_compressed_last_publish_time_;
+  std::chrono::steady_clock::time_point noise_mask_compressed_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_input_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_white_mask_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_green_mask_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_black_mask_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_noise_mask_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_overlay_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_input_compressed_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_white_mask_compressed_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_green_mask_compressed_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_black_mask_compressed_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_noise_mask_compressed_last_publish_time_;
+  std::chrono::steady_clock::time_point debug_overlay_compressed_last_publish_time_;
   bool headless_warned_{false};
   bool controls_window_created_{false};
   bool controls_window_initialized_{false};
