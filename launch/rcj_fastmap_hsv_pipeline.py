@@ -139,6 +139,14 @@ def build_camera_hsv_fastmap_nodes(context, *, use_apply_mask_argument=False):
                         optional_launch_config("remap_publish_output_image", "true"),
                         value_type=bool,
                     ),
+                    "debug_jpeg_quality": ParameterValue(
+                        optional_launch_config("debug_jpeg_quality", "80"),
+                        value_type=int,
+                    ),
+                    "debug_image_max_fps": ParameterValue(
+                        optional_launch_config("debug_image_max_fps", "5.0"),
+                        value_type=float,
+                    ),
                     "enable_timing_log": ParameterValue(
                         LaunchConfiguration("remap_enable_timing_log"),
                         value_type=bool,
@@ -229,6 +237,14 @@ def build_camera_hsv_fastmap_nodes(context, *, use_apply_mask_argument=False):
                     "publish_overlay_image": ParameterValue(
                         optional_launch_config("hsv_publish_overlay_image", "true"),
                         value_type=bool,
+                    ),
+                    "debug_jpeg_quality": ParameterValue(
+                        optional_launch_config("debug_jpeg_quality", "80"),
+                        value_type=int,
+                    ),
+                    "debug_image_max_fps": ParameterValue(
+                        optional_launch_config("debug_image_max_fps", "5.0"),
+                        value_type=float,
                     ),
                     "display_max_width": ParameterValue(
                         LaunchConfiguration("hsv_display_max_width"),
@@ -451,6 +467,14 @@ def build_dt_ridge_node():
                 ),
                 "publish_debug_image": ParameterValue(
                     optional_launch_config("ridge_publish_debug_image", "true"), value_type=bool
+                ),
+                "debug_jpeg_quality": ParameterValue(
+                    optional_launch_config("debug_jpeg_quality", "80"),
+                    value_type=int,
+                ),
+                "debug_image_max_fps": ParameterValue(
+                    optional_launch_config("debug_image_max_fps", "5.0"),
+                    value_type=float,
                 ),
                 "enable_timing_debug": ParameterValue(
                     LaunchConfiguration("ridge_enable_timing_log"),

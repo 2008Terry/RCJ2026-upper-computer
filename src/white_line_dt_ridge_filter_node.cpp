@@ -532,6 +532,7 @@ enum class RidgeTimingStage : std::size_t
   Reconstruct,
   FinalMask,
   DebugComposite,
+  DebugCompression,
   PublishOutputs,
   GuiDisplay,
   UnaccountedOverhead,
@@ -559,6 +560,7 @@ constexpr std::array<const char *, static_cast<std::size_t>(RidgeTimingStage::Co
     "reconstruct",
     "final_mask",
     "debug_composite",
+    "debug_compression",
     "publish_outputs",
     "gui_display",
     "unaccounted_overhead",
@@ -799,6 +801,8 @@ public:
     declare_parameter("publish_reconstructed_mask", true);
     declare_parameter("publish_white_final_mask", true);
     declare_parameter("publish_debug_image", true);
+    declare_parameter("debug_jpeg_quality", 80);
+    declare_parameter("debug_image_max_fps", 5.0);
     declare_parameter("enable_timing_debug", false);
     declare_parameter("timing_summary_interval", 10);
     declare_parameter("display_max_width", 960);
@@ -836,6 +840,46 @@ public:
     debug_green_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/green_mask", 10);
     debug_black_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/black_mask", 10);
     debug_noise_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug/noise_mask", 10);
+    ridge_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/ridge_mask/compressed", 10);
+    distance_transform_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/distance_transform_image/compressed", 10);
+    legacy_skeleton_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/skeleton_mask/compressed", 10);
+    candidate_prefilter_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/candidate_prefilter_mask/compressed", 10);
+    orientation_valid_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/orientation_valid_mask/compressed", 10);
+    side_support_seed_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/side_support_seed_mask/compressed", 10);
+    side_support_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/side_support_mask/compressed", 10);
+    width_supported_ridge_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/width_supported_ridge_mask/compressed", 10);
+    legacy_width_supported_skeleton_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/width_supported_skeleton_mask/compressed", 10);
+    length_filtered_ridge_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/length_filtered_ridge_mask/compressed", 10);
+    legacy_length_filtered_skeleton_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/length_filtered_skeleton_mask/compressed", 10);
+    legacy_supported_skeleton_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/supported_skeleton_mask/compressed", 10);
+    reconstructed_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/reconstructed_mask/compressed", 10);
+    white_final_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/white_final_mask/compressed", 10);
+    legacy_white_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/white_mask/compressed", 10);
+    debug_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug_image/compressed", 10);
+    debug_morph_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/morph_mask/compressed", 10);
+    debug_green_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/green_mask/compressed", 10);
+    debug_black_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/black_mask/compressed", 10);
+    debug_noise_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/noise_mask/compressed", 10);
 
     RCLCPP_INFO(
       get_logger(),
@@ -887,6 +931,26 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_green_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_black_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_noise_mask_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr ridge_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr distance_transform_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr legacy_skeleton_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr candidate_prefilter_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr orientation_valid_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr side_support_seed_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr side_support_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr width_supported_ridge_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr legacy_width_supported_skeleton_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr length_filtered_ridge_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr legacy_length_filtered_skeleton_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr legacy_supported_skeleton_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr reconstructed_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr white_final_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr legacy_white_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_morph_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_green_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_black_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_noise_mask_compressed_pub_;
 
   std::string morph_mask_topic_;
   std::string green_mask_topic_;
@@ -946,6 +1010,8 @@ private:
   bool publish_reconstructed_mask_ = true;
   bool publish_white_final_mask_ = true;
   bool publish_debug_image_ = true;
+  int debug_jpeg_quality_ = 80;
+  double debug_image_max_fps_ = 5.0;
   bool enable_timing_debug_ = false;
   bool morph_window_created_ = false;
   bool distance_transform_window_created_ = false;
@@ -978,6 +1044,7 @@ private:
   int cached_template_direction_bins_ = -1;
   int cached_template_side_band_depth_ = -1;
   std::unordered_map<std::uint64_t, std::vector<cv::Point>> side_template_cache_;
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point> debug_last_publish_times_;
 
   bool isParameterOverridden(const char * name)
   {
@@ -1071,6 +1138,9 @@ private:
     publish_reconstructed_mask_ = get_parameter("publish_reconstructed_mask").as_bool();
     publish_white_final_mask_ = get_parameter("publish_white_final_mask").as_bool();
     publish_debug_image_ = get_parameter("publish_debug_image").as_bool();
+    debug_jpeg_quality_ =
+      std::clamp(static_cast<int>(get_parameter("debug_jpeg_quality").as_int()), 1, 100);
+    debug_image_max_fps_ = std::max(0.0, get_parameter("debug_image_max_fps").as_double());
     enable_timing_debug_ = get_parameter("enable_timing_debug").as_bool();
     timing_summary_interval_ =
       std::max(1, static_cast<int>(get_parameter("timing_summary_interval").as_int()));
@@ -1359,7 +1429,90 @@ private:
   template<typename PublisherT>
   bool shouldPublishDebugImage(const std::shared_ptr<PublisherT> & publisher, bool image_enabled) const
   {
-    return publish_debug_images_ && image_enabled && hasSubscribers(publisher);
+    if (!publish_debug_images_ || !image_enabled || !hasSubscribers(publisher)) {
+      return false;
+    }
+    return debugFpsGateAllows(publisher->get_topic_name(), SteadyClock::now());
+  }
+
+  bool debugFpsGateAllows(const std::string & key, const TimePoint & now) const
+  {
+    if (debug_image_max_fps_ <= 0.0 || !std::isfinite(debug_image_max_fps_)) {
+      return true;
+    }
+    const auto it = debug_last_publish_times_.find(key);
+    if (it == debug_last_publish_times_.end()) {
+      return true;
+    }
+    const auto min_interval = std::chrono::duration<double>(1.0 / debug_image_max_fps_);
+    return now - it->second >= min_interval;
+  }
+
+  bool consumeDebugFpsGate(const std::string & key, const TimePoint & now)
+  {
+    if (!debugFpsGateAllows(key, now)) {
+      return false;
+    }
+    debug_last_publish_times_[key] = now;
+    return true;
+  }
+
+  template<typename PublisherT>
+  bool consumeDebugPublishPermit(
+    const std::shared_ptr<PublisherT> & publisher,
+    bool image_enabled,
+    const TimePoint & now)
+  {
+    return publish_debug_images_ && image_enabled && hasSubscribers(publisher) &&
+           consumeDebugFpsGate(publisher->get_topic_name(), now);
+  }
+
+  bool publishDebugImageIfNeeded(
+    const rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr & publisher,
+    bool image_enabled,
+    const std_msgs::msg::Header & header,
+    const std::string & encoding,
+    const cv::Mat & image,
+    const TimePoint & now)
+  {
+    if (!consumeDebugPublishPermit(publisher, image_enabled, now)) {
+      return false;
+    }
+    publisher->publish(*cv_bridge::CvImage(header, encoding, image).toImageMsg());
+    return true;
+  }
+
+  bool publishCompressedDebugImageIfNeeded(
+    const rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr & publisher,
+    bool image_enabled,
+    const std_msgs::msg::Header & header,
+    const std::string & encoding,
+    const cv::Mat & image,
+    const TimePoint & now,
+    long long & compressed_debug_us)
+  {
+    if (!consumeDebugPublishPermit(publisher, image_enabled, now)) {
+      return false;
+    }
+    long long encode_us = 0;
+    auto compressed_msg = rcj_loc::vision::debug::encodeJpegCompressedImage(
+      header,
+      encoding,
+      image,
+      debug_jpeg_quality_,
+      &encode_us);
+    compressed_debug_us += encode_us;
+    if (!compressed_msg.has_value()) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        2000,
+        "Failed to JPEG-compress ridge debug image with encoding '%s'.",
+        encoding.c_str());
+      return false;
+    }
+    publisher->publish(*compressed_msg);
+    return true;
   }
 
   bool publishOutputs(
@@ -1378,12 +1531,22 @@ private:
     const cv::Mat & length_filtered_ridge_mask,
     const cv::Mat & reconstructed_mask,
     const cv::Mat & white_final_mask,
-    const cv::Mat & debug_image)
+    const cv::Mat & debug_image,
+    long long & compressed_debug_us)
   {
+    const TimePoint now = SteadyClock::now();
     bool published_any = false;
 
     published_any |=
       publishImageIfSubscribed(white_final_mask_pub_, header, "mono8", white_final_mask);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      white_final_mask_compressed_pub_,
+      publish_white_final_mask_,
+      header,
+      "mono8",
+      white_final_mask,
+      now,
+      compressed_debug_us);
 
     if (hasSubscribers(legacy_white_mask_pub_)) {
       if (!warned_deprecated_white_mask_topic_) {
@@ -1396,101 +1559,233 @@ private:
         *cv_bridge::CvImage(header, "mono8", white_final_mask).toImageMsg());
       published_any = true;
     }
+    published_any |= publishCompressedDebugImageIfNeeded(
+      legacy_white_mask_compressed_pub_,
+      publish_white_final_mask_,
+      header,
+      "mono8",
+      white_final_mask,
+      now,
+      compressed_debug_us);
 
-    if (shouldPublishDebugImage(debug_morph_mask_pub_, publish_morph_mask_)) {
-      published_any |= publishImageIfSubscribed(debug_morph_mask_pub_, header, "mono8", morph_mask);
-    }
-    if (shouldPublishDebugImage(debug_green_mask_pub_, publish_green_mask_)) {
-      published_any |= publishImageIfSubscribed(debug_green_mask_pub_, header, "mono8", green_mask);
-    }
-    if (shouldPublishDebugImage(debug_black_mask_pub_, publish_black_mask_)) {
-      published_any |= publishImageIfSubscribed(debug_black_mask_pub_, header, "mono8", black_mask);
-    }
-    if (shouldPublishDebugImage(debug_noise_mask_pub_, publish_noise_mask_)) {
-      published_any |= publishImageIfSubscribed(debug_noise_mask_pub_, header, "mono8", noise_mask);
-    }
+    published_any |= publishDebugImageIfNeeded(
+      debug_morph_mask_pub_, publish_morph_mask_, header, "mono8", morph_mask, now);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      debug_morph_mask_compressed_pub_, publish_morph_mask_, header, "mono8", morph_mask, now, compressed_debug_us);
+    published_any |= publishDebugImageIfNeeded(
+      debug_green_mask_pub_, publish_green_mask_, header, "mono8", green_mask, now);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      debug_green_mask_compressed_pub_, publish_green_mask_, header, "mono8", green_mask, now, compressed_debug_us);
+    published_any |= publishDebugImageIfNeeded(
+      debug_black_mask_pub_, publish_black_mask_, header, "mono8", black_mask, now);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      debug_black_mask_compressed_pub_, publish_black_mask_, header, "mono8", black_mask, now, compressed_debug_us);
+    published_any |= publishDebugImageIfNeeded(
+      debug_noise_mask_pub_, publish_noise_mask_, header, "mono8", noise_mask, now);
+    published_any |= publishCompressedDebugImageIfNeeded(
+      debug_noise_mask_compressed_pub_, publish_noise_mask_, header, "mono8", noise_mask, now, compressed_debug_us);
 
     if (publish_debug_images_ && publish_ridge_mask_) {
-      published_any |= publishImageIfSubscribed(ridge_mask_pub_, header, "mono8", ridge_mask);
-      published_any |= publishImageIfSubscribed(
+      published_any |= publishDebugImageIfNeeded(
+        ridge_mask_pub_, publish_ridge_mask_, header, "mono8", ridge_mask, now);
+      published_any |= publishDebugImageIfNeeded(
         legacy_skeleton_mask_pub_,
+        publish_ridge_mask_,
         header,
         "mono8",
-        ridge_mask);
+        ridge_mask,
+        now);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        ridge_mask_compressed_pub_, publish_ridge_mask_, header, "mono8", ridge_mask, now, compressed_debug_us);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        legacy_skeleton_mask_compressed_pub_, publish_ridge_mask_, header, "mono8", ridge_mask, now, compressed_debug_us);
     }
     if (publish_debug_images_ && publish_candidate_prefilter_mask_) {
-      published_any |= publishImageIfSubscribed(
+      published_any |= publishDebugImageIfNeeded(
         candidate_prefilter_mask_pub_,
+        publish_candidate_prefilter_mask_,
         header,
         "mono8",
-        candidate_prefilter_mask);
+        candidate_prefilter_mask,
+        now);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        candidate_prefilter_mask_compressed_pub_,
+        publish_candidate_prefilter_mask_,
+        header,
+        "mono8",
+        candidate_prefilter_mask,
+        now,
+        compressed_debug_us);
     }
     if (publish_debug_images_ && publish_distance_transform_ && !distance_transform_debug_image.empty()) {
-      published_any |= publishImageIfSubscribed(
+      published_any |= publishDebugImageIfNeeded(
         distance_transform_pub_,
+        publish_distance_transform_,
         header,
         "bgr8",
-        distance_transform_debug_image);
+        distance_transform_debug_image,
+        now);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        distance_transform_compressed_pub_,
+        publish_distance_transform_,
+        header,
+        "bgr8",
+        distance_transform_debug_image,
+        now,
+        compressed_debug_us);
     }
     if (enable_orientation_estimate_ && publish_debug_images_ && publish_orientation_valid_mask_) {
-      published_any |= publishImageIfSubscribed(
+      published_any |= publishDebugImageIfNeeded(
         orientation_valid_mask_pub_,
+        publish_orientation_valid_mask_,
         header,
         "mono8",
-        orientation_valid_mask);
+        orientation_valid_mask,
+        now);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        orientation_valid_mask_compressed_pub_,
+        publish_orientation_valid_mask_,
+        header,
+        "mono8",
+        orientation_valid_mask,
+        now,
+        compressed_debug_us);
     }
     if (publish_debug_images_ && publish_side_support_seed_mask_) {
-      published_any |= publishImageIfSubscribed(
+      published_any |= publishDebugImageIfNeeded(
         side_support_seed_mask_pub_,
+        publish_side_support_seed_mask_,
         header,
         "mono8",
-        side_support_seed_mask);
+        side_support_seed_mask,
+        now);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        side_support_seed_mask_compressed_pub_,
+        publish_side_support_seed_mask_,
+        header,
+        "mono8",
+        side_support_seed_mask,
+        now,
+        compressed_debug_us);
     }
     if (publish_debug_images_ && publish_side_support_mask_) {
-      published_any |= publishImageIfSubscribed(
+      published_any |= publishDebugImageIfNeeded(
         side_support_mask_pub_,
+        publish_side_support_mask_,
         header,
         "mono8",
-        side_support_mask);
+        side_support_mask,
+        now);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        side_support_mask_compressed_pub_,
+        publish_side_support_mask_,
+        header,
+        "mono8",
+        side_support_mask,
+        now,
+        compressed_debug_us);
     }
     if (publish_debug_images_ && publish_width_supported_ridge_mask_) {
-      published_any |= publishImageIfSubscribed(
+      published_any |= publishDebugImageIfNeeded(
         width_supported_ridge_mask_pub_,
+        publish_width_supported_ridge_mask_,
         header,
         "mono8",
-        width_supported_ridge_mask);
-      published_any |= publishImageIfSubscribed(
+        width_supported_ridge_mask,
+        now);
+      published_any |= publishDebugImageIfNeeded(
         legacy_width_supported_skeleton_mask_pub_,
+        publish_width_supported_ridge_mask_,
         header,
         "mono8",
-        width_supported_ridge_mask);
+        width_supported_ridge_mask,
+        now);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        width_supported_ridge_mask_compressed_pub_,
+        publish_width_supported_ridge_mask_,
+        header,
+        "mono8",
+        width_supported_ridge_mask,
+        now,
+        compressed_debug_us);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        legacy_width_supported_skeleton_mask_compressed_pub_,
+        publish_width_supported_ridge_mask_,
+        header,
+        "mono8",
+        width_supported_ridge_mask,
+        now,
+        compressed_debug_us);
     }
     if (publish_debug_images_ && publish_length_filtered_ridge_mask_) {
-      published_any |= publishImageIfSubscribed(
+      published_any |= publishDebugImageIfNeeded(
         length_filtered_ridge_mask_pub_,
+        publish_length_filtered_ridge_mask_,
         header,
         "mono8",
-        length_filtered_ridge_mask);
-      published_any |= publishImageIfSubscribed(
+        length_filtered_ridge_mask,
+        now);
+      published_any |= publishDebugImageIfNeeded(
         legacy_length_filtered_skeleton_mask_pub_,
+        publish_length_filtered_ridge_mask_,
         header,
         "mono8",
-        length_filtered_ridge_mask);
-      published_any |= publishImageIfSubscribed(
+        length_filtered_ridge_mask,
+        now);
+      published_any |= publishDebugImageIfNeeded(
         legacy_supported_skeleton_mask_pub_,
+        publish_length_filtered_ridge_mask_,
         header,
         "mono8",
-        length_filtered_ridge_mask);
+        length_filtered_ridge_mask,
+        now);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        length_filtered_ridge_mask_compressed_pub_,
+        publish_length_filtered_ridge_mask_,
+        header,
+        "mono8",
+        length_filtered_ridge_mask,
+        now,
+        compressed_debug_us);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        legacy_length_filtered_skeleton_mask_compressed_pub_,
+        publish_length_filtered_ridge_mask_,
+        header,
+        "mono8",
+        length_filtered_ridge_mask,
+        now,
+        compressed_debug_us);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        legacy_supported_skeleton_mask_compressed_pub_,
+        publish_length_filtered_ridge_mask_,
+        header,
+        "mono8",
+        length_filtered_ridge_mask,
+        now,
+        compressed_debug_us);
     }
     if (publish_debug_images_ && publish_reconstructed_mask_) {
-      published_any |= publishImageIfSubscribed(
+      published_any |= publishDebugImageIfNeeded(
         reconstructed_mask_pub_,
+        publish_reconstructed_mask_,
         header,
         "mono8",
-        reconstructed_mask);
+        reconstructed_mask,
+        now);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        reconstructed_mask_compressed_pub_,
+        publish_reconstructed_mask_,
+        header,
+        "mono8",
+        reconstructed_mask,
+        now,
+        compressed_debug_us);
     }
     if (publish_debug_images_ && publish_debug_image_ && !debug_image.empty()) {
-      published_any |= publishImageIfSubscribed(debug_pub_, header, "bgr8", debug_image);
+      published_any |= publishDebugImageIfNeeded(
+        debug_pub_, publish_debug_image_, header, "bgr8", debug_image, now);
+      published_any |= publishCompressedDebugImageIfNeeded(
+        debug_compressed_pub_, publish_debug_image_, header, "bgr8", debug_image, now, compressed_debug_us);
     }
 
     return published_any;
@@ -1705,7 +2000,8 @@ private:
 
     const bool distance_transform_debug_image_needed =
       (show_distance_transform_ && distance_transform_window_created_) ||
-      shouldPublishDebugImage(distance_transform_pub_, publish_distance_transform_);
+      shouldPublishDebugImage(distance_transform_pub_, publish_distance_transform_) ||
+      shouldPublishDebugImage(distance_transform_compressed_pub_, publish_distance_transform_);
     cv::Mat distance_transform_debug_image;
     if (distance_transform_debug_image_needed) {
       stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
@@ -2103,7 +2399,8 @@ private:
 
     const bool debug_image_needed =
       (show_debug_image_ && debug_window_created_) ||
-      shouldPublishDebugImage(debug_pub_, publish_debug_image_);
+      shouldPublishDebugImage(debug_pub_, publish_debug_image_) ||
+      shouldPublishDebugImage(debug_compressed_pub_, publish_debug_image_);
     cv::Mat debug_image;
     if (debug_image_needed) {
       stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
@@ -2118,6 +2415,7 @@ private:
     }
 
     stage_start = timing_enabled ? SteadyClock::now() : TimePoint{};
+    long long compressed_debug_us = 0;
     const bool published_any = publishOutputs(
       morph_msg->header,
       morph_mask,
@@ -2134,13 +2432,14 @@ private:
       length_filtered_ridge_mask,
       reconstructed_mask,
       white_final_mask,
-      debug_image);
+      debug_image,
+      compressed_debug_us);
     if (timing_enabled) {
-      recordStageDuration(
-        timing.stage_us,
-        RidgeTimingStage::PublishOutputs,
-        stage_start,
-        SteadyClock::now());
+      const long long publish_total_us = elapsedUs(stage_start, SteadyClock::now());
+      timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::DebugCompression)] =
+        compressed_debug_us;
+      timing.stage_us[static_cast<std::size_t>(RidgeTimingStage::PublishOutputs)] =
+        std::max(0LL, publish_total_us - compressed_debug_us);
     }
 
     const bool display_requested = anyImageWindowCreated();

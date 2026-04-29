@@ -139,6 +139,8 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")
             ),  # Optional remapped-space robot mask image path
+            DeclareLaunchArgument("debug_jpeg_quality", default_value="80"),  # JPEG quality for compressed debug image topics
+            DeclareLaunchArgument("debug_image_max_fps", default_value="5.0"),  # Max FPS for lazy debug image topics
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument(
                 "fastmap_file", default_value=""
