@@ -326,7 +326,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "map_yaml_file", default_value=str(map_yaml_default)
             ),  # Nav2 map YAML path
-            DeclareLaunchArgument("use_fake_yaw", default_value="true"),  # Whether to use synthetic yaw
+            DeclareLaunchArgument("use_fake_yaw", default_value="false"),  # Whether to use synthetic yaw
             DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Robot yaw topic
             DeclareLaunchArgument(
                 "fake_yaw_degrees", default_value="0.0"
@@ -471,7 +471,7 @@ def generate_launch_description():
             DeclareLaunchArgument("odom_noise_y_from_y", default_value="0.06"),  # Lateral motion contribution to y variance
             DeclareLaunchArgument("odom_noise_y_from_theta", default_value="0.0025"),  # Rotation contribution to y variance
             DeclareLaunchArgument("odom_noise_y_bias", default_value="0.0001"),  # Constant y variance term
-            DeclareLaunchArgument("odom_noise_theta_from_x", default_value="0.30"),  # Forward motion contribution to heading variance
+            DeclareLaunchArgument("odom_noise_theta_from_x", default_value="0.60"),  # Forward motion contribution to heading variance
             DeclareLaunchArgument("odom_noise_theta_from_y", default_value="0.60"),  # Lateral motion contribution to heading variance
             DeclareLaunchArgument("odom_noise_theta_from_theta", default_value="0.09"),  # Rotation contribution to heading variance
             DeclareLaunchArgument("odom_noise_theta_bias", default_value="0.000304617"),  # Constant heading variance term

@@ -24,7 +24,18 @@ Most functions block until the requested operation finishes or succeeds. STM32
 commands are retried until they receive a successful gateway response, unless
 ROS shuts down or a validation error is raised before sending the command.
 
+All public `robot.*` functions accept `wait_sec=0.0`. This is an optional extra
+wait after the function finishes normally. The wait keeps ROS callbacks spinning,
+like `robot.sleep(...)`, and `0.0` means no extra wait.
+
 ## Coordinate And Unit Conventions
+
+For the full coordinate-frame contract and conversion formulas, see
+[`docs/coordinate_frames.md`](coordinate_frames.md). New coordinate math should
+refer to that document.
+
+`CompetitionRobot` also accepts `yaw_zero_map_degrees` as a ROS parameter. Keep
+it equal to the `amcl_fusion` value so `ball.turn_angle_deg` matches STM32 yaw.
 
 - `robot.goto(...)` uses the ROS map frame in meters.
 - `robot.get_pose()` returns the current ROS map-frame pose in meters and yaw in
@@ -50,6 +61,7 @@ robot.goto(
     goto_timeout_sec=None,
     pose_wait_timeout_sec=None,
     action_server_wait_sec=None,
+    wait_sec=0.0,
 )
 ```
 
@@ -70,6 +82,7 @@ Defaults, when optional parameters are omitted:
 - `goto_timeout_sec=40.0`
 - `pose_wait_timeout_sec=5.0`
 - `action_server_wait_sec=10.0`
+- `wait_sec=0.0`
 
 Returns `True` when the target is reached. Raises `GotoError` if the target
 cannot be reached before the timeout or iteration limit, or if the motion action
@@ -78,7 +91,7 @@ server cannot be used safely.
 ### `robot.move(...)`
 
 ```python
-robot.move(x_cm=10, y_cm=0, retry_delay_sec=None, timeout_sec=None)
+robot.move(x_cm=10, y_cm=0, retry_delay_sec=None, timeout_sec=None, wait_sec=0.0)
 ```
 
 Sends STM32 `cmd_dis <x_cm> <y_cm>` directly through the `/stm32/motion` action.
@@ -96,7 +109,7 @@ If omitted, those use the robot's configured defaults.
 ### `robot.turn(...)`
 
 ```python
-robot.turn(angle_deg=90, retry_delay_sec=None, timeout_sec=None)
+robot.turn(angle_deg=90, retry_delay_sec=None, timeout_sec=None, wait_sec=0.0)
 ```
 
 Sends STM32 `cmd_turn <angle_deg>` through the `/stm32/motion` action. The target
@@ -111,7 +124,7 @@ or ROS shutdown.
 ```python
 robot.drive(speed_percent=50, move_angle_deg=90)
 robot.drive(speed_percent=50, move_angle_deg=90, head_lock=True)
-robot.drive(speed_percent=0, move_angle_deg=0)
+robot.drive(speed_percent=0, move_angle_deg=0, wait_sec=0.0)
 ```
 
 Sends STM32 `cmd_dkmotor <speed_percent> <move_angle_deg> [head_lock]` through
@@ -135,7 +148,7 @@ mode. Stop continuous movement with `robot.stop()` or by sending
 ### `robot.stop()`
 
 ```python
-robot.stop()
+robot.stop(wait_sec=0.0)
 ```
 
 Sends STM32 `cmd_juststop`. This stops current continuous chassis motion while
@@ -148,8 +161,8 @@ Returns `True` after a successful ACK.
 ### `robot.motion_enable()` / `robot.motion_disable()`
 
 ```python
-robot.motion_enable()
-robot.motion_disable()
+robot.motion_enable(wait_sec=0.0)
+robot.motion_disable(wait_sec=0.0)
 ```
 
 Send STM32 `cmd_conmotion 1` or `cmd_conmotion 0`.
@@ -161,7 +174,7 @@ default yaw-hold output. Both return `True` after a successful ACK.
 ### `robot.reset_yaw()`
 
 ```python
-robot.reset_yaw()
+robot.reset_yaw(wait_sec=0.0)
 ```
 
 Sends STM32 `cmd_anglecal`. This performs the same yaw zeroing operation as the
@@ -174,7 +187,7 @@ success.
 ### `robot.reset_mcu()`
 
 ```python
-robot.reset_mcu()
+robot.reset_mcu(wait_sec=0.0)
 ```
 
 Sends STM32 `cmd_mcureset`, which asks the firmware to perform a software reset.
@@ -189,7 +202,7 @@ will need time to come back.
 ### `robot.suck(...)`
 
 ```python
-robot.suck(speed_percent=50)
+robot.suck(speed_percent=50, wait_sec=0.0)
 ```
 
 Sends STM32 `cmd_suck <speed_percent>`. `speed_percent` must be in `0-100`.
@@ -200,7 +213,7 @@ Returns `True` after a successful ACK.
 
 ```python
 robot.suck_on()
-robot.suck_on(speed_percent=15)
+robot.suck_on(speed_percent=15, wait_sec=0.0)
 ```
 
 Convenience wrapper for `robot.suck(...)`. The default is `100%` if no speed is
@@ -209,7 +222,7 @@ specified.
 ### `robot.suck_off()`
 
 ```python
-robot.suck_off()
+robot.suck_off(wait_sec=0.0)
 ```
 
 Convenience wrapper for `robot.suck(speed_percent=0)`.
@@ -219,7 +232,7 @@ Convenience wrapper for `robot.suck(speed_percent=0)`.
 ### `robot.request_state()`
 
 ```python
-state = robot.request_state()
+state = robot.request_state(wait_sec=0.0)
 print(state.dx, state.dy, state.dtheta, state.theta)
 ```
 
@@ -238,7 +251,7 @@ normally zero.
 ### `robot.read_infrared()`
 
 ```python
-ir = robot.read_infrared()
+ir = robot.read_infrared(wait_sec=0.0)
 print(ir.channel)
 ```
 
@@ -253,7 +266,7 @@ The wrapper validates that the returned channel is in range.
 ### `robot.infrared_channel()`
 
 ```python
-channel = robot.infrared_channel()
+channel = robot.infrared_channel(wait_sec=0.0)
 ```
 
 Convenience wrapper for `robot.read_infrared().channel`. Use this when only the
@@ -262,8 +275,8 @@ channel number matters.
 ### `robot.set_infrared_mode(...)`
 
 ```python
-robot.set_infrared_mode(mode="pt")
-robot.set_infrared_mode(mode="tz")
+robot.set_infrared_mode(mode="pt", wait_sec=0.0)
+robot.set_infrared_mode(mode="tz", wait_sec=0.0)
 ```
 
 Sends STM32 `cmd_infred_mode <mode>`.
@@ -278,8 +291,8 @@ Returns `True` after a successful ACK.
 ### `robot.infrared_plain_mode()` / `robot.infrared_modulated_mode()`
 
 ```python
-robot.infrared_plain_mode()
-robot.infrared_modulated_mode()
+robot.infrared_plain_mode(wait_sec=0.0)
+robot.infrared_modulated_mode(wait_sec=0.0)
 ```
 
 Convenience wrappers for:
@@ -293,7 +306,7 @@ Convenience wrappers for:
 
 ```python
 pose = robot.get_pose()
-pose = robot.get_pose(timeout_sec=1.0)
+pose = robot.get_pose(timeout_sec=1.0, wait_sec=0.0)
 print(pose.x_m, pose.y_m, pose.yaw_deg)
 ```
 
@@ -310,10 +323,9 @@ If `timeout_sec` is omitted, it waits until a pose is available.
 ### `robot.find_ball(...)`
 
 ```python
-ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5)
+ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5, wait_sec=0.0)
 if ball is not None:
-    pose = robot.get_pose()
-    robot.goto(x_m=pose.x_m + ball.x_m, y_m=pose.y_m + ball.y_m)
+    robot.goto(x_m=ball.absolute_x_m, y_m=ball.absolute_y_m)
 ```
 
 Reads `/orange_ball_detector/detection` and returns the latest valid ball
@@ -332,20 +344,31 @@ Returns a `BallDetection` object:
 
 - `ball.x_m`, `ball.y_m`, `ball.z_m`: ball offset from the robot, rotated into
   the map axes, in meters.
-- `ball.local_x_m`, `ball.local_y_m`, `ball.local_z_m`: raw detector position
-  in the robot/base-link frame, in meters.
+- `ball.absolute_x_m`, `ball.absolute_y_m`, `ball.absolute_z_m`: ball position
+  in the map frame, in meters.
+- `ball.local_x_m`, `ball.local_y_m`, `ball.local_z_m`: raw orange-ball detector
+  coordinates, in meters. Detector `+x` is camera-image down, and detector `+y`
+  is camera-image left.
+- `ball.base_x_m`, `ball.base_y_m`, `ball.base_z_m`: ball position converted to
+  robot `base_link`, in meters. `+x` is robot front, and `+y` is robot left.
+- `ball.angle_deg`: relative ball bearing in the robot/base-link frame, in degrees.
+  `0 deg` is robot front, `90 deg` is robot left, and `-90 deg` is robot right.
+- `ball.absolute_map_angle_deg`: ROS map-frame yaw toward the ball, in degrees.
+  This is not the angle to pass to `robot.turn(...)`.
+- `ball.turn_angle_deg`: STM32 firmware yaw target toward the ball, in degrees.
+  Use this with `robot.turn(angle_deg=ball.turn_angle_deg)`.
 - `ball.confidence`: detector confidence.
 - `ball.stamp_sec`: detection message timestamp in seconds.
 
-To move toward an absolute ball position, add `ball.x_m` and `ball.y_m` to the
-current `robot.get_pose()` position, as shown above.
+To move toward the ball's map position, use `ball.absolute_x_m` and
+`ball.absolute_y_m`, as shown above.
 
 ## Waiting
 
 ### `robot.sleep(...)`
 
 ```python
-robot.sleep(duration_sec=1.0)
+robot.sleep(duration_sec=1.0, wait_sec=0.0)
 ```
 
 First calls `robot.stop()` and waits for the STM32 `cmd_juststop` ACK, then waits
@@ -365,4 +388,3 @@ callbacks to keep running.
 - `cmd_dkmotor` continuous drive commands only wait for acceptance, not for
   movement completion.
 - `robot.sleep(...)` intentionally sends `cmd_juststop` before waiting.
-

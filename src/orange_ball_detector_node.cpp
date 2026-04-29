@@ -1979,12 +1979,13 @@ private:
     const cv::Point2d & filtered_raw_center_px,
     const cv::Point2d & filtered_ground_center_m)
   {
-    // `ball_center_ground` is the physical ball-center estimate in `base_link`.
+    // `ball_center_ground` is the physical ball-center estimate in the
+    // orange-ball detector image-ground frame. See docs/coordinate_frames.md.
     // `ball_center_raw_px` is the tracked image-space representative center after EMA.
     // `ball_top_raw_px` is the raw-image representative point of the top-band envelope.
     geometry_msgs::msg::PoseStamped ground_msg;
     ground_msg.header = header;
-    ground_msg.header.frame_id = "base_link";
+    ground_msg.header.frame_id = "orange_ball_detector_ground";
     ground_msg.pose.position.x = filtered_ground_center_m.x;
     ground_msg.pose.position.y = filtered_ground_center_m.y;
     ground_msg.pose.position.z = lut_.ball_diameter_m * 0.5;
@@ -2018,7 +2019,7 @@ private:
   {
     rcj_localization::msg::OrangeBallDetection msg;
     msg.header = header;
-    msg.header.frame_id = "base_link";
+    msg.header.frame_id = "orange_ball_detector_ground";
     msg.detected = detected;
     msg.confidence = static_cast<float>(confidence);
     if (detected) {

@@ -1336,9 +1336,21 @@ private:
   void
   publishDebugPointCloud(const std_msgs::msg::Header &header,
                          const std::vector<rcj_loc::Point2D> &observations) {
+    std::optional<rcj_loc::Particle> pose_estimate;
+    {
+      std::lock_guard<std::mutex> lock(pose_mutex_);
+      pose_estimate = latest_pose_estimate_;
+    }
+    if (!pose_estimate.has_value()) {
+      return;
+    }
+
+    const double cos_t = std::cos(pose_estimate->theta);
+    const double sin_t = std::sin(pose_estimate->theta);
+
     sensor_msgs::msg::PointCloud2 cloud;
     cloud.header = header;
-    cloud.header.frame_id = "base_link";
+    cloud.header.frame_id = "map";
 
     sensor_msgs::PointCloud2Modifier modifier(cloud);
     modifier.setPointCloud2FieldsByString(1, "xyz");
@@ -1349,8 +1361,12 @@ private:
     sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
 
     for (const auto &observation : observations) {
-      *iter_x = static_cast<float>(observation.x);
-      *iter_y = static_cast<float>(observation.y);
+      const double map_x = pose_estimate->x + (observation.x * cos_t) -
+                           (observation.y * sin_t);
+      const double map_y = pose_estimate->y + (observation.x * sin_t) +
+                           (observation.y * cos_t);
+      *iter_x = static_cast<float>(map_x);
+      *iter_y = static_cast<float>(map_y);
       *iter_z = 0.0f;
       ++iter_x;
       ++iter_y;
@@ -1487,6 +1503,10 @@ private:
   publishVisualizationsAndTF(const std::vector<rcj_loc::Particle> &particles,
                              const rcj_loc::Particle &pose_estimate) {
     const rclcpp::Time now = this->now();
+    {
+      std::lock_guard<std::mutex> lock(pose_mutex_);
+      latest_pose_estimate_ = pose_estimate;
+    }
 
     geometry_msgs::msg::PoseArray cloud_msg;
     cloud_msg.header.stamp = now;
@@ -1627,9 +1647,11 @@ private:
 
   std::mutex obs_mutex_;
   std::mutex gateway_mutex_;
+  std::mutex pose_mutex_;
   std::vector<rcj_loc::Point2D> latest_observations_;
   std::unique_ptr<rcj_loc::ParticleFilterAmclFusion> pf_;
   std::optional<GatewayOdomResult> pending_gateway_result_;
+  std::optional<rcj_loc::Particle> latest_pose_estimate_;
 
   std::string mask_topic_;
   double meters_per_pixel_ = -1.0;

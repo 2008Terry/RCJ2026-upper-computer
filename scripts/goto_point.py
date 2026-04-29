@@ -92,6 +92,7 @@ class GotoNavigator(Node):
         goto_timeout_sec: Optional[float] = None,
         pose_wait_timeout_sec: Optional[float] = None,
         action_server_wait_sec: Optional[float] = None,
+        wait_sec: float = 0.0,
     ) -> bool:
         target_x = float(x_m)
         target_y = float(y_m)
@@ -134,6 +135,7 @@ class GotoNavigator(Node):
             if action_server_wait_sec is None
             else action_server_wait_sec,
         )
+        wait_after = self._non_negative_float("wait_sec", wait_sec)
         if not math.isfinite(target_x) or not math.isfinite(target_y):
             raise ValueError("goto target coordinates must be finite.")
 
@@ -161,6 +163,7 @@ class GotoNavigator(Node):
                     f"{target_y:.3f}) m, current=({current_x:.3f}, "
                     f"{current_y:.3f}) m, error={distance:.3f} m"
                 )
+                self._wait_after(wait_after)
                 return True
 
             if time.monotonic() >= deadline:
@@ -211,6 +214,7 @@ class GotoNavigator(Node):
                 f"Goto target reached after final settle: "
                 f"error={final_distance:.3f} m"
             )
+            self._wait_after(wait_after)
             return True
 
         raise GotoError(
@@ -381,6 +385,9 @@ class GotoNavigator(Node):
         deadline = time.monotonic() + max(0.0, duration_sec)
         while rclpy.ok() and time.monotonic() < deadline:
             self._spin_once_until(deadline)
+
+    def _wait_after(self, wait_sec: float) -> None:
+        self._sleep_with_spin(self._non_negative_float("wait_sec", wait_sec))
 
     def _spin_once_until(self, deadline: Optional[float]) -> None:
         timeout_sec = 0.05
