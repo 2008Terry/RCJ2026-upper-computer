@@ -81,6 +81,9 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         self.declare_parameter("reset_yaw_on_start", False)
         self.declare_parameter("align_yaw_on_start", True)
         self.declare_parameter("start_yaw_degrees", 0.0)
+        self.declare_parameter("approach_start_on_run", True)
+        self.declare_parameter("approach_start_goto_timeout_sec", 120.0)
+        self.declare_parameter("approach_start_max_iterations", 80)
         self.declare_parameter("stop_on_exit", True)
         self.declare_parameter("dry_run", False)
 
@@ -138,6 +141,16 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         self.reset_yaw_on_start = bool(self.get_parameter("reset_yaw_on_start").value)
         self.align_yaw_on_start = bool(self.get_parameter("align_yaw_on_start").value)
         self.start_yaw_degrees = self._finite_float("start_yaw_degrees")
+        self.approach_start_on_run = bool(
+            self.get_parameter("approach_start_on_run").value
+        )
+        self.approach_start_goto_timeout_sec = self._positive_param(
+            "approach_start_goto_timeout_sec"
+        )
+        self.approach_start_max_iterations = max(
+            1,
+            int(self.get_parameter("approach_start_max_iterations").value),
+        )
         self.stop_on_exit = bool(self.get_parameter("stop_on_exit").value)
         self.dry_run = bool(self.get_parameter("dry_run").value)
 
@@ -255,6 +268,7 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
             f"waypoint_spacing={self.waypoint_spacing_m:.3f}, "
             f"align_yaw_on_start={self.align_yaw_on_start}, "
             f"start_yaw_degrees={self.start_yaw_degrees:.3f}, "
+            f"approach_start_on_run={self.approach_start_on_run}, "
             f"capture_images={self.capture_images}, "
             f"enable_camera_view={self.enable_camera_view}, "
             f"image_topic='{self.image_topic}'"
@@ -489,6 +503,44 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         if self.align_yaw_on_start:
             self.turn(self.start_yaw_degrees)
 
+    def approach_start_waypoint(self) -> None:
+        if not self.waypoints:
+            raise RuntimeError("Snake path has no waypoints.")
+
+        start_x_m, start_y_m = self.waypoints[0]
+        current_x_m, current_y_m = self.wait_for_pose(
+            timeout_sec=self.path_pose_wait_timeout_sec
+        )
+        start_error_m = math.hypot(start_x_m - current_x_m, start_y_m - current_y_m)
+        if start_error_m <= self.path_goal_tolerance_m:
+            self.get_logger().info(
+                f"Already at snake start waypoint: "
+                f"current=({current_x_m:.3f}, {current_y_m:.3f}) m, "
+                f"target=({start_x_m:.3f}, {start_y_m:.3f}) m, "
+                f"error={start_error_m:.3f} m"
+            )
+            return
+
+        self.active_waypoint_index = -1
+        self.active_target = (start_x_m, start_y_m)
+        self.get_logger().info(
+            f"Approaching snake start waypoint before collection: "
+            f"current=({current_x_m:.3f}, {current_y_m:.3f}) m, "
+            f"target=({start_x_m:.3f}, {start_y_m:.3f}) m, "
+            f"error={start_error_m:.3f} m"
+        )
+        self.goto(
+            start_x_m,
+            start_y_m,
+            goal_tolerance_m=self.path_goal_tolerance_m,
+            max_step_m=self.path_max_step_m,
+            settle_sec=self.path_settle_sec,
+            max_iterations=self.approach_start_max_iterations,
+            goto_timeout_sec=self.approach_start_goto_timeout_sec,
+            pose_wait_timeout_sec=self.path_pose_wait_timeout_sec,
+            action_server_wait_sec=self.path_action_server_wait_sec,
+        )
+
     def run_snake_path(self) -> None:
         self.capture_active = True
         try:
@@ -532,6 +584,8 @@ def run_task(robot: SnakeBlackCircleDatasetCollector) -> None:
         return
 
     robot.prepare_for_motion()
+    if robot.approach_start_on_run:
+        robot.approach_start_waypoint()
     robot.run_snake_path()
 
 
