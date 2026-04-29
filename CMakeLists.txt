@@ -159,6 +159,7 @@ install(PROGRAMS
   "scripts/task_runner.py"
   "scripts/collect_black_circle_training_images.py"
   "scripts/snake_collect_black_circle_dataset.py"
+  "scripts/remapped_photo_capture_ui.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 
