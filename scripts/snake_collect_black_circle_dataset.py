@@ -79,6 +79,8 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         self.declare_parameter("start_delay_sec", 1.0)
         self.declare_parameter("motion_enable_on_start", True)
         self.declare_parameter("reset_yaw_on_start", False)
+        self.declare_parameter("align_yaw_on_start", True)
+        self.declare_parameter("start_yaw_degrees", 0.0)
         self.declare_parameter("stop_on_exit", True)
         self.declare_parameter("dry_run", False)
 
@@ -134,6 +136,8 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
         self.start_delay_sec = self._non_negative_param("start_delay_sec")
         self.motion_enable_on_start = bool(self.get_parameter("motion_enable_on_start").value)
         self.reset_yaw_on_start = bool(self.get_parameter("reset_yaw_on_start").value)
+        self.align_yaw_on_start = bool(self.get_parameter("align_yaw_on_start").value)
+        self.start_yaw_degrees = self._finite_float("start_yaw_degrees")
         self.stop_on_exit = bool(self.get_parameter("stop_on_exit").value)
         self.dry_run = bool(self.get_parameter("dry_run").value)
 
@@ -249,6 +253,8 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
             f"wall_margin={self.path_wall_margin_m:.3f}, "
             f"column_spacing={self.column_spacing_m:.3f}, "
             f"waypoint_spacing={self.waypoint_spacing_m:.3f}, "
+            f"align_yaw_on_start={self.align_yaw_on_start}, "
+            f"start_yaw_degrees={self.start_yaw_degrees:.3f}, "
             f"capture_images={self.capture_images}, "
             f"enable_camera_view={self.enable_camera_view}, "
             f"image_topic='{self.image_topic}'"
@@ -480,6 +486,8 @@ class SnakeBlackCircleDatasetCollector(CompetitionRobot):
             self.motion_enable()
         if self.reset_yaw_on_start:
             self.reset_yaw()
+        if self.align_yaw_on_start:
+            self.turn(self.start_yaw_degrees)
 
     def run_snake_path(self) -> None:
         self.capture_active = True
