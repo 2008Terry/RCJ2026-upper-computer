@@ -25,6 +25,14 @@ class Stm32State:
 
 
 @dataclass(frozen=True)
+class RobotPose:
+    x_m: float
+    y_m: float
+    yaw_rad: float
+    yaw_deg: float
+
+
+@dataclass(frozen=True)
 class BallDetection:
     x_m: float
     y_m: float
@@ -164,6 +172,18 @@ class CompetitionRobot(GotoNavigator):
             theta=float(response.theta),
             attempts=int(response.attempts),
             message=str(response.message),
+        )
+
+    def get_pose(self, *, timeout_sec: Optional[float] = None) -> RobotPose:
+        x_m, y_m = self.wait_for_pose(timeout_sec=timeout_sec)
+        if self._latest_pose_yaw_rad is None:
+            raise GotoError(f"Timed out waiting for yaw from '{self.pose_topic}'.")
+        yaw_rad = self._latest_pose_yaw_rad
+        return RobotPose(
+            x_m=x_m,
+            y_m=y_m,
+            yaw_rad=yaw_rad,
+            yaw_deg=math.degrees(yaw_rad),
         )
 
     def find_ball(

@@ -1,4 +1,5 @@
 from __future__ import annotations
+# from turtle import goto
 
 
 # Edit only run_task(robot) for normal competition programming.
@@ -38,6 +39,10 @@ from __future__ import annotations
 # - robot.request_state()
 #     Read the latest STM32 motion error/state. Returns
 #     state.dx/state.dy/state.dtheta/state.theta.
+# - robot.get_pose(timeout_sec=None)
+#     Read the latest robot pose in the map/world frame. Returns
+#     pose.x_m/pose.y_m in meters and pose.yaw_deg/pose.yaw_rad. yaw_deg uses
+#     ROS map convention: 0 deg is +x, 90 deg is +y.
 # - robot.find_ball(timeout_sec=1.0, min_confidence=0.0)
 #     Reads /orange_ball_detector/detection, where detected/confidence/position
 #     are published together from the same camera frame. Returns the latest valid
@@ -48,8 +53,8 @@ from __future__ import annotations
 #     base_link detection, and ball.confidence is the detector confidence.
 #     Example: ball = robot.find_ball(timeout_sec=1.0)
 #     if ball is not None:
-#         robot_x, robot_y = robot.wait_for_pose()
-#         robot.goto(x_m=robot_x + ball.x_m, y_m=robot_y + ball.y_m)
+#         pose = robot.get_pose()
+#         robot.goto(x_m=pose.x_m + ball.x_m, y_m=pose.y_m + ball.y_m)
 # - robot.sleep(duration_sec=...)
 #     First calls robot.stop(), waits for the cmd_juststop ACK, then waits for
 #     duration_sec while still spinning ROS callbacks. run_task does not execute
@@ -69,8 +74,22 @@ def run_task(robot) -> None:
     # if ball is not None:
     #     print(ball.x_m, ball.y_m, ball.z_m, ball.confidence)
 
-    robot.suck_on(speed_percent=10)
-    # robot.motion_disable()
+    # pose = robot.get_pose()
+    # print(pose.x_m, pose.y_m, pose.yaw_deg)
+    
+    robot.suck_on(speed_percent=15)
+    robot.motion_disable()
+    
+    
+    
+
+    # while()
+    #     random()
+
+    #     goto()
+
+    #     take picture
+
     # robot.sleep(duration_sec=1.0)
     # robot.suck_on(speed_percent=0)
     
