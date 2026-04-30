@@ -182,7 +182,8 @@ class GotoNavigator(Node):
             command = (
                 "cmd_dis "
                 f"{_format_number(step_dx_stm32_cm)} "
-                f"{_format_number(step_dy_stm32_cm)}"
+                f"{_format_number(step_dy_stm32_cm)} "
+                "1"
             )
 
             self.get_logger().info(

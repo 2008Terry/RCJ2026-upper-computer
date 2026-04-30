@@ -330,7 +330,7 @@ def generate_launch_description():
             DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Robot yaw topic
             DeclareLaunchArgument(
                 "fake_yaw_degrees", default_value="0.0"
-            ),  # Fixed yaw angle used when use_fake_yaw is true
+            ),  # Fixed STM32 yaw angle used when use_fake_yaw is true
             DeclareLaunchArgument(
                 "yaw_zero_map_degrees", default_value="0.0"
             ),  # Field-heading offset for robot yaw 0; 0 means the top side of the field

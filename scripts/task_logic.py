@@ -6,7 +6,7 @@ from __future__ import annotations
 # Full API documentation: docs/task_logic_api.md
 # Coordinate-frame reference: docs/coordinate_frames.md
 # Keep CompetitionRobot yaw_zero_map_degrees equal to amcl_fusion's value when
-# using ball.turn_angle_deg.
+# using ball.absolute_angle_deg.
 # Prefer keyword arguments such as x_m=-0.40 and angle_deg=90, so each number
 # keeps its meaning at the call site.
 #
@@ -34,6 +34,12 @@ from __future__ import annotations
 #     Turn suction on. Default is 100%.
 # - robot.suck_off(wait_sec=0.0)
 #     Turn suction off. Equivalent to robot.suck(speed_percent=0).
+# - robot.is_ball_detected(wait_sec=0.0)
+#     Send cmd_xqcx and return True when the suction microswitch reports a ball.
+# - robot.set_relay(enabled=True/False, wait_sec=0.0)
+#     Send cmd_dct 1/0 to control the PD0/JD1 relay.
+# - robot.relay_on(wait_sec=0.0) / robot.relay_off(wait_sec=0.0)
+#     Convenience wrappers for cmd_dct.
 # - robot.reset_yaw(wait_sec=0.0)
 #     Reset STM32 yaw zero. Sends cmd_anglecal.
 # - robot.reset_mcu(wait_sec=0.0)
@@ -49,7 +55,8 @@ from __future__ import annotations
 # - robot.get_pose(timeout_sec=None, wait_sec=0.0)
 #     Read the latest robot pose in the map/world frame. Returns
 #     pose.x_m/pose.y_m in meters and pose.yaw_deg/pose.yaw_rad. yaw_deg uses
-#     ROS map convention: 0 deg is +x, 90 deg is +y.
+#     ROS map convention: 0 deg is map-right/+x, 90 deg is map-up/+y. This is
+#     not STM32 yaw.
 # - robot.find_ball(timeout_sec=1.0, min_confidence=0.0, wait_sec=0.0)
 #     Reads /orange_ball_detector/detection, where detected/confidence/position
 #     are published together from the same camera frame. Returns the latest valid
@@ -61,18 +68,18 @@ from __future__ import annotations
 #     ball.base_x_m/base_y_m/base_z_m are converted to robot base_link:
 #     +x front, +y left. ball.angle_deg is the relative ball bearing in the
 #     robot frame: 0 is front, 90 is left, -90 is right.
-#     ball.absolute_map_angle_deg is the ROS map yaw toward the ball, not for
-#     robot.turn(). ball.turn_angle_deg is the STM32 yaw target to pass to
+#     ball.absolute_angle_deg is the STM32 yaw target to pass to
 #     robot.turn(angle_deg=...). ball.confidence is the detector confidence.
 #     Example: ball = robot.find_ball(timeout_sec=1.0)
 #     if ball is not None:
-#         print(ball.angle_deg, ball.absolute_map_angle_deg, ball.turn_angle_deg)
-#         robot.turn(angle_deg=ball.turn_angle_deg)
+#         print(ball.angle_deg, ball.absolute_angle_deg)
+#         robot.turn(angle_deg=ball.absolute_angle_deg)
 #         robot.goto(x_m=ball.absolute_x_m, y_m=ball.absolute_y_m)
-# - robot.move(x_cm=..., y_cm=..., retry_delay_sec=None, timeout_sec=None,
-#              wait_sec=0.0)
-#     Send STM32 cmd_dis directly. x_cm/y_cm are relative odometry-frame
-#     centimeters, matching the firmware interface document.
+# - robot.move(x_cm=..., y_cm=..., speed_profile=1, retry_delay_sec=None,
+#              timeout_sec=None, wait_sec=0.0)
+#     Send STM32 cmd_dis directly. x_cm/y_cm are field-fixed centimeters:
+#     x_cm > 0 is map-left, y_cm > 0 is map-down. speed_profile can be
+#     0 fast, 1 normal, or 2 smooth.
 # - robot.sleep(duration_sec=..., wait_sec=0.0)
 #     First calls robot.stop(), waits for the cmd_juststop ACK, then waits for
 #     duration_sec while still spinning ROS callbacks. run_task does not execute
@@ -135,14 +142,14 @@ def run_task(robot) -> None:
     # robot.turn(angle_deg=-90)
     # robot.goto(x_m=0.40, y_m=0.60)
     
-    # ball_pose = robot.find_ball(timeout_sec=3.0, min_confidence=0.5)
-    # if ball_pose is not None:
-    #     print(ball_pose)
-    #     robot.turn(angle_deg=ball_pose.turn_angle_deg)
-    #     robot.sleep(duration_sec=10)
-    #     robot.goto(x_m=ball_pose.absolute_x_m, y_m=ball_pose.absolute_y_m)
-    # else:
-    #     print("Ball not found")
+    ball_pose = robot.find_ball(timeout_sec=3.0, min_confidence=0.5)
+    if ball_pose is not None:
+        print(ball_pose)
+        robot.turn(angle_deg=ball_pose.absolute_angle_deg)
+        robot.sleep(duration_sec=10)
+        robot.goto(x_m=ball_pose.absolute_x_m, y_m=ball_pose.absolute_y_m)
+    else:
+        print("Ball not found")
     
     # robot.turn(angle_deg=90)
     # robot.suck_off()

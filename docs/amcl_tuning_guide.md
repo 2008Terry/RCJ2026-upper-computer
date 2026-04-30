@@ -46,8 +46,8 @@ ros2 launch rcj_localization imx477_hsv_dt_fastmap_amcl.launch.py
 | 参数 | 当前默认 | 作用 |
 | --- | --- | --- |
 | `use_fake_yaw` | `true` | 是否使用固定 yaw |
-| `fake_yaw_degrees` | `0.0` | 固定 yaw 值 |
-| `yaw_zero_map_degrees` | `0.0` | yaw=0 对应地图方向的偏移 |
+| `fake_yaw_degrees` | `0.0` | 固定 STM32 yaw 值；默认 `0` 表示朝地图上方 |
+| `yaw_zero_map_degrees` | `0.0` | STM32 yaw 零点相对地图上方的偏移 |
 | `yaw_topic` | `/robot/yaw` | 真实 yaw topic |
 | `use_stm32_gateway_odometry` | `true` | 是否通过 STM32 gateway 请求 odom 增量 |
 | `stm32_command_service` | `/stm32/send_command` | STM32 service |
@@ -93,7 +93,8 @@ use_fake_yaw:=false
 
 ### 2.5 STM32 odometry 各向异性噪声
 
-成功收到 STM32 odom 后，AMCL 会把运动增量转成机体系：
+成功收到 STM32 odom 后，AMCL 先把 STM32 场地固定位移轴转换成 ROS map 轴，
+再按运动中点 yaw 把增量转成机体系：
 
 ```text
 dx_b, dy_b, dtheta

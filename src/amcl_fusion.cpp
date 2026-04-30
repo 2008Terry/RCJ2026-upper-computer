@@ -114,8 +114,8 @@ double fieldYawDegreesToRosMapRadians(double yaw_degrees,
 }
 
 double stm32XAxisDegreesToRosMapRadians(double zero_map_degrees) {
-  // STM32 dx is robot-left when robot yaw is 0, so it is 90 degrees left of
-  // the robot-forward field yaw.
+  // STM32 dx is field-fixed map-left, independent of the robot's current yaw.
+  // With zero_map_degrees=0 this is ROS map 180 deg.
   return normalizeAngle(degreesToRadians(180.0 + zero_map_degrees));
 }
 

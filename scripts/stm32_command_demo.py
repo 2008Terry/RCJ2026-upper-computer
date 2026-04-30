@@ -41,9 +41,31 @@ def main() -> int:
     parser.add_argument("--port", default="/dev/ttyACM0")
     parser.add_argument("--baudrate", type=int, default=115200)
     parser.add_argument("--timeout-sec", type=float, default=1.0)
-    parser.add_argument("--x-coord", type=float, default=100.0)
-    parser.add_argument("--y-coord", type=float, default=-100.0)
-    parser.add_argument("--degrees", type=float, default=90.0)
+    parser.add_argument(
+        "--x-coord",
+        type=float,
+        default=100.0,
+        help="cmd_dis x in cm; positive is map-left.",
+    )
+    parser.add_argument(
+        "--y-coord",
+        type=float,
+        default=-100.0,
+        help="cmd_dis y in cm; positive is map-down.",
+    )
+    parser.add_argument(
+        "--degrees",
+        type=float,
+        default=90.0,
+        help="cmd_turn STM32 yaw in degrees; 0 is map-up, 90 is map-left.",
+    )
+    parser.add_argument(
+        "--speed-profile",
+        type=int,
+        default=1,
+        choices=(0, 1, 2),
+        help="cmd_dis speed profile: 0 fast, 1 normal, 2 smooth.",
+    )
     parser.add_argument(
         "--send",
         action="store_true",
@@ -60,7 +82,7 @@ def main() -> int:
     )
 
     try:
-        dis_packet = sender.cmd_dis(args.x_coord, args.y_coord)
+        dis_packet = sender.cmd_dis(args.x_coord, args.y_coord, args.speed_profile)
         turn_packet = sender.cmd_turn(args.degrees)
     finally:
         sender.close()

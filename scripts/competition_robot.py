@@ -55,8 +55,7 @@ class BallDetection:
     local_y_m: float
     local_z_m: float
     angle_deg: float
-    absolute_map_angle_deg: float
-    turn_angle_deg: float
+    absolute_angle_deg: float
     confidence: float
     stamp_sec: float
 
@@ -132,6 +131,7 @@ class CompetitionRobot(GotoNavigator):
         *,
         x_cm: float,
         y_cm: float,
+        speed_profile: int = 1,
         retry_delay_sec: Optional[float] = None,
         timeout_sec: Optional[float] = None,
         wait_sec: float = 0.0,
@@ -141,10 +141,14 @@ class CompetitionRobot(GotoNavigator):
         y_cm_value = float(y_cm)
         if not math.isfinite(x_cm_value) or not math.isfinite(y_cm_value):
             raise ValueError("x_cm and y_cm must be finite.")
+        speed_profile_int = int(speed_profile)
+        if speed_profile_int not in (0, 1, 2):
+            raise ValueError("speed_profile must be 0, 1, or 2.")
         command = (
             "cmd_dis "
             f"{_format_number(x_cm_value)} "
-            f"{_format_number(y_cm_value)}"
+            f"{_format_number(y_cm_value)} "
+            f"{speed_profile_int}"
         )
         result = self._send_motion_until_success(
             command,
@@ -278,6 +282,32 @@ class CompetitionRobot(GotoNavigator):
 
     def suck_off(self, *, wait_sec: float = 0.0) -> bool:
         return self.suck(speed_percent=0, wait_sec=wait_sec)
+
+    def is_ball_detected(self, *, wait_sec: float = 0.0) -> bool:
+        wait_after = self._non_negative_float("wait_sec", wait_sec)
+        response = self._send_command_until_success("cmd_xqcx")
+        match = re.search(r"detected=(0|1)", str(response.message))
+        if match is None:
+            raise RuntimeError(
+                "STM32 ball-detection response did not include detected=0/1: "
+                f"{response.message}"
+            )
+        detected = match.group(1) == "1"
+        self._wait_after(wait_after)
+        return detected
+
+    def set_relay(self, *, enabled: bool, wait_sec: float = 0.0) -> bool:
+        wait_after = self._non_negative_float("wait_sec", wait_sec)
+        enabled_value = 1 if bool(enabled) else 0
+        self._send_command_until_success(f"cmd_dct {enabled_value}")
+        self._wait_after(wait_after)
+        return True
+
+    def relay_on(self, *, wait_sec: float = 0.0) -> bool:
+        return self.set_relay(enabled=True, wait_sec=wait_sec)
+
+    def relay_off(self, *, wait_sec: float = 0.0) -> bool:
+        return self.set_relay(enabled=False, wait_sec=wait_sec)
 
     def reset_yaw(self, *, wait_sec: float = 0.0) -> bool:
         wait_after = self._non_negative_float("wait_sec", wait_sec)
@@ -433,11 +463,10 @@ class CompetitionRobot(GotoNavigator):
             local_y_m=local_y_m,
             local_z_m=local_z_m,
             angle_deg=self._ball_angle_deg(base_x_m, base_y_m),
-            absolute_map_angle_deg=self._ball_absolute_map_angle_deg(
+            absolute_angle_deg=self._ball_absolute_angle_deg(
                 base_x_m,
                 base_y_m,
             ),
-            turn_angle_deg=self._ball_turn_angle_deg(base_x_m, base_y_m),
             confidence=float(msg.confidence),
             stamp_sec=float(msg.header.stamp.sec)
             + float(msg.header.stamp.nanosec) * 1e-9,
@@ -455,7 +484,7 @@ class CompetitionRobot(GotoNavigator):
     def _ball_angle_deg(base_x_m: float, base_y_m: float) -> float:
         return math.degrees(math.atan2(base_y_m, base_x_m))
 
-    def _ball_absolute_map_angle_deg(self, base_x_m: float, base_y_m: float) -> float:
+    def _ball_ros_map_angle_deg(self, base_x_m: float, base_y_m: float) -> float:
         if self._latest_pose_yaw_rad is None:
             return math.nan
         robot_yaw_deg = math.degrees(self._latest_pose_yaw_rad)
@@ -463,13 +492,13 @@ class CompetitionRobot(GotoNavigator):
             robot_yaw_deg + self._ball_angle_deg(base_x_m, base_y_m)
         )
 
-    def _ball_turn_angle_deg(self, base_x_m: float, base_y_m: float) -> float:
-        absolute_map_angle_deg = self._ball_absolute_map_angle_deg(
+    def _ball_absolute_angle_deg(self, base_x_m: float, base_y_m: float) -> float:
+        ros_map_angle_deg = self._ball_ros_map_angle_deg(
             base_x_m,
             base_y_m,
         )
         return self._normalize_angle_deg(
-            absolute_map_angle_deg - 90.0 - self.yaw_zero_map_degrees
+            ros_map_angle_deg - 90.0 - self.yaw_zero_map_degrees
         )
 
     @staticmethod
