@@ -20,3 +20,10 @@
 # Ignore Python cache files
 __pycache__/
 *.pyc
+
+# Local ML/YOLO environment and generated model outputs
+.venv-yolo/
+.yolo-bootstrap/
+.yolo-config/
+runs/
+*.pt

@@ -17,6 +17,7 @@ import cv2
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from rclpy.utilities import remove_ros_args
 from sensor_msgs.msg import Image
 
@@ -406,7 +407,7 @@ class RemappedPhotoCaptureNode(Node):
             Image,
             self.input_topic,
             self.image_callback,
-            10,
+            qos_profile_sensor_data,
         )
         self.get_logger().info(f"Subscribing to remapped image topic: {self.input_topic}")
 
