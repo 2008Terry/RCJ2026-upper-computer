@@ -191,6 +191,7 @@ install(FILES
   "scripts/goto_point.py"
   "scripts/task_logic.py"
   "scripts/duel_logic.py"
+  "scripts/duel_behaviors.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 
