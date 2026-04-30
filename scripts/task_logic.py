@@ -1,7 +1,6 @@
 from __future__ import annotations
 # from turtle import goto
 
-
 # Edit only run_task(robot) for normal competition programming.
 # Full API documentation: docs/task_logic_api.md
 # Coordinate-frame reference: docs/coordinate_frames.md
@@ -75,10 +74,17 @@ from __future__ import annotations
 #         print(ball.angle_deg, ball.absolute_angle_deg)
 #         robot.turn(angle_deg=ball.absolute_angle_deg)
 #         robot.goto(x_m=ball.absolute_x_m, y_m=ball.absolute_y_m)
+# - robot.goto_ball_standoff(ball=None, stand_off_m=0.12,
+#                            min_confidence=0.5, detection_timeout_sec=1.0,
+#                            goal_tolerance_m=0.04, max_step_m=0.35,
+#                            wait_sec=0.0)
+#     Go to a map target that stops stand_off_m meters before the ball. If ball
+#     is omitted, this function calls robot.find_ball(...) first. Returns False
+#     if no ball is available.
 # - robot.move(x_cm=..., y_cm=..., speed_profile=1, retry_delay_sec=None,
 #              timeout_sec=None, wait_sec=0.0)
 #     Send STM32 cmd_dis directly. x_cm/y_cm are field-fixed centimeters:
-#     x_cm > 0 is map-left, y_cm > 0 is map-down. speed_profile can be
+#     x_cm > 0 is map-up, y_cm > 0 is map-left. speed_profile can be
 #     0 fast, 1 normal, or 2 smooth.
 # - robot.sleep(duration_sec=..., wait_sec=0.0)
 #     First calls robot.stop(), waits for the cmd_juststop ACK, then waits for
@@ -106,7 +112,7 @@ def run_task(robot) -> None:
     """Edit this function to write the competition task sequence."""
 
     # robot.reset_yaw()
-    # robot.motion_enable()
+    robot.motion_enable()
 
     # Example task sequence. Coordinates are absolute map-frame meters.
     # ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5)
@@ -116,9 +122,15 @@ def run_task(robot) -> None:
     # pose = robot.get_pose()
     # print(pose.x_m, pose.y_m, pose.yaw_deg)
     
-    robot.suck_on(speed_percent=15)
-    robot.motion_disable()
+    # robot.suck_on(speed_percent=15)
+    # # robot.motion_disable()
+    # robot.sleep(duration_sec=10.0)
+    # robot.suck_off()
     
+    ball = robot.find_ball(timeout_sec=5.0, min_confidence=0.5)
+    if ball is not None:
+        robot.turn(angle_deg=ball.absolute_angle_deg)
+        robot.goto_ball_standoff(ball, stand_off_m=0.30)
     
     
 
@@ -133,7 +145,19 @@ def run_task(robot) -> None:
     # robot.suck_on(speed_percent=0)
     
     
+    # robot.turn(angle_deg=0)
+    # robot.move(x_cm=0, y_cm=10, speed_profile=1)
+        
+    # robot.turn(angle_deg=90)
+    # robot.move(x_cm=10, y_cm=0, speed_profile=1)
+    
+    # robot.turn(angle_deg=-90)
+    # robot.move(x_cm=10, y_cm=0, speed_profile=1)
+    
     # robot.turn(angle_deg=180)
+    # robot.move(x_cm=10, y_cm=0, speed_profile=1)
+    
+    
     # robot.goto(x_m=-0.40, y_m=-0.60)
     # robot.turn(angle_deg=90)
     # robot.goto(x_m=0.40, y_m=-0.60)
@@ -142,14 +166,17 @@ def run_task(robot) -> None:
     # robot.turn(angle_deg=-90)
     # robot.goto(x_m=0.40, y_m=0.60)
     
-    ball_pose = robot.find_ball(timeout_sec=3.0, min_confidence=0.5)
-    if ball_pose is not None:
-        print(ball_pose)
-        robot.turn(angle_deg=ball_pose.absolute_angle_deg)
-        robot.sleep(duration_sec=10)
-        robot.goto(x_m=ball_pose.absolute_x_m, y_m=ball_pose.absolute_y_m)
-    else:
-        print("Ball not found")
+    # ball_pose = robot.find_ball(timeout_sec=3.0, min_confidence=0.5)
+    # if ball_pose is not None:
+    #     print(ball_pose)
+    #     robot.turn(angle_deg=ball_pose.absolute_angle_deg)
+    #     # robot.sleep(duration_sec=10)
+    #     robot.suck_on(speed_percent=15)
+    #     robot.goto(x_m=ball_pose.absolute_x_m, y_m=ball_pose.absolute_y_m)
+    #     robot.sleep(duration_sec=2)
+    #     robot.suck_off()
+    # else:
+    #     print("Ball not found")
     
     # robot.turn(angle_deg=90)
     # robot.suck_off()

@@ -45,7 +45,7 @@ class Stm32SquareLoopNode(Node):
 
         side = _format_number(side_cm)
         minus_side = _format_number(-side_cm)
-        # STM32 cmd_dis axes are field-fixed: +x map-left, +y map-down.
+        # Public cmd_dis world axes are field-fixed: +x map-up, +y map-left.
         self._commands = [
             f"cmd_dis {side} 0 1",
             f"cmd_dis 0 {side} 1",

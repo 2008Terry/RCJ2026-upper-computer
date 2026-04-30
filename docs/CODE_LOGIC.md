@@ -187,7 +187,7 @@ CRC 使用 CRC16-CCITT，初值 `0xFFFF`，计算范围是 `*` 前面的 payload
 
 主要命令：
 
-- `cmd_dis x y speed_profile`：按 STM32 里程计坐标相对移动，单位 cm；上层默认发送 `speed_profile=1`。
+- `cmd_dis x y speed_profile`：按任务层世界系相对移动，单位 cm；`x > 0` 为地图上方，`y > 0` 为地图左方，上层默认发送 `speed_profile=1`。
 - `cmd_turn yaw`：转到指定 yaw 角度。
 - `cmd_dkmotor speed angle [head_lock]`：持续速度模式，速度为 `0-100` 映射值，角度为运动方向，`head_lock` 默认 `1`。
 - `cmd_juststop`：停止持续运动，但保持转向环。
@@ -199,7 +199,7 @@ CRC 使用 CRC16-CCITT，初值 `0xFFFF`，计算范围是 `*` 前面的 payload
 - `cmd_mcureset`：回复后复位 MCU。
 - `cmd_infred`：读取 BE-1732 当前最强红外通道。
 - `cmd_infred_mode pt/tz`：切换 BE-1732 普通检测/调制检测模式。
-- `cmd_request`：返回最近一次查询以来的 STM32 里程计 `dx/dy`、yaw 增量和当前 yaw；`dx/dy` 与 `cmd_dis x/y` 同轴。
+- `cmd_request`：返回最近一次查询以来的世界系 `dx/dy`、yaw 增量和当前 yaw；`dx/dy` 与 `cmd_dis x/y` 同轴。
 
 `cmd_dis` 和 `cmd_turn` 是有完成事件的命令。底盘任务完成后，`AppChassisTask_ConsumeDoneEvent()` 被 `AppPiComm_Task()` 消费，然后串口发送 `done`。
 

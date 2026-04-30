@@ -45,8 +45,8 @@ With the default `0.0`, STM32 yaw `0 deg` means the robot faces map-up,
   ROS map convention: `0 deg` is map `+x`/right, `90 deg` is map `+y`/up. This
   is not STM32 yaw.
 - `robot.move(...)` sends STM32 `cmd_dis` directly, so its `x_cm` and `y_cm`
-  values are field-fixed STM32 centimeters: `x_cm > 0` moves map-left and
-  `y_cm > 0` moves map-down. The wrapper always sends a `speed_profile`
+  values are field-fixed world-frame centimeters: `x_cm > 0` moves map-up and
+  `y_cm > 0` moves map-left. The wrapper always sends a `speed_profile`
   argument; the default is `1`.
 - `robot.drive(...)` sends STM32 `cmd_dkmotor` directly. Its motion angle uses
   the firmware convention: `0 deg` is robot front, `90 deg` is robot left.
@@ -110,7 +110,7 @@ robot.move(
 
 Sends STM32 `cmd_dis <x_cm> <y_cm> <speed_profile>` directly through the
 `/stm32/motion` action. This is a field-fixed relative movement in centimeters:
-`x_cm > 0` is map-left and `y_cm > 0` is map-down. It is not robot-front/left
+`x_cm > 0` is map-up and `y_cm > 0` is map-left. It is not robot-front/left
 body motion. During the movement, the STM32 firmware holds the current yaw.
 
 `speed_profile` must be `0`, `1`, or `2`: `0` is faster acceleration, `1` is the
@@ -275,16 +275,16 @@ print(state.dx, state.dy, state.dtheta, state.theta)
 
 Sends STM32 `cmd_request` and returns a `Stm32State` object:
 
-- `state.dx`: STM32 odometry x delta since the previous `cmd_request`, in cm.
-- `state.dy`: STM32 odometry y delta since the previous `cmd_request`, in cm.
+- `state.dx`: world-frame x delta since the previous `cmd_request`, in cm.
+- `state.dy`: world-frame y delta since the previous `cmd_request`, in cm.
 - `state.dtheta`: yaw delta since the previous `cmd_request`, in degrees.
 - `state.theta`: current STM32 yaw, in degrees.
 - `state.attempts`: gateway send attempts used for this command.
 - `state.message`: gateway summary text.
 
-`state.dx/state.dy` use the same field-fixed axes as `cmd_dis`: positive `dx`
-is map-left and positive `dy` is map-down. `state.theta` is STM32 yaw, not ROS
-map yaw.
+`state.dx/state.dy` use the same field-fixed world axes as `cmd_dis`: positive
+`dx` is map-up and positive `dy` is map-left. `state.theta` is STM32 yaw, not
+ROS map yaw.
 
 The firmware defines the first request as the reference point, so its deltas are
 normally zero.
@@ -403,6 +403,39 @@ Returns a `BallDetection` object:
 
 To move toward the ball's map position, use `ball.absolute_x_m` and
 `ball.absolute_y_m`, as shown above.
+
+### `robot.goto_ball_standoff(...)`
+
+```python
+ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5)
+if ball is not None:
+    robot.turn(angle_deg=ball.absolute_angle_deg)
+    robot.goto_ball_standoff(ball, stand_off_m=0.12)
+
+robot.goto_ball_standoff(stand_off_m=0.15)
+```
+
+Moves to a map-frame target that stops before the detected ball by
+`stand_off_m` meters. If `ball` is omitted, the function calls
+`robot.find_ball(timeout_sec=detection_timeout_sec,
+min_confidence=min_confidence)` first. It returns `False` when no usable ball is
+available, otherwise it calls `robot.goto(...)` and returns `True`.
+
+The target point is calculated on the line from the robot to the ball:
+
+```text
+distance = hypot(ball.x_m, ball.y_m)
+direction_x = ball.x_m / distance
+direction_y = ball.y_m / distance
+
+target_x_m = ball.absolute_x_m - direction_x * stand_off_m
+target_y_m = ball.absolute_y_m - direction_y * stand_off_m
+```
+
+`ball.x_m/y_m` are the robot-to-ball offset in map axes, so this backs up from
+the absolute ball position along the same map-frame direction. For example,
+`stand_off_m=0.12` means the goto target is about 12 cm before the ball, from
+the robot's current side.
 
 ## Waiting
 

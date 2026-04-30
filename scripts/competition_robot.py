@@ -403,6 +403,53 @@ class CompetitionRobot(GotoNavigator):
 
         raise RuntimeError("ROS shutdown while waiting for orange ball detection.")
 
+    def goto_ball_standoff(
+        self,
+        ball: Optional[BallDetection] = None,
+        *,
+        stand_off_m: float = 0.12,
+        min_confidence: float = 0.5,
+        detection_timeout_sec: float = 1.0,
+        goal_tolerance_m: float = 0.04,
+        max_step_m: float = 0.35,
+        wait_sec: float = 0.0,
+    ) -> bool:
+        """Go to a map target that stops stand_off_m before the detected ball."""
+
+        stand_off = self._non_negative_float("stand_off_m", stand_off_m)
+        goal_tolerance = self._positive_float(
+            "goal_tolerance_m", goal_tolerance_m
+        )
+
+        if ball is None:
+            ball = self.find_ball(
+                timeout_sec=detection_timeout_sec,
+                min_confidence=min_confidence,
+            )
+        if ball is None:
+            return False
+
+        distance_to_ball_m = math.hypot(ball.x_m, ball.y_m)
+        if distance_to_ball_m <= 1e-6:
+            return False
+
+        if distance_to_ball_m <= stand_off + goal_tolerance:
+            return True
+
+        direction_x = ball.x_m / distance_to_ball_m
+        direction_y = ball.y_m / distance_to_ball_m
+        target_x_m = ball.absolute_x_m - direction_x * stand_off
+        target_y_m = ball.absolute_y_m - direction_y * stand_off
+
+        self.goto(
+            x_m=target_x_m,
+            y_m=target_y_m,
+            goal_tolerance_m=goal_tolerance,
+            max_step_m=max_step_m,
+            wait_sec=wait_sec,
+        )
+        return True
+
     def sleep(self, *, duration_sec: float, wait_sec: float = 0.0) -> None:
         duration = self._non_negative_float("duration_sec", duration_sec)
         wait_after = self._non_negative_float("wait_sec", wait_sec)

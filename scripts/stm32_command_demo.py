@@ -45,13 +45,13 @@ def main() -> int:
         "--x-coord",
         type=float,
         default=100.0,
-        help="cmd_dis x in cm; positive is map-left.",
+        help="cmd_dis world x in cm; positive is map-up.",
     )
     parser.add_argument(
         "--y-coord",
         type=float,
         default=-100.0,
-        help="cmd_dis y in cm; positive is map-down.",
+        help="cmd_dis world y in cm; positive is map-left.",
     )
     parser.add_argument(
         "--degrees",

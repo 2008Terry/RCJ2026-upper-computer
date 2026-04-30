@@ -31,7 +31,7 @@ class GotoNavigator(Node):
         self.declare_parameter("pose_topic", "/amcl_pose")
         self.declare_parameter("motion_action_name", "/stm32/motion")
         self.declare_parameter("goal_tolerance_m", 0.02)
-        self.declare_parameter("max_step_m", 0.80)
+        self.declare_parameter("max_step_m", 0.50)
         self.declare_parameter("settle_sec", 0.7)
         self.declare_parameter("max_iterations", 25)
         self.declare_parameter("goto_timeout_sec", 40.0)
@@ -370,9 +370,9 @@ class GotoNavigator(Node):
         self, dx_map_m: float, dy_map_m: float
     ) -> Tuple[float, float]:
         # Map frame: +x is right, +y is up.
-        # STM32 cmd_dis frame: +x is map-left, +y is map-down.
+        # Public cmd_dis world frame: +x is map-up, +y is map-left.
         # Both frames are field-fixed; robot yaw is not part of this conversion.
-        return -dx_map_m, -dy_map_m
+        return dy_map_m, -dx_map_m
 
     def _spin_until_future_done(self, future, timeout_sec: float) -> bool:
         deadline = time.monotonic() + max(0.0, float(timeout_sec))

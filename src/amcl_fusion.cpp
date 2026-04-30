@@ -108,15 +108,10 @@ double radiansToDegrees(double angle_rad) { return angle_rad * (180.0 / M_PI); }
 
 double fieldYawDegreesToRosMapRadians(double yaw_degrees,
                                       double zero_map_degrees) {
-  // Robot yaw is field-relative: 0=top/forward, 90=left, 180=back,
-  // 270=right. ROS map yaw is 0=+X/right, 90=+Y/top.
+  // Robot yaw is field-relative counter-clockwise from map-up:
+  // 0=top/forward, 90=left, 180=back, -90=right. ROS map yaw is:
+  // 0=+X/right, 90=+Y/top.
   return normalizeAngle(degreesToRadians(90.0 + zero_map_degrees + yaw_degrees));
-}
-
-double stm32XAxisDegreesToRosMapRadians(double zero_map_degrees) {
-  // STM32 dx is field-fixed map-left, independent of the robot's current yaw.
-  // With zero_map_degrees=0 this is ROS map 180 deg.
-  return normalizeAngle(degreesToRadians(180.0 + zero_map_degrees));
 }
 
 void validateAxisMotionNoiseConfig(const rcj_loc::AxisMotionNoiseConfig &config,
@@ -1097,17 +1092,11 @@ private:
     const double absorbed_global_y_m = latest_failure.y - last_success.y;
     const double absorbed_dtheta_rad =
         normalizeAngle(latest_failure.theta - last_success.theta);
-    const double stm32_x_axis_map_rad =
-        stm32XAxisDegreesToRosMapRadians(yaw_zero_map_degrees_);
-    const double cos_axis = std::cos(stm32_x_axis_map_rad);
-    const double sin_axis = std::sin(stm32_x_axis_map_rad);
-    const double absorbed_stm32_x_m =
-        (cos_axis * absorbed_global_x_m) + (sin_axis * absorbed_global_y_m);
-    const double absorbed_stm32_y_m =
-        (-sin_axis * absorbed_global_x_m) + (cos_axis * absorbed_global_y_m);
+    const double absorbed_world_x_m = absorbed_global_y_m;
+    const double absorbed_world_y_m = -absorbed_global_x_m;
 
-    dx_cm -= absorbed_stm32_x_m * 100.0;
-    dy_cm -= absorbed_stm32_y_m * 100.0;
+    dx_cm -= absorbed_world_x_m * 100.0;
+    dy_cm -= absorbed_world_y_m * 100.0;
     dtheta_deg = radiansToDegrees(normalizeAngle(
         degreesToRadians(dtheta_deg) - absorbed_dtheta_rad));
     request_yaw_rad = latest_failure.theta;
@@ -1116,10 +1105,10 @@ private:
       RCLCPP_INFO(
           this->get_logger(),
           "Compensated STM32 odometry request %" PRIu64
-          ": raw=(%.6f, %.6f, %.6f), absorbed=(%.6f, %.6f, %.6f), "
+          ": request=(%.6f, %.6f, %.6f), absorbed=(%.6f, %.6f, %.6f), "
           "compensated=(%.6f, %.6f, %.6f).",
           result.request_id, result.dx_cm, result.dy_cm, result.dtheta_deg,
-          absorbed_stm32_x_m * 100.0, absorbed_stm32_y_m * 100.0,
+          absorbed_world_x_m * 100.0, absorbed_world_y_m * 100.0,
           radiansToDegrees(absorbed_dtheta_rad), dx_cm, dy_cm, dtheta_deg);
     }
 
@@ -1136,8 +1125,8 @@ private:
       return false;
     }
 
-    const double delta_x_stm32_m = dx_cm * 0.01;
-    const double delta_y_stm32_m = dy_cm * 0.01;
+    const double delta_x_world_m = dx_cm * 0.01;
+    const double delta_y_world_m = dy_cm * 0.01;
     const double delta_theta_rad = normalizeAngle(degreesToRadians(dtheta_deg));
     double absolute_yaw_rad = current_yaw_rad_;
     if (use_stm32_request_theta_) {
@@ -1153,16 +1142,10 @@ private:
       current_yaw_rad_ = result.theta_rad;
       yaw_initialized_ = true;
     }
-    const double stm32_x_axis_map_rad =
-        stm32XAxisDegreesToRosMapRadians(yaw_zero_map_degrees_);
-    const double cos_axis = std::cos(stm32_x_axis_map_rad);
-    const double sin_axis = std::sin(stm32_x_axis_map_rad);
-    const double delta_x_global_m =
-        (cos_axis * delta_x_stm32_m) - (sin_axis * delta_y_stm32_m);
-    const double delta_y_global_m =
-        (sin_axis * delta_x_stm32_m) + (cos_axis * delta_y_stm32_m);
+    const double delta_x_global_m = -delta_y_world_m;
+    const double delta_y_global_m = delta_x_world_m;
 
-    if (!std::isfinite(delta_x_stm32_m) || !std::isfinite(delta_y_stm32_m) ||
+    if (!std::isfinite(delta_x_world_m) || !std::isfinite(delta_y_world_m) ||
         !std::isfinite(delta_x_global_m) || !std::isfinite(delta_y_global_m) ||
         !std::isfinite(delta_theta_rad) ||
         !std::isfinite(absolute_yaw_rad) ||

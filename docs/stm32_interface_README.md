@@ -186,9 +186,9 @@ uint16_t crc16_ccitt(const uint8_t *data, uint16_t size)
 
 ### `cmd_dis`
 
-控制底盘按 STM32 里程计坐标做相对位移，单位为 cm。执行过程中保持当前 yaw。
-本项目上层约定该里程计坐标仍为场地固定轴：`x_cm > 0` 为地图左边，也就是
-ROS map `-x`；`y_cm > 0` 为地图下边，也就是 ROS map `-y`。
+控制底盘按世界系里程计坐标做相对位移，单位为 cm。执行过程中保持当前 yaw。
+该世界系为场地固定轴：`x_cm > 0` 为地图上边，也就是 ROS map `+y`；
+`y_cm > 0` 为地图左边，也就是 ROS map `-x`。
 
 ```text
 cmd_dis <x_cm> <y_cm> <speed_profile> *<CRC16>
@@ -201,8 +201,8 @@ cmd_dis 10 0 1 *F493
 cmd_dis 10 0 0 *E4B2
 ```
 
-含义：向 STM32 里程计 x 正方向移动 10 cm，y 方向不变。上层封装默认发送
-`speed_profile=1`，不再生成两参数 `cmd_dis`。
+含义：向世界系 x 正方向，也就是地图上方，移动 10 cm；y 方向不变。上层封装
+默认发送 `speed_profile=1`，不再生成两参数 `cmd_dis`。
 
 速度曲线档位：
 
@@ -221,7 +221,8 @@ err arg *....
 
 ### `cmd_turn`
 
-控制底盘转到绝对目标 yaw 角，单位为度。目标角会被归一化到 0-360 度。
+控制底盘转到绝对目标 yaw 角，单位为度。`0 deg` 为地图上方，`90 deg` 为地图
+左方，`-90 deg` 为地图右方。目标角会被归一化到 0-360 度。
 
 ```text
 cmd_turn <target_yaw_deg> *<CRC16>
@@ -406,8 +407,8 @@ cmd_request <dx_cm> <dy_cm> <dyaw_deg> <yaw_deg> *<CRC16>
 
 字段说明：
 
-- `dx_cm`：距离上次查询的 STM32 里程计 x 位移，单位 cm；正方向与 `cmd_dis x_cm` 相同，为地图左边。
-- `dy_cm`：距离上次查询的 STM32 里程计 y 位移，单位 cm；正方向与 `cmd_dis y_cm` 相同，为地图下边。
+- `dx_cm`：距离上次查询的世界系 x 位移，单位 cm；正方向与 `cmd_dis x_cm` 相同，为地图上边。
+- `dy_cm`：距离上次查询的世界系 y 位移，单位 cm；正方向与 `cmd_dis y_cm` 相同，为地图左边。
 - `dyaw_deg`：距离上次查询的 yaw 变化，单位度。
 - `yaw_deg`：当前 yaw，单位度。
 

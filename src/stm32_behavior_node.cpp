@@ -138,7 +138,7 @@ namespace
       {
         throw std::runtime_error(
             "Invalid cmd_dis command '" + spec +
-            "'. Expected: cmd_dis <primary> <secondary> <speed_profile 0|1|2>");
+            "'. Expected: cmd_dis <x_cm> <y_cm> <speed_profile 0|1|2>");
       }
       std::size_t consumed = 0;
       int speed_profile = 0;
