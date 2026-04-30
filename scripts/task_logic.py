@@ -159,7 +159,9 @@ def run_task(robot) -> None:
     # robot.suck_on(speed_percent=15)
     # # robot.motion_disable()
     # robot.sleep(duration_sec=10.0)
-    robot.suck_on(speed_percent=0)
+    # robot.suck_on(speed_percent=0)
+    while(1):
+        print(robot.is_ball_detected())
     
     
     ### test dk move
