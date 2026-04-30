@@ -60,6 +60,13 @@ def main() -> int:
         help="cmd_turn STM32 yaw in degrees; 0 is map-up, 90 is map-left.",
     )
     parser.add_argument(
+        "--speed-profile",
+        type=int,
+        default=1,
+        choices=(0, 1, 2),
+        help="cmd_dis speed profile: 0 fast, 1 normal, 2 smooth.",
+    )
+    parser.add_argument(
         "--send",
         action="store_true",
         help="Send commands to the serial port instead of dry-run preview.",
@@ -75,7 +82,7 @@ def main() -> int:
     )
 
     try:
-        dis_packet = sender.cmd_dis(args.x_coord, args.y_coord)
+        dis_packet = sender.cmd_dis(args.x_coord, args.y_coord, args.speed_profile)
         turn_packet = sender.cmd_turn(args.degrees)
     finally:
         sender.close()

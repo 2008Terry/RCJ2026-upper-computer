@@ -51,7 +51,7 @@ stm32_yaw_deg = normalize(ros_yaw_deg - 90 - yaw_zero_map_degrees)
 
 ### STM32 Translation Frame
 
-用于 STM32 `cmd_dis x y`，以及 `cmd_request` 返回的 `dx/dy`。
+用于 STM32 `cmd_dis x y speed_profile`，以及 `cmd_request` 返回的 `dx/dy`。
 
 这是场地固定坐标，不是机器人自身的前后左右坐标。
 
@@ -74,7 +74,7 @@ map_dy_m = -cmd_y_cm * 0.01
 - 地图目标在当前点右边 `0.30 m`：`map_dx_m = +0.30`，所以 `cmd_x_cm = -30`。
 - 地图目标在当前点上方 `0.30 m`：`map_dy_m = +0.30`，所以 `cmd_y_cm = -30`。
 
-`robot.move(x_cm=..., y_cm=...)` 会直接发送 STM32 `cmd_dis`，所以它的参数也
+`robot.move(x_cm=..., y_cm=..., speed_profile=1)` 会直接发送 STM32 `cmd_dis`，所以它的参数也
 遵守这一套左/下场地固定轴。普通绝对导航请优先使用 `robot.goto(...)`。
 
 ### Robot Base Link Frame
@@ -169,7 +169,7 @@ robot.turn(angle_deg=-90)  # 朝地图右边
 - `0 deg`：机器人前方。
 - `90 deg`：机器人左方。
 
-`robot.move(x_cm=..., y_cm=...)` 直接发送 STM32 `cmd_dis`：
+`robot.move(x_cm=..., y_cm=..., speed_profile=1)` 直接发送 STM32 `cmd_dis`：
 
 - `x_cm > 0`：地图左边。
 - `y_cm > 0`：地图下边。

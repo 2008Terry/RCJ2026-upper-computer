@@ -46,7 +46,8 @@ With the default `0.0`, STM32 yaw `0 deg` means the robot faces map-up,
   is not STM32 yaw.
 - `robot.move(...)` sends STM32 `cmd_dis` directly, so its `x_cm` and `y_cm`
   values are field-fixed STM32 centimeters: `x_cm > 0` moves map-left and
-  `y_cm > 0` moves map-down.
+  `y_cm > 0` moves map-down. The wrapper always sends a `speed_profile`
+  argument; the default is `1`.
 - `robot.drive(...)` sends STM32 `cmd_dkmotor` directly. Its motion angle uses
   the firmware convention: `0 deg` is robot front, `90 deg` is robot left.
 - STM32 yaw angles used by `robot.turn(...)` are firmware yaw angles in degrees:
@@ -97,13 +98,23 @@ server cannot be used safely.
 ### `robot.move(...)`
 
 ```python
-robot.move(x_cm=10, y_cm=0, retry_delay_sec=None, timeout_sec=None, wait_sec=0.0)
+robot.move(
+    x_cm=10,
+    y_cm=0,
+    speed_profile=1,
+    retry_delay_sec=None,
+    timeout_sec=None,
+    wait_sec=0.0,
+)
 ```
 
-Sends STM32 `cmd_dis <x_cm> <y_cm>` directly through the `/stm32/motion` action.
-This is a field-fixed relative movement in centimeters: `x_cm > 0` is map-left
-and `y_cm > 0` is map-down. It is not robot-front/left body motion. During the
-movement, the STM32 firmware holds the current yaw.
+Sends STM32 `cmd_dis <x_cm> <y_cm> <speed_profile>` directly through the
+`/stm32/motion` action. This is a field-fixed relative movement in centimeters:
+`x_cm > 0` is map-left and `y_cm > 0` is map-down. It is not robot-front/left
+body motion. During the movement, the STM32 firmware holds the current yaw.
+
+`speed_profile` must be `0`, `1`, or `2`: `0` is faster acceleration, `1` is the
+normal/default profile, and `2` is smoother acceleration.
 
 Use this when you want the exact firmware-level relative movement command. Use
 `robot.goto(...)` when you want absolute map-frame navigation using AMCL pose
@@ -233,6 +244,25 @@ robot.suck_off(wait_sec=0.0)
 ```
 
 Convenience wrapper for `robot.suck(speed_percent=0)`.
+
+### `robot.is_ball_detected()`
+
+```python
+detected = robot.is_ball_detected(wait_sec=0.0)
+```
+
+Sends STM32 `cmd_xqcx` and returns `True` when the PB15/xqwd suction
+microswitch reports that a ball is detected.
+
+### `robot.set_relay()` / `robot.relay_on()` / `robot.relay_off()`
+
+```python
+robot.set_relay(enabled=True, wait_sec=0.0)
+robot.relay_on(wait_sec=0.0)
+robot.relay_off(wait_sec=0.0)
+```
+
+Sends STM32 `cmd_dct 1` or `cmd_dct 0` to control the PD0/JD1 relay output.
 
 ## STM32 State And Infrared Sensor
 

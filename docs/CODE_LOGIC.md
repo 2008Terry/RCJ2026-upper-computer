@@ -27,6 +27,7 @@ flowchart TB
     Imu["BspBno085\nI2C1 姿态"]
     Infra["BspBe1732\nI2C2 红外"]
     Suck["BspSuctionMotor\nTIM4 PWM"]
+    Dct["BspDct\nPD0/JD1 继电器"]
     CanBus["CAN1\nC610/C620"]
     Motors["底盘电机 / 功能电机"]
     Be1732["BE-1732"]
@@ -37,6 +38,7 @@ flowchart TB
     AppPi --> AppChassis
     AppPi --> Infra
     AppPi --> Suck
+    AppPi --> Dct
     AppPi --> Usart
     AppChassis --> Chassis
     AppChassis --> Odom
@@ -48,11 +50,14 @@ flowchart TB
     Infra <--> Be1732
     Imu <--> Bno085
     Suck --> Esc
+    SuckDetect["吸球检测"] --> Switch["PB15/xqwd 微动开关"]
+    Dct --> Relay["继电器"]
     Core -.-> Usart
     Core -.-> Motor
     Core -.-> Infra
     Core -.-> Imu
     Core -.-> Suck
+    Core -.-> Dct
 ```
 
 核心执行链路：
@@ -62,14 +67,16 @@ main()
   -> MX_*_Init()
   -> BspMotor_Init()
   -> BspSuctionMotor_Init()
+  -> BspSuctionDetect_Init()
   -> BspBe1732_Init()
+  -> BspDct_Init()
   -> AppChassisTask_Init()
   -> AppPiComm_Init()
   -> Bno085_Init() / Bno085_EnableDefaultReports()
   -> while (1)
        -> AppPiComm_Task()
        -> Bno085_ReadSensorData()
-       -> 零 yaw 按键处理
+       -> BNO_KEY 短按/长按处理
        -> AppChassisTask_Task()
        -> BspSuctionMotorTest_Task()
        -> AppPiComm_Task()
@@ -90,7 +97,9 @@ main()
 - `MX_I2C2_Init()`：初始化 I2C2，用于 BE-1732 红外传感器。
 - `BspMotor_Init()`：配置 CAN 滤波器、启动 CAN、打开 FIFO0 接收中断。
 - `BspSuctionMotor_Init()`：启动 TIM4 CH1 PWM，并输出初始化脉宽。
+- `BspSuctionDetect_Init()`：初始化吸球检测 BSP，GPIO 配置由 CubeMX 的 `MX_GPIO_Init()` 完成。
 - `BspBe1732_Init()`：恢复 I2C2 总线、检查设备、默认切换到调制检测模式。
+- `BspDct_Init()`：关闭 PD0/JD1 继电器输出。
 - `AppChassisTask_Init()`：初始化底盘任务状态机。
 - `AppPiComm_Init()`：启动 USART6 单字节中断接收。
 - `Bno085_Init()`：初始化 BNO085，并开启默认姿态/陀螺仪报告。
@@ -101,7 +110,7 @@ main()
 2. 调用 `Bno085_ReadSensorData()`，读取 IMU 数据。
 3. 如果有旋转向量数据，更新 `bno085_yaw_deg` 和 yaw 更新时间。
 4. 如果有陀螺仪数据，更新 `bno085_gyro_z_deg_s` 和 gyro 更新时间。
-5. 扫描零 yaw 按键，去抖后调用 `Main_ResetYawZero()`。
+5. 扫描 `BNO_KEY`，去抖后区分短按/长按：短按 yaw 归零，长按切换底盘运动使能。
 6. 根据 yaw/gyro 更新时间判断数据是否有效。
 7. 调用 `AppChassisTask_Task()`，根据当前底盘状态输出电机控制。
 8. 调用 `BspSuctionMotorTest_Task()`，保留吸力电机测试任务。
@@ -114,7 +123,7 @@ main()
 flowchart TD
     Start["while (1) 开始"] --> Comm1["AppPiComm_Task\n处理串口命令"]
     Comm1 --> ReadImu["Bno085_ReadSensorData\n读取 yaw/gyro"]
-    ReadImu --> ZeroKey["零 yaw 按键去抖\n必要时 Main_ResetYawZero"]
+    ReadImu --> ZeroKey["BNO_KEY 去抖\n短按归零 / 长按切换运动使能"]
     ZeroKey --> Valid["判断 yaw/gyro 是否超时"]
     Valid --> ChassisTask["AppChassisTask_Task\n底盘状态机输出"]
     ChassisTask --> SuckTest["BspSuctionMotorTest_Task"]
@@ -178,20 +187,19 @@ CRC 使用 CRC16-CCITT，初值 `0xFFFF`，计算范围是 `*` 前面的 payload
 
 主要命令：
 
-- `cmd_dis x y`：按场地固定 STM32 位移轴相对移动，单位 cm；`x>0` 为地图左边，
-  `y>0` 为地图下边。
-- `cmd_turn yaw`：转到指定 STM32 yaw 角度；默认 `0` 为地图上方，`90` 为地图左边，
-  `-90` 为地图右边。
+- `cmd_dis x y speed_profile`：按 STM32 里程计坐标相对移动，单位 cm；上层默认发送 `speed_profile=1`。
+- `cmd_turn yaw`：转到指定 yaw 角度。
 - `cmd_dkmotor speed angle [head_lock]`：持续速度模式，速度为 `0-100` 映射值，角度为运动方向，`head_lock` 默认 `1`。
 - `cmd_juststop`：停止持续运动，但保持转向环。
 - `cmd_conmotion 0/1`：禁用/使能底盘运动功能。
 - `cmd_suck speed`：设置吸力电机速度百分比。
+- `cmd_xqcx`：读取 PB15/xqwd 吸球微动开关状态，返回 `1` 表示吸到球。
+- `cmd_dct 0/1`：控制 PD0/JD1 继电器输出。
 - `cmd_anglecal`：执行 yaw 归零，功能等同按键。
 - `cmd_mcureset`：回复后复位 MCU。
 - `cmd_infred`：读取 BE-1732 当前最强红外通道。
 - `cmd_infred_mode pt/tz`：切换 BE-1732 普通检测/调制检测模式。
-- `cmd_request`：返回最近一次查询以来的 STM32 位移/yaw 增量；`dx>0` 为地图左边，
-  `dy>0` 为地图下边。
+- `cmd_request`：返回最近一次查询以来的 STM32 里程计 `dx/dy`、yaw 增量和当前 yaw；`dx/dy` 与 `cmd_dis x/y` 同轴。
 
 `cmd_dis` 和 `cmd_turn` 是有完成事件的命令。底盘任务完成后，`AppChassisTask_ConsumeDoneEvent()` 被 `AppPiComm_Task()` 消费，然后串口发送 `done`。
 
@@ -249,7 +257,7 @@ AppChassisTask_Task(yaw_valid, yaw_deg, gyro_valid, gyro_z_deg_s)
 - yaw 无效时进入 `WAIT_IMU`，并停止底盘。
 - 第一次拿到有效 yaw 时初始化里程计，并进入 `IDLE`。
 - 后续每轮调用 `BspChassisOdom_Update(yaw_deg)` 更新当前位置。
-- 如果 `cmd_conmotion 0` 禁用了运动，则停电机并保持在 `IDLE`，不执行转向环。
+- 如果 `cmd_conmotion 0` 或 `BNO_KEY` 长按禁用了运动，则停电机并保持在 `IDLE`，不执行转向环。
 - 如果运动使能，则按当前模式执行。
 
 各模式行为：
@@ -264,7 +272,7 @@ AppChassisTask_Task(yaw_valid, yaw_deg, gyro_valid, gyro_z_deg_s)
 
 重要接口：
 
-- `AppChassisTask_CommandDistanceCm()`：记录当前位置作为起点，设置目标 `x/y`。
+- `AppChassisTask_CommandDistanceCm()`：记录当前位置作为起点，设置目标 `x/y`，并保存 `cmd_dis` 的速度曲线档位。
 - `AppChassisTask_CommandTurnDeg()`：设置目标 yaw。
 - `AppChassisTask_CommandDkMotor()`：设置持续运动速度、方向、锁头模式。
 - `AppChassisTask_CommandJustStop()`：清持续运动速度，回到 `IDLE`，继续保持转向环。
@@ -423,9 +431,11 @@ BNO085 驱动在 `Bsp/Src/bsp_bno085.c`，使用 I2C1。
 - `Bno085_GetYawDegrees()` 得到 yaw 角。
 - `gyro.z` 转为 `deg/s` 后给底盘转向环使用。
 
-yaw 归零：
+yaw 归零和运动使能按键：
 
-- 物理按键触发时，主循环调用 `Main_ResetYawZero()`。
+- `BNO_KEY` 短按释放时，主循环调用 `Main_ResetYawZero()`。
+- `BNO_KEY` 长按超过 `MAIN_ZERO_KEY_LONG_PRESS_MS` 时，调用 `AppChassisTask_SetMotionEnabled()` 切换底盘运动使能。
+- 长按失能后，新的 `cmd_dis`、`cmd_turn`、`cmd_dkmotor` 等底盘运动命令会返回 `busy`；再次长按可恢复。
 - 串口 `cmd_anglecal` 也调用同一个函数。
 - 归零后会更新 BNO085 yaw 零点，并通知底盘任务重置目标 yaw 和里程计。
 
@@ -516,6 +526,59 @@ flowchart LR
     Init --> Pwm["TIM4 CH1 PWM"]
     Map --> Pwm
     Pwm --> Esc["吸力电调"]
+```
+
+## 吸球检测逻辑
+
+吸球检测驱动在 `Bsp/Src/bsp_suction_detect.c`，使用 PB15/xqwd 普通 GPIO 输入。
+
+控制方式：
+
+- PB15 已由 CubeMX 配置为上拉输入。
+- 默认 `BSP_SUCTION_DETECT_ACTIVE_LEVEL` 为 `GPIO_PIN_RESET`，微动开关闭合拉低时表示吸到球。
+- 如硬件为高电平有效，可在编译宏中把 `BSP_SUCTION_DETECT_ACTIVE_LEVEL` 改为 `GPIO_PIN_SET`。
+- `cmd_xqcx` 调用 `BspSuctionDetect_IsBallDetected()`，返回 `cmd_xqcx 1` 或 `cmd_xqcx 0`。
+
+数据流：
+
+```text
+cmd_xqcx
+  -> AppPiComm
+  -> BspSuctionDetect_IsBallDetected()
+  -> HAL_GPIO_ReadPin(xqwd_GPIO_Port, xqwd_Pin)
+  -> PB15/xqwd 微动开关
+```
+
+## 继电器逻辑
+
+继电器接口在 `Bsp/Src/bsp_dct.c`，使用 PD0/JD1 普通 GPIO 输出。
+
+控制方式：
+
+- `BspDct_Init()` 默认关闭继电器。
+- `cmd_dct 0` 调用 `BspDct_SetEnabled(0)`，PD0 输出低电平。
+- `cmd_dct 1` 调用 `BspDct_SetEnabled(1)`，PD0 输出高电平。
+- `BspDct_GetEnabled()` 返回软件缓存的继电器状态。
+
+数据流：
+
+```text
+cmd_dct 0/1
+  -> AppPiComm
+  -> BspDct_SetEnabled()
+  -> HAL_GPIO_WritePin(JD1_GPIO_Port, JD1_Pin, ...)
+  -> PD0/JD1 继电器接口
+```
+
+继电器控制图：
+
+```mermaid
+flowchart LR
+    Cmd["cmd_dct 0/1"] --> Parse["AppPiComm\n解析参数"]
+    Parse --> Set["BspDct_SetEnabled"]
+    Set --> Gpio["HAL_GPIO_WritePin\nPD0/JD1"]
+    Gpio --> Relay["继电器"]
+    Set --> State["dct_enabled 状态缓存"]
 ```
 
 ## USART 逻辑
@@ -619,6 +682,7 @@ USART6: cmd_infred *CRC
 - I2C 传感器读取。
 - 底盘运动状态机。
 - 吸力电机测试任务。
+- 继电器等 GPIO 输出控制命令。
 
 调度关系图：
 

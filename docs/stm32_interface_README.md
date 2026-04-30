@@ -1,6 +1,6 @@
 # RCJchassisdiver
 
-STM32F407 底盘驱动工程，用于 RCJ 机器人底盘控制。工程基于 STM32CubeMX 生成的 HAL 初始化代码和 CMake 构建系统，业务层实现了底盘闭环移动、BNO085 姿态读取、CAN 电机控制、吸力电机 PWM 控制，以及面向上位机/树莓派的串口命令协议。
+STM32F407 底盘驱动工程，用于 RCJ 机器人底盘控制。工程基于 STM32CubeMX 生成的 HAL 初始化代码和 CMake 构建系统，业务层实现了底盘闭环移动、BNO085 姿态读取、CAN 电机控制、吸力电机 PWM 控制、继电器控制，以及面向上位机/树莓派的串口命令协议。
 
 ## 功能概览
 
@@ -10,6 +10,8 @@ STM32F407 底盘驱动工程，用于 RCJ 机器人底盘控制。工程基于 S
 - 红外复眼：BE-1732 通过 I2C2 读取 7 路红外光强方向。
 - 电机通信：CAN1 控制底盘电机和功能电机。
 - 吸力电机：TIM4_CH1 输出 PWM，支持 0-100% 速度设置。
+- 吸球检测：PB15/xqwd 输入微动开关，支持串口查询是否吸到球。
+- 继电器：PD0/JD1 输出控制，支持串口开关。
 - 串口通信：USART6 接收树莓派命令，USART1 默认用于调试打印。
 
 ## 代码结构
@@ -31,6 +33,8 @@ STM32F407 底盘驱动工程，用于 RCJ 机器人底盘控制。工程基于 S
 │       ├── bsp_chassis_odom.c    # 里程计估计和目标点控制
 │       ├── bsp_bno085.c          # BNO085 初始化、报文读取、yaw 计算
 │       ├── bsp_be1732.c          # BE-1732 红外复眼 I2C 读取
+│       ├── bsp_dct.c             # PD0/JD1 继电器开关控制
+│       ├── bsp_suction_detect.c  # PB15/xqwd 吸球微动开关检测
 │       ├── bsp_suction_motor.c   # 吸力电机 PWM/油门控制
 │       └── bsp_usart.c           # 串口发送、接收、Printf 封装
 ├── Core/                         # STM32CubeMX 生成和用户主循环代码
@@ -57,11 +61,14 @@ STM32F407 底盘驱动工程，用于 RCJ 机器人底盘控制。工程基于 S
 
 1. `BspMotor_Init()`：启动 CAN 电机通信。
 2. `BspSuctionMotor_Init()`：启动吸力电机 PWM。
-3. `AppChassisTask_Init()`：初始化底盘任务状态机。
-4. `AppPiComm_Init()`：启动 USART6 中断接收。
-5. `Bno085_Init()` 和 `Bno085_EnableDefaultReports()`：初始化 IMU 并开启默认报告。
+3. `BspSuctionDetect_Init()`：初始化吸球检测 BSP。
+4. `BspBe1732_Init()`：初始化 BE-1732 红外复眼，默认进入调制检测模式。
+5. `BspDct_Init()`：关闭 PD0/JD1 继电器输出。
+6. `AppChassisTask_Init()`：初始化底盘任务状态机。
+7. `AppPiComm_Init()`：启动 USART6 中断接收。
+8. `Bno085_Init()` 和 `Bno085_EnableDefaultReports()`：初始化 IMU 并开启默认报告。
 
-主循环中持续处理串口命令、读取 BNO085 数据、按按键进行 yaw 清零、更新底盘任务，并执行吸力电机测试任务。
+主循环中持续处理串口命令、读取 BNO085 数据、处理 BNO_KEY 短按/长按、更新底盘任务，并执行吸力电机测试任务。
 
 ## 外设连接
 
@@ -73,8 +80,10 @@ STM32F407 底盘驱动工程，用于 RCJ 机器人底盘控制。工程基于 S
 | I2C1 | PB6 SCL, PB7 SDA, 400 kHz | BNO085 通信 |
 | I2C2 | PB10 SCL, PB11 SDA, 100 kHz | BE-1732 红外复眼 |
 | TIM4_CH1 | PD12, 50 Hz PWM | 吸力电机/电调控制 |
+| xqwd | PB15 input pull-up | 吸球微动开关检测，默认低电平表示吸到球 |
+| JD1 | PD0 output | 继电器控制 |
 | BNO_INT2 | PB1 input | BNO085 中断/就绪检测 |
-| BNO_KEY | PE13 input pull-up | yaw 清零按键 |
+| BNO_KEY | PE13 input pull-up | 短按 yaw 清零，长按切换底盘运动使能 |
 | BNO_NRST | PB8 output | BNO085 复位 |
 
 ## 构建方式
@@ -141,7 +150,7 @@ openocd -f interface/stlink.cfg -f target/stm32f4x.cfg \
 
 说明：
 
-- `payload` 是实际命令内容，例如 `cmd_dis 10 0`。
+- `payload` 是实际命令内容，例如 `cmd_dis 10 0 1`。
 - `*` 后面是 4 位大写十六进制 CRC。
 - CRC 算法为 CRC16-CCITT，初值 `0xFFFF`，多项式 `0x1021`，无最终异或。
 - CRC 只计算 `payload`，不包含 ` *CRC`、`\r`、`\n`。
@@ -177,37 +186,42 @@ uint16_t crc16_ccitt(const uint8_t *data, uint16_t size)
 
 ### `cmd_dis`
 
-控制底盘按场地固定 STM32 位移轴做相对位移，单位为 cm。执行过程中保持当前
-yaw。这里的 `x/y` 不是机器人自身前后左右，也不是 ROS map `x/y`：
-
-- `x_cm > 0`：地图左边。
-- `y_cm > 0`：地图下边。
+控制底盘按 STM32 里程计坐标做相对位移，单位为 cm。执行过程中保持当前 yaw。
+本项目上层约定该里程计坐标仍为场地固定轴：`x_cm > 0` 为地图左边，也就是
+ROS map `-x`；`y_cm > 0` 为地图下边，也就是 ROS map `-y`。
 
 ```text
-cmd_dis <x_cm> <y_cm> *<CRC16>
+cmd_dis <x_cm> <y_cm> <speed_profile> *<CRC16>
 ```
 
 示例：
 
 ```text
-cmd_dis 10 0 *B37E
+cmd_dis 10 0 1 *F493
+cmd_dis 10 0 0 *E4B2
 ```
 
-含义：向地图左边移动 10 cm，y 方向不变。
+含义：向 STM32 里程计 x 正方向移动 10 cm，y 方向不变。上层封装默认发送
+`speed_profile=1`，不再生成两参数 `cmd_dis`。
+
+速度曲线档位：
+
+- `0`：加减速更急，能更快接近最高速度。
+- `1`：维持原来的曲线。
+- `2`：加减速更缓，起停更柔和。
 
 可能回复：
 
 ```text
-cmd_dis ok 10 0 *....
-cmd_dis busy 10 0 *....
-cmd_dis done 10 0 *....
+cmd_dis ok 10 0 1 *....
+cmd_dis busy 10 0 1 *....
+cmd_dis done 10 0 1 *....
 err arg *....
 ```
 
 ### `cmd_turn`
 
 控制底盘转到绝对目标 yaw 角，单位为度。目标角会被归一化到 0-360 度。
-默认 yaw 约定是 `0 deg` 朝地图上方，`90 deg` 朝地图左边，`-90 deg` 朝地图右边。
 
 ```text
 cmd_turn <target_yaw_deg> *<CRC16>
@@ -302,6 +316,51 @@ cmd_suck busy 50 *....
 err arg *....
 ```
 
+### `cmd_xqcx`
+
+查询 PB15/xqwd 吸球微动开关状态。命令无参数，返回 `1` 表示吸到球，`0` 表示未吸到球。默认按上拉输入、开关闭合拉低处理。
+
+```text
+cmd_xqcx *8DF9
+```
+
+回复格式：
+
+```text
+cmd_xqcx <0|1> *<CRC16>
+err arg *....
+```
+
+### `cmd_dct`
+
+控制 PD0/JD1 继电器输出。
+
+```text
+cmd_dct <0|1> *<CRC16>
+```
+
+示例：
+
+```text
+cmd_dct 0 *B72D
+cmd_dct 1 *A70C
+```
+
+说明：
+
+- `0`：关闭继电器输出，PD0 输出低电平。
+- `1`：打开继电器输出，PD0 输出高电平。
+
+可能回复：
+
+```text
+cmd_dct ok 0 *F12F
+cmd_dct ok 1 *E10E
+cmd_dct busy 0 *2DA2
+cmd_dct busy 1 *3D83
+err arg *....
+```
+
 ### `cmd_conmotion`
 
 控制底盘运动功能使能。该开关会影响 `cmd_dis`、`cmd_turn` 以及空闲状态下默认的转向环/角度保持输出。
@@ -321,6 +380,7 @@ cmd_conmotion 1 *7713
 
 - `0`：失能底盘运动，立即停止底盘电机，并关闭默认转向环输出。
 - `1`：使能底盘运动，允许 `cmd_dis`、`cmd_turn` 和空闲角度保持继续工作。
+- 也可以长按 `BNO_KEY` 切换该使能状态；失能后新的底盘运动命令会返回 `busy`。
 
 可能回复：
 
@@ -346,11 +406,10 @@ cmd_request <dx_cm> <dy_cm> <dyaw_deg> <yaw_deg> *<CRC16>
 
 字段说明：
 
-- `dx_cm`：距离上次查询的 x 位移，单位 cm。正方向为地图左边。
-- `dy_cm`：距离上次查询的 y 位移，单位 cm。正方向为地图下边。
+- `dx_cm`：距离上次查询的 STM32 里程计 x 位移，单位 cm；正方向与 `cmd_dis x_cm` 相同，为地图左边。
+- `dy_cm`：距离上次查询的 STM32 里程计 y 位移，单位 cm；正方向与 `cmd_dis y_cm` 相同，为地图下边。
 - `dyaw_deg`：距离上次查询的 yaw 变化，单位度。
-- `yaw_deg`：当前 STM32 yaw，单位度。默认 `0 deg` 朝地图上方，
-  `90 deg` 朝地图左边，`-90 deg` 朝地图右边。
+- `yaw_deg`：当前 yaw，单位度。
 
 第一次查询时，`dx_cm`、`dy_cm`、`dyaw_deg` 返回 0，随后建立增量参考点。
 
@@ -478,12 +537,12 @@ err arg *....
 ## 调试建议
 
 - `MAIN_IMU_PRINT_ENABLE` 可打开 IMU 周期打印。
-- yaw 清零由 `BNO_KEY` 按键触发，成功后 USART1 打印 `imu_zero:1`。
+- `BNO_KEY` 短按执行 yaw 清零，成功后 USART1 打印 `imu_zero:1`；长按约 1 秒切换底盘运动使能。
 - 如果串口命令一直返回 `busy`，优先检查 BNO085 是否正常输出 yaw；没有有效 yaw 时底盘任务会停留在等待 IMU 状态。
 - 如果底盘方向或角度闭环相反，检查 `BSP_CHASSIS_*_DIR`、`BSP_CHASSIS_YAW_CTRL_DIR`、`BSP_CHASSIS_GYRO_Z_DIR` 等方向宏。
 - 如果里程计距离偏差较大，调整 `BSP_CHASSIS_ODOM_FORWARD_SCALE` 和 `BSP_CHASSIS_ODOM_LEFT_SCALE`。
 
-## 维护注意事项 
+## 维护注意事项
 
 - `Core/` 下多数文件由 STM32CubeMX 生成，重新生成代码时注意保留 `USER CODE` 区域内的用户代码。
 - 新增业务逻辑优先放在 `App/` 或 `Bsp/`，避免和 CubeMX 生成代码混在一起。

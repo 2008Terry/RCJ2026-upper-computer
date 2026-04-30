@@ -34,6 +34,12 @@ from __future__ import annotations
 #     Turn suction on. Default is 100%.
 # - robot.suck_off(wait_sec=0.0)
 #     Turn suction off. Equivalent to robot.suck(speed_percent=0).
+# - robot.is_ball_detected(wait_sec=0.0)
+#     Send cmd_xqcx and return True when the suction microswitch reports a ball.
+# - robot.set_relay(enabled=True/False, wait_sec=0.0)
+#     Send cmd_dct 1/0 to control the PD0/JD1 relay.
+# - robot.relay_on(wait_sec=0.0) / robot.relay_off(wait_sec=0.0)
+#     Convenience wrappers for cmd_dct.
 # - robot.reset_yaw(wait_sec=0.0)
 #     Reset STM32 yaw zero. Sends cmd_anglecal.
 # - robot.reset_mcu(wait_sec=0.0)
@@ -69,10 +75,11 @@ from __future__ import annotations
 #         print(ball.angle_deg, ball.absolute_angle_deg)
 #         robot.turn(angle_deg=ball.absolute_angle_deg)
 #         robot.goto(x_m=ball.absolute_x_m, y_m=ball.absolute_y_m)
-# - robot.move(x_cm=..., y_cm=..., retry_delay_sec=None, timeout_sec=None,
-#              wait_sec=0.0)
+# - robot.move(x_cm=..., y_cm=..., speed_profile=1, retry_delay_sec=None,
+#              timeout_sec=None, wait_sec=0.0)
 #     Send STM32 cmd_dis directly. x_cm/y_cm are field-fixed centimeters:
-#     x_cm > 0 is map-left, y_cm > 0 is map-down.
+#     x_cm > 0 is map-left, y_cm > 0 is map-down. speed_profile can be
+#     0 fast, 1 normal, or 2 smooth.
 # - robot.sleep(duration_sec=..., wait_sec=0.0)
 #     First calls robot.stop(), waits for the cmd_juststop ACK, then waits for
 #     duration_sec while still spinning ROS callbacks. run_task does not execute
