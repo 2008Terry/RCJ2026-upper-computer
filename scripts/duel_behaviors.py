@@ -11,7 +11,7 @@ from typing import Any, Optional
 # - attack direction is map +y, STM32 yaw 0 deg
 ATTACK_YAW_DEG = 0.0
 DEFENSE_POINT_X_M = 0.0
-DEFENSE_POINT_Y_M = -0.65
+DEFENSE_POINT_Y_M = -0.30
 
 FIELD_X_MIN_M = -0.72
 FIELD_X_MAX_M = 0.72
@@ -33,9 +33,9 @@ KICK_DRIVE_SPEED_PERCENT = 20
 
 CHASE_BEHIND_OFFSET_M = 0.24
 CHASE_BEHIND_TOLERANCE_M = 0.08
-KICK_DISTANCE_M = 0.28
+KICK_DISTANCE_M = 0.20
 KICK_ANGLE_DEG = 18.0
-KICK_SUCK_SPEED_PERCENT = 60
+KICK_SUCK_SPEED_PERCENT = 20
 
 # Tune this if the BE-1732 physical channel order is mounted differently.
 IR_CHANNEL_TO_MOVE_ANGLE_DEG = {

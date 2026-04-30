@@ -189,6 +189,7 @@ install(PROGRAMS
   "scripts/remapped_photo_capture_ui.py"
   "scripts/test_yolo_auto_env.sh"
   "scripts/yolo_black_circle_debug.py"
+  "scripts/defense_runner.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -199,6 +200,8 @@ install(FILES
   "scripts/task_logic.py"
   "scripts/duel_logic.py"
   "scripts/duel_behaviors.py"
+  "scripts/defense_logic.py"
+  "scripts/defense_behaviors.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 
