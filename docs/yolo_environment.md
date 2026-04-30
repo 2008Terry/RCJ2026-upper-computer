@@ -63,6 +63,41 @@ yolo checks
 Ubuntu's apt OpenCV package instead of pip's OpenCV wheel. That is expected as
 long as `check_yolo_env.py` reports `opencv`, `rclpy`, and `cv_bridge` present.
 
+## Live Black Circle YOLO Debugging
+
+Run the live remapped-camera YOLO web viewer with:
+
+```bash
+ros2 launch rcj_localization yolo_black_circle_debug.launch.py
+```
+
+Then open `http://<robot-ip>:8081/` in a browser. If you are on the same
+machine, `http://localhost:8081/` also works.
+
+The default model path is `~/Downloads/train-2/weights/best.pt`. Override it
+explicitly when needed:
+
+```bash
+ros2 launch rcj_localization yolo_black_circle_debug.launch.py \
+  model_path:=~/Downloads/train-2/weights/best.pt confidence:=0.25 imgsz:=320
+```
+
+The browser view streams annotated detections and live stats for received FPS,
+processed FPS, model inference time, total frame time, skipped frames, detections, and
+maximum confidence. It does not require Qt or a graphical desktop session on the
+robot.
+
+Use a different port when needed:
+
+```bash
+ros2 launch rcj_localization yolo_black_circle_debug.launch.py web_port:=8082
+```
+
+If `camera_ros` reports `no cameras available`, the YOLO node is fine; the
+camera is not visible to `camera_ros`. Check that the camera is connected/enabled
+and not already owned by another process, or run with `enable_camera:=false`
+when another node is already publishing `/camera/image_raw`.
+
 ## Notes for the Future YOLO Black Circle Node
 
 - Keep model weights out of git; `*.pt` is ignored.
