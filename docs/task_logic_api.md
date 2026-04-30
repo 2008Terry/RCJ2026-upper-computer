@@ -155,6 +155,7 @@ robot.goto(
     goto_timeout_sec=None,
     pose_wait_timeout_sec=None,
     action_server_wait_sec=None,
+    speed_profile=1,
     wait_sec=0.0,
 )
 ```
@@ -167,6 +168,10 @@ delta, limits each movement to `max_step_m`, converts that step into STM32
 `cmd_dis` centimeters, sends the motion goal through `/stm32/motion`, waits for
 the STM32 motion result, then replans from the latest pose after `settle_sec`.
 
+`speed_profile` controls the STM32 `cmd_dis` speed profile for every segment:
+`0` is faster acceleration, `1` is the normal/default profile, and `2` is
+smoother acceleration.
+
 Defaults, when optional parameters are omitted:
 
 - `goal_tolerance_m=0.02`
@@ -176,6 +181,7 @@ Defaults, when optional parameters are omitted:
 - `goto_timeout_sec=40.0`
 - `pose_wait_timeout_sec=5.0`
 - `action_server_wait_sec=10.0`
+- `speed_profile=1`
 - `wait_sec=0.0`
 
 Returns `True` when the target is reached. Raises `GotoError` if the target
@@ -194,6 +200,7 @@ robot.goto(
     y_m=0.10,
     goal_tolerance_m=0.04,
     max_step_m=0.30,
+    speed_profile=2,
 )
 ```
 
@@ -859,7 +866,7 @@ if ball is not None:
     robot.turn(angle_deg=ball.absolute_angle_deg)
     robot.goto_ball_standoff(ball, stand_off_m=0.12)
 
-robot.goto_ball_standoff(stand_off_m=0.15)
+robot.goto_ball_standoff(stand_off_m=0.15, speed_profile=2)
 ```
 
 Moves to a map-frame target that stops before the detected ball by
@@ -883,6 +890,9 @@ target_y_m = ball.absolute_y_m - direction_y * stand_off_m
 the absolute ball position along the same map-frame direction. For example,
 `stand_off_m=0.12` means the goto target is about 12 cm before the ball, from
 the robot's current side.
+
+`speed_profile` is passed through to `robot.goto(...)` and uses the same values:
+`0` fast, `1` normal/default, or `2` smooth.
 
 Use this before the final slow suction approach. It should not be the last
 catching step; after reaching the standoff point, use `robot.drive(...)` and the

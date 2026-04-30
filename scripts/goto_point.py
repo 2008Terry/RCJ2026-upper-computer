@@ -92,6 +92,7 @@ class GotoNavigator(Node):
         goto_timeout_sec: Optional[float] = None,
         pose_wait_timeout_sec: Optional[float] = None,
         action_server_wait_sec: Optional[float] = None,
+        speed_profile: int = 1,
         wait_sec: float = 0.0,
     ) -> bool:
         target_x = float(x_m)
@@ -135,6 +136,9 @@ class GotoNavigator(Node):
             if action_server_wait_sec is None
             else action_server_wait_sec,
         )
+        speed_profile_int = int(speed_profile)
+        if speed_profile_int not in (0, 1, 2):
+            raise ValueError("speed_profile must be 0, 1, or 2.")
         wait_after = self._non_negative_float("wait_sec", wait_sec)
         if not math.isfinite(target_x) or not math.isfinite(target_y):
             raise ValueError("goto target coordinates must be finite.")
@@ -142,7 +146,8 @@ class GotoNavigator(Node):
         deadline = time.monotonic() + goto_timeout
         self.get_logger().info(
             f"Goto target start: target=({target_x:.3f}, {target_y:.3f}) m, "
-            f"tolerance={goal_tolerance:.3f} m"
+            f"tolerance={goal_tolerance:.3f} m, "
+            f"speed_profile={speed_profile_int}"
         )
 
         self._ensure_action_server_ready(deadline, action_wait_timeout)
@@ -183,7 +188,7 @@ class GotoNavigator(Node):
                 "cmd_dis "
                 f"{_format_number(step_dx_stm32_cm)} "
                 f"{_format_number(step_dy_stm32_cm)} "
-                "1"
+                f"{speed_profile_int}"
             )
 
             self.get_logger().info(

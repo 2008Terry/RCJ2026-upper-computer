@@ -638,6 +638,7 @@ class CompetitionRobot(GotoNavigator):
         detection_timeout_sec: float = 1.0,
         goal_tolerance_m: float = 0.04,
         max_step_m: float = 0.35,
+        speed_profile: int = 1,
         wait_sec: float = 0.0,
     ) -> bool:
         """Go to a map target that stops stand_off_m before the detected ball."""
@@ -646,6 +647,9 @@ class CompetitionRobot(GotoNavigator):
         goal_tolerance = self._positive_float(
             "goal_tolerance_m", goal_tolerance_m
         )
+        speed_profile_int = int(speed_profile)
+        if speed_profile_int not in (0, 1, 2):
+            raise ValueError("speed_profile must be 0, 1, or 2.")
 
         if ball is None:
             ball = self.find_ball(
@@ -672,6 +676,7 @@ class CompetitionRobot(GotoNavigator):
             y_m=target_y_m,
             goal_tolerance_m=goal_tolerance,
             max_step_m=max_step_m,
+            speed_profile=speed_profile_int,
             wait_sec=wait_sec,
         )
         return True
