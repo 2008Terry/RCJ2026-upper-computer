@@ -149,8 +149,11 @@ from __future__ import annotations
 def run_task(robot) -> None:
     """Edit this function to write the competition task sequence."""
     # robot.reset_yaw()
-    robot.motion_enable()
-    robot.suck_off()
+    # robot.motion_enable()
+    # robot.suck_off()
+    # robot.set_relay(enabled=True)
+    robot.relay_off()
+    
 
     # Example task sequence. Coordinates are absolute map-frame meters.
     # ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5)
@@ -189,38 +192,38 @@ def run_task(robot) -> None:
     
     
     ### successfully catched the ball
-    ball = robot.find_ball(timeout_sec=5.0, min_confidence=0.5)
-    if ball is None:
-        ball = robot.spin_find_ball(
-            step_deg=20.0,
-            direction=1,
-            max_turn_deg=360.0,
-            min_confidence=0.5,
-            settle_sec=0.2,
-            confirm_settle_sec=0.5,
-            confirm_timeout_sec=1.0,
-        )
-    if ball is not None:
-        robot.turn(angle_deg=ball.absolute_angle_deg)
-        robot.goto_ball_standoff(ball, stand_off_m=0.30)
+    # ball = robot.find_ball(timeout_sec=5.0, min_confidence=0.5)
+    # if ball is None:
+    #     ball = robot.spin_find_ball(
+    #         step_deg=20.0,
+    #         direction=1,
+    #         max_turn_deg=360.0,
+    #         min_confidence=0.5,
+    #         settle_sec=0.2,
+    #         confirm_settle_sec=0.5,
+    #         confirm_timeout_sec=1.0,
+    #     )
+    # if ball is not None:
+    #     robot.turn(angle_deg=ball.absolute_angle_deg)
+    #     robot.goto_ball_standoff(ball, stand_off_m=0.30)
         
-        robot.suck_on(speed_percent=15)
-        robot.reset_ball_sucked_detector(required_detected_count=5, sample_interval_sec=0.2)
-        while(1):
-            ball = robot.find_ball(timeout_sec=0.1)
-            if ball is not None:
-                robot.drive(speed_percent=10, move_angle_deg=ball.absolute_angle_deg, head_lock=False)
-            else:
-                print("Ball not found")
-            if robot.poll_ball_sucked(stop_on_success=True):
-                break
+    #     robot.suck_on(speed_percent=15)
+    #     robot.reset_ball_sucked_detector(required_detected_count=5, sample_interval_sec=0.2)
+    #     while(1):
+    #         ball = robot.find_ball(timeout_sec=0.1)
+    #         if ball is not None:
+    #             robot.drive(speed_percent=10, move_angle_deg=ball.absolute_angle_deg, head_lock=False)
+    #         else:
+    #             print("Ball not found")
+    #         if robot.poll_ball_sucked(stop_on_success=True):
+    #             break
             
-        robot.turn_to_point(x_m=0.0, y_m=0.0)
-        robot.goto(x_m=0.0, y_m=0.0,speed_profile=2)
-        robot.suck_off()
+    #     robot.turn_to_point(x_m=0.0, y_m=0.0)
+    #     robot.goto(x_m=0.0, y_m=0.0,speed_profile=2)
+    #     robot.suck_off()
             
-    else:
-        print("Ball not found")
+    # else:
+    #     print("Ball not found")
     
     
     
