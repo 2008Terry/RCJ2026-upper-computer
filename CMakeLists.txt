@@ -181,6 +181,7 @@ install(PROGRAMS
   "scripts/stm32_command_demo.py"
   "scripts/stm32_square_loop.py"
   "scripts/task_runner.py"
+  "scripts/duel_runner.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -189,6 +190,8 @@ install(FILES
   "scripts/competition_robot.py"
   "scripts/goto_point.py"
   "scripts/task_logic.py"
+  "scripts/duel_logic.py"
+  "scripts/duel_behaviors.py"
   DESTINATION lib/${PROJECT_NAME}
 )
 
