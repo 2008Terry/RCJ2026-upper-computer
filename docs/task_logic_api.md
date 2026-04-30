@@ -53,6 +53,93 @@ With the default `0.0`, STM32 yaw `0 deg` means the robot faces map-up,
 - STM32 yaw angles used by `robot.turn(...)` are firmware yaw angles in degrees:
   `0 deg` is map-up, `90 deg` is map-left, and `-90 deg` is map-right.
 
+## Quick Usage Recipes
+
+Use these as starting templates inside `run_task(robot)`.
+
+### Enable Motion Before A Task
+
+```python
+def run_task(robot) -> None:
+    robot.motion_enable()
+    robot.suck_off()
+
+    robot.goto(x_m=0.30, y_m=0.20)
+```
+
+### Go Through Several Map Points
+
+```python
+robot.motion_enable()
+
+robot.goto(x_m=-0.40, y_m=-0.60)
+robot.turn(angle_deg=90)
+robot.goto(x_m=0.40, y_m=-0.60)
+robot.turn_to_point(x_m=0.0, y_m=0.0)
+```
+
+### Find A Ball, Face It, Approach It, Then Chase And Suck
+
+```python
+ball = robot.find_ball(timeout_sec=0.5, min_confidence=0.5)
+if ball is None:
+    ball = robot.spin_find_ball(min_confidence=0.5)
+
+if ball is not None:
+    robot.turn(angle_deg=ball.absolute_angle_deg)
+    robot.goto_ball_standoff(ball, stand_off_m=0.30)
+
+    robot.suck_on(speed_percent=15)
+    robot.reset_ball_sucked_detector(
+        required_detected_count=3,
+        sample_interval_sec=0.05,
+    )
+
+    while True:
+        ball = robot.find_ball(timeout_sec=0.05, min_confidence=0.5)
+        if ball is not None:
+            robot.drive(
+                speed_percent=10,
+                move_angle_deg=ball.angle_deg,
+                head_lock=False,
+            )
+
+        if robot.poll_ball_sucked(stop_on_success=True):
+            break
+else:
+    print("Ball not found")
+```
+
+In the chase loop, use `ball.angle_deg` for `robot.drive(...)`, because
+`drive()` expects a robot-relative direction. Use `ball.absolute_angle_deg` only
+with `robot.turn(...)`.
+
+### Drive Continuously For A Fixed Time
+
+```python
+robot.drive(speed_percent=20, move_angle_deg=0, head_lock=True)
+robot.timer(duration_sec=1.0)
+robot.stop()
+```
+
+Use `robot.timer(...)` here, not `robot.sleep(...)`, because `sleep()` sends
+`robot.stop()` before waiting.
+
+### Release A Ball And Confirm It Is Gone
+
+```python
+robot.stop()
+robot.suck_off()
+
+released = robot.wait_for_ball_released(
+    timeout_sec=2.0,
+    required_empty_count=3,
+    sample_interval_sec=0.05,
+)
+if released:
+    print("Released")
+```
+
 ## Navigation And Motion
 
 ### `robot.goto(...)`
@@ -95,6 +182,21 @@ Returns `True` when the target is reached. Raises `GotoError` if the target
 cannot be reached before the timeout or iteration limit, or if the motion action
 server cannot be used safely.
 
+Use this for normal map navigation, especially when you trust `/amcl_pose` and
+want the robot to replan from pose feedback.
+
+Example:
+
+```python
+robot.goto(x_m=0.20, y_m=0.40)
+robot.goto(
+    x_m=0.60,
+    y_m=0.10,
+    goal_tolerance_m=0.04,
+    max_step_m=0.30,
+)
+```
+
 ### `robot.move(...)`
 
 ```python
@@ -124,6 +226,16 @@ Returns `True` after the gateway receives the STM32 motion `done` reply. Retries
 after failures using `retry_delay_sec`; each motion attempt uses `timeout_sec`.
 If omitted, those use the robot's configured defaults.
 
+Example:
+
+```python
+# Move 20 cm toward map-up while holding the current yaw.
+robot.move(x_cm=20, y_cm=0, speed_profile=1)
+
+# Move 10 cm toward map-left.
+robot.move(x_cm=0, y_cm=10, speed_profile=2)
+```
+
 ### `robot.turn(...)`
 
 ```python
@@ -136,6 +248,65 @@ map-left, and `-90 deg` is map-right. The firmware normalizes the target angle.
 
 Returns `True` after the STM32 reports the turn is done. Retries until success
 or ROS shutdown.
+
+Use this when you already know the desired STM32 yaw, or when using
+`ball.absolute_angle_deg`.
+
+Example:
+
+```python
+robot.turn(angle_deg=0)    # face map-up
+robot.turn(angle_deg=90)   # face map-left
+robot.turn(angle_deg=-90)  # face map-right
+
+ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5)
+if ball is not None:
+    robot.turn(angle_deg=ball.absolute_angle_deg)
+```
+
+### `robot.turn_to_point(...)`
+
+```python
+robot.turn_to_point(x_m=0.40, y_m=-0.60)
+robot.turn_to_point(x_m=0.40, y_m=-0.60, min_distance_m=0.02)
+```
+
+Turns in place to face an absolute ROS map-frame point. `x_m` and `y_m` are map
+coordinates in meters, using the same frame as `robot.goto(...)`.
+
+The wrapper reads the current robot pose, computes the map direction from the
+robot to the target point, converts that ROS map angle into the STM32 yaw
+convention, then calls `robot.turn(...)`.
+
+The calculation is:
+
+```text
+dx = target_x_m - current_x_m
+dy = target_y_m - current_y_m
+
+ros_map_angle_deg = atan2(dy, dx)
+stm32_yaw_deg = normalize(
+    ros_map_angle_deg - 90 - yaw_zero_map_degrees
+)
+```
+
+Returns `True` after the turn succeeds. Returns `False` without turning if the
+target is closer than `min_distance_m`, because the facing direction is then not
+stable enough to define.
+
+Use this when you know a point on the map and want the robot to face it without
+manually calculating yaw.
+
+Example:
+
+```python
+# Face the map origin.
+robot.turn_to_point(x_m=0.0, y_m=0.0)
+
+# Drive somewhere, then face a scoring area or another known map point.
+robot.goto(x_m=0.30, y_m=-0.20)
+robot.turn_to_point(x_m=-0.50, y_m=0.60)
+```
 
 ### `robot.drive(...)`
 
@@ -163,6 +334,29 @@ accepted. It does not wait for a `done` reply because `cmd_dkmotor` is continuou
 mode. Stop continuous movement with `robot.stop()` or by sending
 `robot.drive(speed_percent=0, move_angle_deg=0)`.
 
+Use this for short continuous behaviors such as final ball chasing. If you want
+the chassis to keep facing its current heading while sliding, use
+`head_lock=True`. If you want the firmware to turn toward the movement direction,
+use `head_lock=False`.
+
+Example:
+
+```python
+# Drive forward for 1 second, then stop.
+robot.drive(speed_percent=20, move_angle_deg=0, head_lock=True)
+robot.timer(duration_sec=1.0)
+robot.stop()
+
+# Chase a detected ball using robot-relative angle.
+ball = robot.find_ball(timeout_sec=0.1, min_confidence=0.5)
+if ball is not None:
+    robot.drive(
+        speed_percent=10,
+        move_angle_deg=ball.angle_deg,
+        head_lock=False,
+    )
+```
+
 ### `robot.stop()`
 
 ```python
@@ -173,6 +367,14 @@ Sends STM32 `cmd_juststop`. This stops current continuous chassis motion while
 keeping the STM32 chassis motion feature enabled and leaving yaw hold active.
 
 Returns `True` after a successful ACK.
+
+Example:
+
+```python
+robot.drive(speed_percent=15, move_angle_deg=0, head_lock=True)
+robot.timer(duration_sec=0.5)
+robot.stop()
+```
 
 ## STM32 Motion Enable And Reset
 
@@ -189,6 +391,14 @@ Send STM32 `cmd_conmotion 1` or `cmd_conmotion 0`.
 `motion_disable()` immediately stops chassis motor output and disables the
 default yaw-hold output. Both return `True` after a successful ACK.
 
+Typical use:
+
+```python
+def run_task(robot) -> None:
+    robot.motion_enable()
+    robot.goto(x_m=0.20, y_m=0.20)
+```
+
 ### `robot.reset_yaw()`
 
 ```python
@@ -201,6 +411,16 @@ firmware's BNO key yaw reset.
 Returns `True` after the command succeeds. The firmware may reject this command
 as busy if it does not yet have valid BNO085 yaw data; the wrapper retries until
 success.
+
+Use this only when you intentionally want the current robot heading to become
+the STM32 yaw zero reference.
+
+Example:
+
+```python
+robot.reset_yaw()
+robot.turn(angle_deg=0)
+```
 
 ### `robot.reset_mcu()`
 
@@ -227,6 +447,14 @@ Sends STM32 `cmd_suck <speed_percent>`. `speed_percent` must be in `0-100`.
 
 Returns `True` after a successful ACK.
 
+Example:
+
+```python
+robot.suck(speed_percent=40)
+robot.timer(duration_sec=0.5)
+robot.suck(speed_percent=0)
+```
+
 ### `robot.suck_on(...)`
 
 ```python
@@ -237,6 +465,12 @@ robot.suck_on(speed_percent=15, wait_sec=0.0)
 Convenience wrapper for `robot.suck(...)`. The default is `100%` if no speed is
 specified.
 
+Example:
+
+```python
+robot.suck_on(speed_percent=15)
+```
+
 ### `robot.suck_off()`
 
 ```python
@@ -244,6 +478,12 @@ robot.suck_off(wait_sec=0.0)
 ```
 
 Convenience wrapper for `robot.suck(speed_percent=0)`.
+
+Example:
+
+```python
+robot.suck_off()
+```
 
 ### `robot.is_ball_detected()`
 
@@ -254,6 +494,130 @@ detected = robot.is_ball_detected(wait_sec=0.0)
 Sends STM32 `cmd_xqcx` and returns `True` when the PB15/xqwd suction
 microswitch reports that a ball is detected.
 
+Use this for a one-shot raw read. For task decisions, prefer
+`robot.wait_for_ball_sucked(...)` or `robot.poll_ball_sucked(...)` because they
+debounce the switch.
+
+Example:
+
+```python
+if robot.is_ball_detected():
+    print("Switch says ball is present")
+```
+
+### `robot.wait_for_ball_sucked(...)`
+
+```python
+caught = robot.wait_for_ball_sucked(
+    timeout_sec=3.0,
+    required_detected_count=3,
+    sample_interval_sec=0.05,
+    stop_on_success=True,
+)
+```
+
+Robust suction-state detector for the binary suction microswitch. It repeatedly
+calls `robot.is_ball_detected()` and uses a small state machine:
+
+- `empty`: the latest stable state is no ball.
+- `candidate`: one or more detected samples have appeared, but not enough to
+  confirm the ball.
+- `confirmed`: `required_detected_count` consecutive detected samples have been
+  observed.
+
+The function returns `True` only after the `confirmed` state is reached. If the
+signal drops back to not detected before enough consecutive samples are seen,
+the streak resets to `empty`. It returns `False` when `timeout_sec` expires.
+
+Set `stop_on_success=True` when this function is used during a slow approach;
+the robot will send `robot.stop()` as soon as the suction state is confirmed.
+
+Use this when the robot does not need to keep updating `drive()` inside your own
+loop.
+
+Example:
+
+```python
+robot.suck_on(speed_percent=30)
+robot.drive(speed_percent=12, move_angle_deg=0, head_lock=True)
+
+caught = robot.wait_for_ball_sucked(
+    timeout_sec=2.0,
+    required_detected_count=3,
+    stop_on_success=True,
+)
+if not caught:
+    robot.stop()
+```
+
+### Non-Blocking Suction Poll
+
+```python
+robot.reset_ball_sucked_detector(
+    required_detected_count=3,
+    sample_interval_sec=0.05,
+)
+
+while True:
+    ball = robot.find_ball(timeout_sec=0.05, min_confidence=0.5)
+    if ball is not None:
+        robot.drive(
+            speed_percent=10,
+            move_angle_deg=ball.angle_deg,
+            head_lock=False,
+        )
+
+    if robot.poll_ball_sucked(stop_on_success=True):
+        break
+```
+
+Use this pattern when your task loop must keep doing other work, such as
+continuously steering with `robot.drive(...)`. Call
+`robot.reset_ball_sucked_detector(...)` once before the loop. Then call
+`robot.poll_ball_sucked(...)` once per loop iteration.
+
+`poll_ball_sucked()` does not own the loop and does not sleep until timeout. It
+only samples the microswitch when `sample_interval_sec` has elapsed; otherwise
+it returns the current confirmed/not-confirmed state immediately. Once
+`required_detected_count` consecutive detected samples are seen, it returns
+`True`. With `stop_on_success=True`, it also sends `robot.stop()` at that moment.
+
+Use this with vision-guided chasing, where each loop iteration may send a new
+`robot.drive(...)` command based on the current ball angle.
+
+### `robot.wait_for_ball_released(...)`
+
+```python
+released = robot.wait_for_ball_released(
+    timeout_sec=3.0,
+    required_empty_count=3,
+    sample_interval_sec=0.05,
+)
+```
+
+Robust release/drop detector for the same binary suction microswitch. It is the
+reverse of `robot.wait_for_ball_sucked(...)`: the function returns `True` only
+after `required_empty_count` consecutive not-detected samples.
+
+The state machine is:
+
+- `sucked`: the latest stable state is ball present.
+- `release_candidate`: one or more empty samples have appeared, but not enough
+  to confirm release/drop.
+- `released`: `required_empty_count` consecutive empty samples have been
+  observed.
+
+Use this after intentionally turning suction off, or while carrying a ball if
+you want to detect a real drop instead of reacting to a single noisy sample.
+
+Example:
+
+```python
+robot.suck_off()
+if robot.wait_for_ball_released(timeout_sec=2.0, required_empty_count=3):
+    print("Release confirmed")
+```
+
 ### `robot.set_relay()` / `robot.relay_on()` / `robot.relay_off()`
 
 ```python
@@ -263,6 +627,14 @@ robot.relay_off(wait_sec=0.0)
 ```
 
 Sends STM32 `cmd_dct 1` or `cmd_dct 0` to control the PD0/JD1 relay output.
+
+Example:
+
+```python
+robot.relay_on()
+robot.timer(duration_sec=0.5)
+robot.relay_off()
+```
 
 ## STM32 State And Infrared Sensor
 
@@ -289,6 +661,13 @@ ROS map yaw.
 The firmware defines the first request as the reference point, so its deltas are
 normally zero.
 
+Example:
+
+```python
+state = robot.request_state()
+print(f"STM32 yaw={state.theta:.1f}, dx={state.dx:.1f}, dy={state.dy:.1f}")
+```
+
 ### `robot.read_infrared()`
 
 ```python
@@ -304,6 +683,14 @@ Sends STM32 `cmd_infred` and returns a `Stm32Infrared` object:
 
 The wrapper validates that the returned channel is in range.
 
+Example:
+
+```python
+ir = robot.read_infrared()
+if ir.channel in (3, 4, 5):
+    print("IR source is near the center channels")
+```
+
 ### `robot.infrared_channel()`
 
 ```python
@@ -312,6 +699,13 @@ channel = robot.infrared_channel(wait_sec=0.0)
 
 Convenience wrapper for `robot.read_infrared().channel`. Use this when only the
 channel number matters.
+
+Example:
+
+```python
+channel = robot.infrared_channel()
+print(channel)
+```
 
 ### `robot.set_infrared_mode(...)`
 
@@ -328,6 +722,15 @@ Modes:
 - `"tz"`: modulated detection mode. This is the firmware default.
 
 Returns `True` after a successful ACK.
+
+Example:
+
+```python
+robot.infrared_modulated_mode()
+channel = robot.infrared_channel()
+
+robot.infrared_plain_mode()
+```
 
 ### `robot.infrared_plain_mode()` / `robot.infrared_modulated_mode()`
 
@@ -361,6 +764,20 @@ Reads the latest `/amcl_pose` pose and returns a `RobotPose` object:
 
 If no pose is available before `timeout_sec`, the function raises `GotoError`.
 If `timeout_sec` is omitted, it waits until a pose is available.
+
+Use this when you need to make a decision from the robot's current map position.
+Use `robot.goto(...)` for navigation instead of manually calculating `move(...)`
+commands from pose.
+
+Example:
+
+```python
+pose = robot.get_pose(timeout_sec=1.0)
+print(f"x={pose.x_m:.2f}, y={pose.y_m:.2f}, yaw={pose.yaw_deg:.1f}")
+
+if pose.y_m < 0.0:
+    robot.goto(x_m=pose.x_m, y_m=0.0)
+```
 
 ### `robot.find_ball(...)`
 
@@ -404,6 +821,36 @@ Returns a `BallDetection` object:
 To move toward the ball's map position, use `ball.absolute_x_m` and
 `ball.absolute_y_m`, as shown above.
 
+Use this for a single vision read. If it returns `None`, you can call
+`robot.spin_find_ball(...)` to scan in place.
+
+Examples:
+
+```python
+ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5)
+if ball is not None:
+    print(f"relative angle={ball.angle_deg:.1f}")
+    print(f"turn target={ball.absolute_angle_deg:.1f}")
+```
+
+```python
+# Turn to face the ball.
+ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5)
+if ball is not None:
+    robot.turn(angle_deg=ball.absolute_angle_deg)
+```
+
+```python
+# Chase the ball with continuous drive.
+ball = robot.find_ball(timeout_sec=0.05, min_confidence=0.5)
+if ball is not None:
+    robot.drive(
+        speed_percent=10,
+        move_angle_deg=ball.angle_deg,
+        head_lock=False,
+    )
+```
+
 ### `robot.goto_ball_standoff(...)`
 
 ```python
@@ -437,6 +884,69 @@ the absolute ball position along the same map-frame direction. For example,
 `stand_off_m=0.12` means the goto target is about 12 cm before the ball, from
 the robot's current side.
 
+Use this before the final slow suction approach. It should not be the last
+catching step; after reaching the standoff point, use `robot.drive(...)` and the
+suction switch detector for the final few centimeters.
+
+Example:
+
+```python
+ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5)
+if ball is not None:
+    robot.turn(angle_deg=ball.absolute_angle_deg)
+    if robot.goto_ball_standoff(ball, stand_off_m=0.25):
+        robot.suck_on(speed_percent=15)
+```
+
+### `robot.spin_find_ball(...)`
+
+```python
+ball = robot.find_ball(timeout_sec=0.5, min_confidence=0.5)
+if ball is None:
+    ball = robot.spin_find_ball(
+        step_deg=20.0,
+        direction=1,
+        max_turn_deg=360.0,
+        min_confidence=0.5,
+        confirm_settle_sec=0.5,
+    )
+
+if ball is not None:
+    print(ball.base_x_m, ball.angle_deg, ball.absolute_angle_deg)
+```
+
+Searches for a ball by turning in place in small absolute-yaw steps. This uses
+`robot.turn(...)`, so it does not translate the chassis. `direction > 0` scans
+toward positive STM32 yaw, and `direction < 0` scans toward negative STM32 yaw.
+Positive STM32 yaw is map-left with the default yaw convention.
+
+After each step, the function waits `settle_sec`, then calls
+`robot.find_ball(timeout_sec=detection_timeout_sec,
+min_confidence=min_confidence)`. When a ball is found, it sends `robot.stop()`,
+waits `confirm_settle_sec` so rotation and camera blur settle, reads the ball
+again for up to `confirm_timeout_sec`, and returns that confirmed
+`BallDetection`. If the confirm read fails, it returns the first detection as a
+fallback. If no ball is found before `max_turn_deg` is swept, it returns `None`.
+
+Use this when a direct `robot.find_ball(...)` call fails and you want the robot
+to search without translating.
+
+Example:
+
+```python
+ball = robot.find_ball(timeout_sec=0.5, min_confidence=0.5)
+if ball is None:
+    ball = robot.spin_find_ball(
+        step_deg=15.0,
+        direction=-1,
+        max_turn_deg=270.0,
+        min_confidence=0.5,
+    )
+
+if ball is not None:
+    robot.turn(angle_deg=ball.absolute_angle_deg)
+```
+
 ## Waiting
 
 ### `robot.sleep(...)`
@@ -452,6 +962,42 @@ detection subscribers continue updating during the wait.
 Use this instead of `time.sleep(...)` inside `run_task(robot)` when you want ROS
 callbacks to keep running.
 
+Use `robot.sleep(...)` only when you intentionally want the chassis stopped
+during the wait.
+
+Example:
+
+```python
+robot.stop()
+robot.sleep(duration_sec=0.5)
+```
+
+### `robot.timer(...)`
+
+```python
+robot.drive(speed_percent=20, move_angle_deg=0, head_lock=True)
+robot.timer(duration_sec=1.5)
+robot.stop()
+```
+
+Waits for `duration_sec` while still spinning ROS callbacks, but does not send
+`robot.stop()`. Use this when a continuous command such as `robot.drive(...)` or
+suction should keep running for a fixed amount of time.
+
+`robot.sleep(...)` is the stopping wait. `robot.timer(...)` is the non-stopping
+wait.
+
+Example:
+
+```python
+robot.suck_on(speed_percent=30)
+robot.timer(duration_sec=0.2)
+
+robot.drive(speed_percent=10, move_angle_deg=0, head_lock=False)
+robot.timer(duration_sec=0.5)
+robot.stop()
+```
+
 ## Error Handling Notes
 
 - Invalid arguments, such as out-of-range speed percentages or non-finite
@@ -462,3 +1008,4 @@ callbacks to keep running.
 - `cmd_dkmotor` continuous drive commands only wait for acceptance, not for
   movement completion.
 - `robot.sleep(...)` intentionally sends `cmd_juststop` before waiting.
+- `robot.timer(...)` does not stop active continuous motion.

@@ -26,6 +26,12 @@ from __future__ import annotations
 # - robot.turn(angle_deg=..., retry_delay_sec=None, timeout_sec=None, wait_sec=0.0)
 #     Turn to an STM32 yaw angle in degrees. Retries until the gateway reports
 #     motion done.
+# - robot.turn_to_point(x_m=..., y_m=..., min_distance_m=0.01,
+#                       pose_wait_timeout_sec=None, retry_delay_sec=None,
+#                       timeout_sec=None, wait_sec=0.0)
+#     Turn in place to face an absolute map-frame point. Returns False if the
+#     target point is too close to the current robot position to define a stable
+#     direction.
 # - robot.suck(speed_percent=..., retry_delay_sec=None, timeout_sec=None,
 #              wait_sec=0.0)
 #     Set suction speed. speed_percent is 0-100. Returns after a successful ACK.
@@ -35,6 +41,24 @@ from __future__ import annotations
 #     Turn suction off. Equivalent to robot.suck(speed_percent=0).
 # - robot.is_ball_detected(wait_sec=0.0)
 #     Send cmd_xqcx and return True when the suction microswitch reports a ball.
+# - robot.wait_for_ball_sucked(timeout_sec=3.0, required_detected_count=3,
+#                              sample_interval_sec=0.05,
+#                              stop_on_success=False, wait_sec=0.0)
+#     Robust suction state detector. It repeatedly reads the suction
+#     microswitch and returns True only after required_detected_count
+#     consecutive detected samples. Returns False on timeout.
+# - robot.reset_ball_sucked_detector(required_detected_count=3,
+#                                    sample_interval_sec=0.05)
+#     Reset the non-blocking suction debounce state machine before a catch loop.
+# - robot.poll_ball_sucked(stop_on_success=False)
+#     Non-blocking suction debounce poll for use inside your own while loop.
+#     Returns True once the configured consecutive detected count is reached.
+# - robot.wait_for_ball_released(timeout_sec=3.0, required_empty_count=3,
+#                                sample_interval_sec=0.05,
+#                                stop_on_success=False, wait_sec=0.0)
+#     Robust release/drop detector. It repeatedly reads the suction microswitch
+#     and returns True only after required_empty_count consecutive not-detected
+#     samples. Returns False on timeout.
 # - robot.set_relay(enabled=True/False, wait_sec=0.0)
 #     Send cmd_dct 1/0 to control the PD0/JD1 relay.
 # - robot.relay_on(wait_sec=0.0) / robot.relay_off(wait_sec=0.0)
@@ -81,6 +105,13 @@ from __future__ import annotations
 #     Go to a map target that stops stand_off_m meters before the ball. If ball
 #     is omitted, this function calls robot.find_ball(...) first. Returns False
 #     if no ball is available.
+# - robot.spin_find_ball(step_deg=20.0, direction=1, max_turn_deg=360.0,
+#                        min_confidence=0.5, detection_timeout_sec=0.25,
+#                        settle_sec=0.2, confirm_settle_sec=0.5,
+#                        confirm_timeout_sec=1.0, wait_sec=0.0)
+#     Search for a ball by turning in place in small absolute-yaw steps. When a
+#     ball is found, stop, wait for confirm_settle_sec, read the ball again, and
+#     return the confirmed BallDetection. Returns None if no ball is found.
 # - robot.move(x_cm=..., y_cm=..., speed_profile=1, retry_delay_sec=None,
 #              timeout_sec=None, wait_sec=0.0)
 #     Send STM32 cmd_dis directly. x_cm/y_cm are field-fixed centimeters:
@@ -91,6 +122,10 @@ from __future__ import annotations
 #     duration_sec while still spinning ROS callbacks. run_task does not execute
 #     the next command during this wait. The chassis should stay in STM32 IDLE:
 #     yaw hold remains active, but no translation command is active.
+# - robot.timer(duration_sec=..., wait_sec=0.0)
+#     Wait for duration_sec while still spinning ROS callbacks, without sending
+#     robot.stop(). Use this to let continuous drive/suction keep running for a
+#     fixed amount of time.
 # - robot.drive(speed_percent=..., move_angle_deg=..., head_lock=None,
 #               retry_delay_sec=None, timeout_sec=None, wait_sec=0.0)
 #     Send STM32 cmd_dkmotor for continuous velocity control. speed_percent is
@@ -110,7 +145,6 @@ from __future__ import annotations
 
 def run_task(robot) -> None:
     """Edit this function to write the competition task sequence."""
-
     # robot.reset_yaw()
     robot.motion_enable()
 
@@ -125,39 +159,85 @@ def run_task(robot) -> None:
     # robot.suck_on(speed_percent=15)
     # # robot.motion_disable()
     # robot.sleep(duration_sec=10.0)
-    # robot.suck_off()
-    
-    ball = robot.find_ball(timeout_sec=5.0, min_confidence=0.5)
-    if ball is not None:
-        robot.turn(angle_deg=ball.absolute_angle_deg)
-        robot.goto_ball_standoff(ball, stand_off_m=0.30)
+    robot.suck_on(speed_percent=0)
     
     
-
-    # while()
-    #     random()
-
-    #     goto()
-
-    #     take picture
-
-    # robot.sleep(duration_sec=1.0)
-    # robot.suck_on(speed_percent=0)
+    ### test dk move
+    # robot.turn(angle_deg=0)
+    # robot.drive(speed_percent=10, move_angle_deg=0, head_lock=True)
+    # robot.timer(duration_sec=3)
+    # robot.drive(speed_percent=10, move_angle_deg=90, head_lock=True)
+    # robot.timer(duration_sec=3)
+    # robot.drive(speed_percent=10, move_angle_deg=180, head_lock=True)
+    # robot.timer(duration_sec=3)
+    # robot.drive(speed_percent=10, move_angle_deg=270, head_lock=True)
+    # robot.timer(duration_sec=3)
+    # robot.stop()
     
     
+    
+    ### successfully catched the ball
+    # ball = robot.find_ball(timeout_sec=5.0, min_confidence=0.5)
+    # if ball is None:
+    #     ball = robot.spin_find_ball(
+    #         step_deg=20.0,
+    #         direction=1,
+    #         max_turn_deg=360.0,
+    #         min_confidence=0.5,
+    #         settle_sec=0.2,
+    #         confirm_settle_sec=0.5,
+    #         confirm_timeout_sec=1.0,
+    #     )
+    # if ball is not None:
+    #     robot.turn(angle_deg=ball.absolute_angle_deg)
+    #     robot.goto_ball_standoff(ball, stand_off_m=0.30)
+        
+    #     robot.suck_on(speed_percent=15)
+    #     while(1):
+    #         ball = robot.find_ball(timeout_sec=0.1)
+    #         if ball is not None:
+    #             robot.drive(speed_percent=10, move_angle_deg=ball.absolute_angle_deg, head_lock=False)
+    #         else:
+    #             print("Ball not found")
+    # else:
+    #     print("Ball not found")
+    
+    
+    
+    
+    ### standard spinning and find ball
+    # ball = robot.find_ball(timeout_sec=10, min_confidence=0.5)
+    # if ball is None:
+    #     ball = robot.spin_find_ball(
+    #         step_deg=20.0,
+    #         direction=1,
+    #         max_turn_deg=360.0,
+    #         min_confidence=0.5,
+    #         settle_sec=0.2,
+    #         confirm_settle_sec=0.5,
+    #         confirm_timeout_sec=1.0,
+    #     )
+    # if ball is not None:
+    #     robot.turn(angle_deg=ball.absolute_angle_deg)
+    #     print(ball.base_x_m, ball.angle_deg, ball.absolute_angle_deg)
+    # else:
+    #     print("Ball not found")
+        
+        
+        
+    ### test move
     # robot.turn(angle_deg=0)
     # robot.move(x_cm=0, y_cm=10, speed_profile=1)
-        
     # robot.turn(angle_deg=90)
     # robot.move(x_cm=10, y_cm=0, speed_profile=1)
-    
     # robot.turn(angle_deg=-90)
     # robot.move(x_cm=10, y_cm=0, speed_profile=1)
-    
     # robot.turn(angle_deg=180)
     # robot.move(x_cm=10, y_cm=0, speed_profile=1)
     
     
+    
+    ### walk points
     # robot.goto(x_m=-0.40, y_m=-0.60)
     # robot.turn(angle_deg=90)
     # robot.goto(x_m=0.40, y_m=-0.60)
@@ -165,18 +245,4 @@ def run_task(robot) -> None:
     # robot.goto(x_m=-0.40, y_m=0.60)
     # robot.turn(angle_deg=-90)
     # robot.goto(x_m=0.40, y_m=0.60)
-    
-    # ball_pose = robot.find_ball(timeout_sec=3.0, min_confidence=0.5)
-    # if ball_pose is not None:
-    #     print(ball_pose)
-    #     robot.turn(angle_deg=ball_pose.absolute_angle_deg)
-    #     # robot.sleep(duration_sec=10)
-    #     robot.suck_on(speed_percent=15)
-    #     robot.goto(x_m=ball_pose.absolute_x_m, y_m=ball_pose.absolute_y_m)
-    #     robot.sleep(duration_sec=2)
-    #     robot.suck_off()
-    # else:
-    #     print("Ball not found")
-    
-    # robot.turn(angle_deg=90)
-    # robot.suck_off()
+   

@@ -112,6 +112,12 @@ class CompetitionRobot(GotoNavigator):
         )
         self._latest_ball_detection: Optional[OrangeBallDetection] = None
         self._latest_ball_detection_time: Optional[float] = None
+        self._ball_sucked_required_count = 3
+        self._ball_sucked_sample_interval_sec = 0.05
+        self._ball_sucked_detected_streak = 0
+        self._ball_sucked_confirmed = False
+        self._ball_sucked_last_sample_time: Optional[float] = None
+        self._ball_sucked_state = "empty"
         self._ball_detection_sub = self.create_subscription(
             OrangeBallDetection,
             self.ball_detection_topic,
@@ -178,6 +184,62 @@ class CompetitionRobot(GotoNavigator):
         )
         self._wait_after(wait_after)
         return result
+
+    def turn_to_point(
+        self,
+        *,
+        x_m: float,
+        y_m: float,
+        min_distance_m: float = 0.01,
+        pose_wait_timeout_sec: Optional[float] = None,
+        retry_delay_sec: Optional[float] = None,
+        timeout_sec: Optional[float] = None,
+        wait_sec: float = 0.0,
+    ) -> bool:
+        target_x = float(x_m)
+        target_y = float(y_m)
+        min_distance = self._non_negative_float("min_distance_m", min_distance_m)
+        if not math.isfinite(target_x) or not math.isfinite(target_y):
+            raise ValueError("x_m and y_m must be finite.")
+
+        current_x, current_y = self.wait_for_pose(
+            timeout_sec=(
+                self.pose_wait_timeout_sec
+                if pose_wait_timeout_sec is None
+                else pose_wait_timeout_sec
+            )
+        )
+        dx_map = target_x - current_x
+        dy_map = target_y - current_y
+        distance_m = math.hypot(dx_map, dy_map)
+        if distance_m <= min_distance:
+            self.get_logger().warn(
+                "Turn-to-point skipped because target is too close: "
+                f"target=({target_x:.3f}, {target_y:.3f}) m, "
+                f"current=({current_x:.3f}, {current_y:.3f}) m, "
+                f"distance={distance_m:.3f} m"
+            )
+            self._wait_after(wait_sec)
+            return False
+
+        ros_map_angle_deg = math.degrees(math.atan2(dy_map, dx_map))
+        stm32_yaw_deg = self._normalize_angle_deg(
+            ros_map_angle_deg - 90.0 - self.yaw_zero_map_degrees
+        )
+        self.get_logger().info(
+            "Turn-to-point target: "
+            f"target=({target_x:.3f}, {target_y:.3f}) m, "
+            f"current=({current_x:.3f}, {current_y:.3f}) m, "
+            f"ros_angle={ros_map_angle_deg:.3f} deg, "
+            f"stm32_yaw={stm32_yaw_deg:.3f} deg"
+        )
+
+        return self.turn(
+            angle_deg=stm32_yaw_deg,
+            retry_delay_sec=retry_delay_sec,
+            timeout_sec=timeout_sec,
+            wait_sec=wait_sec,
+        )
 
     def drive(
         self,
@@ -295,6 +357,170 @@ class CompetitionRobot(GotoNavigator):
         detected = match.group(1) == "1"
         self._wait_after(wait_after)
         return detected
+
+    def reset_ball_sucked_detector(
+        self,
+        *,
+        required_detected_count: int = 3,
+        sample_interval_sec: float = 0.05,
+    ) -> None:
+        self._ball_sucked_required_count = self._positive_int(
+            "required_detected_count", required_detected_count
+        )
+        self._ball_sucked_sample_interval_sec = self._non_negative_float(
+            "sample_interval_sec", sample_interval_sec
+        )
+        self._ball_sucked_detected_streak = 0
+        self._ball_sucked_confirmed = False
+        self._ball_sucked_last_sample_time = None
+        self._ball_sucked_state = "empty"
+
+    def poll_ball_sucked(self, *, stop_on_success: bool = False) -> bool:
+        if self._ball_sucked_confirmed:
+            return True
+
+        now = time.monotonic()
+        if (
+            self._ball_sucked_last_sample_time is not None
+            and now - self._ball_sucked_last_sample_time
+            < self._ball_sucked_sample_interval_sec
+        ):
+            return False
+
+        self._ball_sucked_last_sample_time = now
+        detected = self.is_ball_detected()
+        if detected:
+            self._ball_sucked_detected_streak += 1
+            self._ball_sucked_state = "candidate"
+            if (
+                self._ball_sucked_detected_streak
+                >= self._ball_sucked_required_count
+            ):
+                self._ball_sucked_state = "confirmed"
+                self._ball_sucked_confirmed = True
+                if stop_on_success:
+                    self.stop()
+                self.get_logger().info(
+                    "Suction ball state confirmed: "
+                    f"state={self._ball_sucked_state}, "
+                    f"detected_streak={self._ball_sucked_detected_streak}"
+                )
+                return True
+        else:
+            self._ball_sucked_detected_streak = 0
+            self._ball_sucked_state = "empty"
+
+        return False
+
+    def wait_for_ball_sucked(
+        self,
+        *,
+        timeout_sec: float = 3.0,
+        required_detected_count: int = 3,
+        sample_interval_sec: float = 0.05,
+        stop_on_success: bool = False,
+        wait_sec: float = 0.0,
+    ) -> bool:
+        timeout = self._non_negative_float("timeout_sec", timeout_sec)
+        required_count = self._positive_int(
+            "required_detected_count", required_detected_count
+        )
+        sample_interval = self._non_negative_float(
+            "sample_interval_sec", sample_interval_sec
+        )
+        wait_after = self._non_negative_float("wait_sec", wait_sec)
+
+        deadline = time.monotonic() + timeout
+        detected_streak = 0
+        state = "empty"
+
+        while rclpy.ok():
+            detected = self.is_ball_detected()
+            if detected:
+                detected_streak += 1
+                state = "candidate"
+                if detected_streak >= required_count:
+                    state = "confirmed"
+                    if stop_on_success:
+                        self.stop()
+                    self.get_logger().info(
+                        "Suction ball state confirmed: "
+                        f"state={state}, detected_streak={detected_streak}"
+                    )
+                    self._wait_after(wait_after)
+                    return True
+            else:
+                detected_streak = 0
+                state = "empty"
+
+            if timeout == 0.0 or time.monotonic() >= deadline:
+                self.get_logger().info(
+                    "Suction ball state not confirmed: "
+                    f"state={state}, detected_streak={detected_streak}"
+                )
+                self._wait_after(wait_after)
+                return False
+
+            self.timer(
+                duration_sec=min(sample_interval, self._remaining_time(deadline))
+            )
+
+        raise RuntimeError("ROS shutdown while waiting for suction ball state.")
+
+    def wait_for_ball_released(
+        self,
+        *,
+        timeout_sec: float = 3.0,
+        required_empty_count: int = 3,
+        sample_interval_sec: float = 0.05,
+        stop_on_success: bool = False,
+        wait_sec: float = 0.0,
+    ) -> bool:
+        timeout = self._non_negative_float("timeout_sec", timeout_sec)
+        required_count = self._positive_int(
+            "required_empty_count", required_empty_count
+        )
+        sample_interval = self._non_negative_float(
+            "sample_interval_sec", sample_interval_sec
+        )
+        wait_after = self._non_negative_float("wait_sec", wait_sec)
+
+        deadline = time.monotonic() + timeout
+        empty_streak = 0
+        state = "sucked"
+
+        while rclpy.ok():
+            detected = self.is_ball_detected()
+            if not detected:
+                empty_streak += 1
+                state = "release_candidate"
+                if empty_streak >= required_count:
+                    state = "released"
+                    if stop_on_success:
+                        self.stop()
+                    self.get_logger().info(
+                        "Suction release state confirmed: "
+                        f"state={state}, empty_streak={empty_streak}"
+                    )
+                    self._wait_after(wait_after)
+                    return True
+            else:
+                empty_streak = 0
+                state = "sucked"
+
+            if timeout == 0.0 or time.monotonic() >= deadline:
+                self.get_logger().info(
+                    "Suction release state not confirmed: "
+                    f"state={state}, empty_streak={empty_streak}"
+                )
+                self._wait_after(wait_after)
+                return False
+
+            self.timer(
+                duration_sec=min(sample_interval, self._remaining_time(deadline))
+            )
+
+        raise RuntimeError("ROS shutdown while waiting for suction release state.")
 
     def set_relay(self, *, enabled: bool, wait_sec: float = 0.0) -> bool:
         wait_after = self._non_negative_float("wait_sec", wait_sec)
@@ -449,6 +675,105 @@ class CompetitionRobot(GotoNavigator):
             wait_sec=wait_sec,
         )
         return True
+
+    def spin_find_ball(
+        self,
+        *,
+        step_deg: float = 20.0,
+        direction: int = 1,
+        max_turn_deg: float = 360.0,
+        min_confidence: float = 0.5,
+        detection_timeout_sec: float = 0.25,
+        settle_sec: float = 0.2,
+        confirm_settle_sec: float = 0.5,
+        confirm_timeout_sec: float = 1.0,
+        wait_sec: float = 0.0,
+    ) -> Optional[BallDetection]:
+        """Search for a ball by turning in place, then re-read after settling."""
+
+        step = self._positive_float("step_deg", step_deg)
+        max_turn = self._positive_float("max_turn_deg", max_turn_deg)
+        detection_timeout = self._non_negative_float(
+            "detection_timeout_sec", detection_timeout_sec
+        )
+        settle = self._non_negative_float("settle_sec", settle_sec)
+        confirm_settle = self._non_negative_float(
+            "confirm_settle_sec", confirm_settle_sec
+        )
+        confirm_timeout = self._non_negative_float(
+            "confirm_timeout_sec", confirm_timeout_sec
+        )
+        wait_after = self._non_negative_float("wait_sec", wait_sec)
+        direction_value = int(direction)
+        if direction_value == 0:
+            raise ValueError("direction must be positive or negative.")
+        direction_sign = 1.0 if direction_value > 0 else -1.0
+
+        ball = self.find_ball(
+            timeout_sec=detection_timeout,
+            min_confidence=min_confidence,
+        )
+        if ball is not None:
+            result = self._confirm_ball_after_stop(
+                ball,
+                min_confidence=min_confidence,
+                settle_sec=confirm_settle,
+                timeout_sec=confirm_timeout,
+            )
+            self._wait_after(wait_after)
+            return result
+
+        start_yaw = self.request_state().theta
+        turn_count = int(math.ceil(max_turn / step))
+
+        for turn_index in range(1, turn_count + 1):
+            swept_deg = min(step * turn_index, max_turn)
+            target_yaw = self._normalize_angle_deg(
+                start_yaw + direction_sign * swept_deg
+            )
+            self.turn(angle_deg=target_yaw)
+            self.timer(duration_sec=settle)
+
+            ball = self.find_ball(
+                timeout_sec=detection_timeout,
+                min_confidence=min_confidence,
+            )
+            if ball is not None:
+                result = self._confirm_ball_after_stop(
+                    ball,
+                    min_confidence=min_confidence,
+                    settle_sec=confirm_settle,
+                    timeout_sec=confirm_timeout,
+                )
+                self._wait_after(wait_after)
+                return result
+
+        self._wait_after(wait_after)
+        return None
+
+    def _confirm_ball_after_stop(
+        self,
+        fallback_ball: BallDetection,
+        *,
+        min_confidence: float,
+        settle_sec: float,
+        timeout_sec: float,
+    ) -> BallDetection:
+        self.stop()
+        self.timer(duration_sec=settle_sec)
+        confirmed_ball = self.find_ball(
+            timeout_sec=timeout_sec,
+            min_confidence=min_confidence,
+        )
+        if confirmed_ball is not None:
+            return confirmed_ball
+        return fallback_ball
+
+    def timer(self, *, duration_sec: float, wait_sec: float = 0.0) -> None:
+        duration = self._non_negative_float("duration_sec", duration_sec)
+        wait_after = self._non_negative_float("wait_sec", wait_sec)
+        self._sleep_with_spin(duration)
+        self._wait_after(wait_after)
 
     def sleep(self, *, duration_sec: float, wait_sec: float = 0.0) -> None:
         duration = self._non_negative_float("duration_sec", duration_sec)
