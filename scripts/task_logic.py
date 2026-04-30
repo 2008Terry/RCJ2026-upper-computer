@@ -99,7 +99,7 @@ def run_task(robot) -> None:
     """Edit this function to write the competition task sequence."""
 
     # robot.reset_yaw()
-    robot.motion_enable()
+    # robot.motion_enable()
 
     # Example task sequence. Coordinates are absolute map-frame meters.
     # ball = robot.find_ball(timeout_sec=1.0, min_confidence=0.5)
@@ -109,8 +109,8 @@ def run_task(robot) -> None:
     # pose = robot.get_pose()
     # print(pose.x_m, pose.y_m, pose.yaw_deg)
     
-    # robot.suck_on(speed_percent=0)
-    # robot.motion_disable()
+    robot.suck_on(speed_percent=15)
+    robot.motion_disable()
     
     
     
@@ -135,14 +135,14 @@ def run_task(robot) -> None:
     # robot.turn(angle_deg=-90)
     # robot.goto(x_m=0.40, y_m=0.60)
     
-    ball_pose = robot.find_ball(timeout_sec=3.0, min_confidence=0.5)
-    if ball_pose is not None:
-        print(ball_pose)
-        robot.turn(angle_deg=ball_pose.turn_angle_deg)
-        robot.sleep(duration_sec=10)
-        robot.goto(x_m=ball_pose.absolute_x_m, y_m=ball_pose.absolute_y_m)
-    else:
-        print("Ball not found")
+    # ball_pose = robot.find_ball(timeout_sec=3.0, min_confidence=0.5)
+    # if ball_pose is not None:
+    #     print(ball_pose)
+    #     robot.turn(angle_deg=ball_pose.turn_angle_deg)
+    #     robot.sleep(duration_sec=10)
+    #     robot.goto(x_m=ball_pose.absolute_x_m, y_m=ball_pose.absolute_y_m)
+    # else:
+    #     print("Ball not found")
     
     # robot.turn(angle_deg=90)
     # robot.suck_off()
