@@ -1,5 +1,9 @@
 from __future__ import annotations
 # from turtle import goto
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from competition_robot import CompetitionRobot
 
 # Edit only run_task(robot) for normal competition programming.
 # Full API documentation: docs/task_logic_api.md
@@ -146,7 +150,7 @@ from __future__ import annotations
 #
 
 
-def run_task(robot) -> None:
+def run_task(robot: CompetitionRobot) -> None:
     """Edit this function to write the competition task sequence."""
     # robot.reset_yaw()
     # robot.motion_enable()
