@@ -92,11 +92,10 @@ void printUsage(const char * program_name)
 {
   std::cout
     << "Usage:\n"
-    << "  " << program_name << " [--lut <filename-or-path>] [--frame-size <width>x<height>]\n"
-    << "  " << program_name << " [--lut <filename-or-path>] [--frame-width <w> --frame-height <h>]\n"
+    << "  " << program_name << " --lut <filename-or-path> [--frame-size <width>x<height>]\n"
+    << "  " << program_name << " --lut <filename-or-path> [--frame-width <w> --frame-height <h>]\n"
     << "\n"
     << "Notes:\n"
-    << "  - If --lut is omitted, the checker loads the newest raw_ball_top_lut*.xml from config/.\n"
     << "  - If --lut is a bare filename, the checker looks for it inside config/.\n"
     << "  - If --lut is a path with directories or an absolute path, that path is used directly.\n";
 }
@@ -196,35 +195,6 @@ std::filesystem::path resolveConfigDir(const std::filesystem::path & program_pat
           "Cannot locate config directory. Tried ./config and install/share/rcj_localization/config.");
 }
 
-std::filesystem::path resolveNewestRawBallLutPath(const std::filesystem::path & config_dir)
-{
-  std::filesystem::path best_path;
-  std::filesystem::file_time_type best_time{};
-
-  for (const auto & entry : std::filesystem::directory_iterator(config_dir)) {
-    if (!entry.is_regular_file()) {
-      continue;
-    }
-
-    const std::string filename = entry.path().filename().string();
-    if (filename.rfind("raw_ball_top_lut", 0) != 0 || entry.path().extension() != ".xml") {
-      continue;
-    }
-
-    const auto write_time = entry.last_write_time();
-    if (best_path.empty() || write_time > best_time) {
-      best_path = entry.path();
-      best_time = write_time;
-    }
-  }
-
-  if (best_path.empty()) {
-    throw std::runtime_error("No raw_ball_top_lut*.xml files found in config directory: " + pathToString(config_dir));
-  }
-
-  return best_path;
-}
-
 std::filesystem::path resolveLutPath(
   const CommandLineOptions & options,
   const std::filesystem::path & program_path)
@@ -232,7 +202,7 @@ std::filesystem::path resolveLutPath(
   const std::filesystem::path config_dir = resolveConfigDir(program_path);
 
   if (options.lut_spec.empty()) {
-    return resolveNewestRawBallLutPath(config_dir);
+    throw std::runtime_error("Option --lut is required.");
   }
 
   if (options.lut_spec.is_absolute() || options.lut_spec.has_parent_path()) {

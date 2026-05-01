@@ -21,7 +21,7 @@ from rcj_shared_launch_params import (
 
 def generate_launch_description():
     package_share = Path(get_package_share_directory("rcj_localization"))
-    default_lut = package_share / "config" / "raw_ball_top_lut_20260422_104020.xml"
+    default_lut = package_share / "config" / "camera1_raw_ball_top_lut_20260422_104020.xml"
 
     camera_index = LaunchConfiguration("camera_index")
     role = LaunchConfiguration("role")

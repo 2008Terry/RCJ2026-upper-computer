@@ -15,7 +15,7 @@ def generate_launch_description():
     imx_amcl_launch_file = (
         package_share / "launch" / "imx477_hsv_dt_fastmap_amcl.launch.py"
     )
-    default_lut = package_share / "config" / "raw_ball_top_lut_20260422_104020.xml"
+    default_lut = package_share / "config" / "camera1_raw_ball_top_lut_20260422_104020.xml"
     default_robot_mask = package_share / "config" / "mask.png"
 
     input_topic = LaunchConfiguration("input_topic")

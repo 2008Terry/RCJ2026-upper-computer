@@ -1,7 +1,6 @@
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-from ament_index_python.packages import get_package_share_directory
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -16,16 +15,6 @@ def optional_launch_config(name, default_value):
     return LaunchConfiguration(name, default=default_value)
 
 
-def find_latest_fastmap_file():
-    config_dir = Path(get_package_share_directory("rcj_localization")) / "config"
-    candidates = sorted(config_dir.glob("undistort_map_*_fast.xml"))
-    if not candidates:
-        candidates = sorted(config_dir.glob("*.xml"))
-    if not candidates:
-        raise FileNotFoundError(f"No fastmap XML file found in {config_dir}")
-    return candidates[-1]
-
-
 def read_fastmap_source_size(fastmap_file):
     root = ET.parse(fastmap_file).getroot()
     source_width = root.findtext("source_width")
@@ -38,14 +27,10 @@ def read_fastmap_source_size(fastmap_file):
 
 
 def resolve_fastmap_file(context):
-    use_latest_fastmap = (
-        LaunchConfiguration("use_latest_fastmap").perform(context).strip().lower()
-        == "true"
-    )
     fastmap_file_value = LaunchConfiguration("fastmap_file").perform(context).strip()
 
-    if use_latest_fastmap or not fastmap_file_value:
-        return find_latest_fastmap_file()
+    if not fastmap_file_value:
+        raise RuntimeError("Launch argument 'fastmap_file' must be set.")
 
     fastmap_path = Path(fastmap_file_value).expanduser()
     if not fastmap_path.is_absolute():

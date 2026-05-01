@@ -110,10 +110,14 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")
             ),  # Optional remapped-space robot mask image path
-            DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument(
-                "fastmap_file", default_value=""
-            ),  # Specific Fastmap XML path when auto-select is disabled
+                "fastmap_file",
+                default_value=str(
+                    package_share
+                    / "config"
+                    / "camera1_undistort_map_20260420_082314_fast.xml"
+                ),
+            ),  # Fastmap XML path
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
             declare_remap_interpolation_argument(),
             DeclareLaunchArgument(
