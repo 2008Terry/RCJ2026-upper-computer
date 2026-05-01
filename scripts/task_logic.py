@@ -154,9 +154,11 @@ def run_task(robot: CompetitionRobot) -> None:
     """Edit this function to write the competition task sequence."""
     # robot.reset_yaw()
     # robot.motion_enable()
-    # robot.suck_off()
+    robot.suck_on(speed_percent=10)
+    robot.timer(duration_sec=10)
+    robot.suck_off()
     # robot.set_relay(enabled=True)
-    robot.relay_off()
+    # robot.relay_off()
     
 
     # Example task sequence. Coordinates are absolute map-frame meters.
