@@ -30,13 +30,13 @@ class GotoNavigator(Node):
 
         self.declare_parameter("pose_topic", "/amcl_pose")
         self.declare_parameter("motion_action_name", "/stm32/motion")
-        self.declare_parameter("goal_tolerance_m", 0.03)
-        self.declare_parameter("max_step_m", 0.40)
-        self.declare_parameter("settle_sec", 0.5)
-        self.declare_parameter("max_iterations", 20)
-        self.declare_parameter("goto_timeout_sec", 30.0)
+        self.declare_parameter("goal_tolerance_m", 0.02)
+        self.declare_parameter("max_step_m", 0.50)
+        self.declare_parameter("settle_sec", 0.7)
+        self.declare_parameter("max_iterations", 25)
+        self.declare_parameter("goto_timeout_sec", 40.0)
         self.declare_parameter("pose_wait_timeout_sec", 5.0)
-        self.declare_parameter("action_server_wait_sec", 2.0)
+        self.declare_parameter("action_server_wait_sec", 10.0)
 
         self.pose_topic = str(self.get_parameter("pose_topic").value)
         self.motion_action_name = str(self.get_parameter("motion_action_name").value)
@@ -55,6 +55,7 @@ class GotoNavigator(Node):
         self._validate_parameters()
 
         self._latest_pose_xy: Optional[Tuple[float, float]] = None
+        self._latest_pose_yaw_rad: Optional[float] = None
         self._latest_pose_received_time: Optional[float] = None
         self._motion_in_flight = False
 
@@ -80,8 +81,9 @@ class GotoNavigator(Node):
 
     def goto(
         self,
-        target_x_m: float,
-        target_y_m: float,
+        *,
+        x_m: float,
+        y_m: float,
         tolerance_m: Optional[float] = None,
         goal_tolerance_m: Optional[float] = None,
         max_step_m: Optional[float] = None,
@@ -90,9 +92,11 @@ class GotoNavigator(Node):
         goto_timeout_sec: Optional[float] = None,
         pose_wait_timeout_sec: Optional[float] = None,
         action_server_wait_sec: Optional[float] = None,
+        speed_profile: int = 1,
+        wait_sec: float = 0.0,
     ) -> bool:
-        target_x = float(target_x_m)
-        target_y = float(target_y_m)
+        target_x = float(x_m)
+        target_y = float(y_m)
         if tolerance_m is not None and goal_tolerance_m is not None:
             raise ValueError(
                 "Use either tolerance_m or goal_tolerance_m, not both."
@@ -132,13 +136,18 @@ class GotoNavigator(Node):
             if action_server_wait_sec is None
             else action_server_wait_sec,
         )
+        speed_profile_int = int(speed_profile)
+        if speed_profile_int not in (0, 1, 2):
+            raise ValueError("speed_profile must be 0, 1, or 2.")
+        wait_after = self._non_negative_float("wait_sec", wait_sec)
         if not math.isfinite(target_x) or not math.isfinite(target_y):
             raise ValueError("goto target coordinates must be finite.")
 
         deadline = time.monotonic() + goto_timeout
         self.get_logger().info(
             f"Goto target start: target=({target_x:.3f}, {target_y:.3f}) m, "
-            f"tolerance={goal_tolerance:.3f} m"
+            f"tolerance={goal_tolerance:.3f} m, "
+            f"speed_profile={speed_profile_int}"
         )
 
         self._ensure_action_server_ready(deadline, action_wait_timeout)
@@ -159,6 +168,7 @@ class GotoNavigator(Node):
                     f"{target_y:.3f}) m, current=({current_x:.3f}, "
                     f"{current_y:.3f}) m, error={distance:.3f} m"
                 )
+                self._wait_after(wait_after)
                 return True
 
             if time.monotonic() >= deadline:
@@ -177,7 +187,8 @@ class GotoNavigator(Node):
             command = (
                 "cmd_dis "
                 f"{_format_number(step_dx_stm32_cm)} "
-                f"{_format_number(step_dy_stm32_cm)}"
+                f"{_format_number(step_dy_stm32_cm)} "
+                f"{speed_profile_int}"
             )
 
             self.get_logger().info(
@@ -209,6 +220,7 @@ class GotoNavigator(Node):
                 f"Goto target reached after final settle: "
                 f"error={final_distance:.3f} m"
             )
+            self._wait_after(wait_after)
             return True
 
         raise GotoError(
@@ -238,13 +250,28 @@ class GotoNavigator(Node):
 
     def _pose_callback(self, msg: PoseWithCovarianceStamped) -> None:
         position = msg.pose.pose.position
+        orientation = msg.pose.pose.orientation
         x = float(position.x)
         y = float(position.y)
-        if not math.isfinite(x) or not math.isfinite(y):
-            self.get_logger().warn("Ignoring non-finite /amcl_pose position.")
+        yaw_rad = self._quaternion_to_yaw_rad(
+            float(orientation.x),
+            float(orientation.y),
+            float(orientation.z),
+            float(orientation.w),
+        )
+        if not math.isfinite(x) or not math.isfinite(y) or not math.isfinite(yaw_rad):
+            self.get_logger().warn("Ignoring non-finite /amcl_pose.")
             return
         self._latest_pose_xy = (x, y)
+        self._latest_pose_yaw_rad = yaw_rad
         self._latest_pose_received_time = time.monotonic()
+
+    def _quaternion_to_yaw_rad(
+        self, x: float, y: float, z: float, w: float
+    ) -> float:
+        siny_cosp = 2.0 * (w * z + x * y)
+        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        return math.atan2(siny_cosp, cosy_cosp)
 
     def _validate_parameters(self) -> None:
         if not self.pose_topic:
@@ -348,9 +375,9 @@ class GotoNavigator(Node):
         self, dx_map_m: float, dy_map_m: float
     ) -> Tuple[float, float]:
         # Map frame: +x is right, +y is up.
-        # STM32 cmd_dis frame: +x is map-left, +y is map-down.
+        # Public cmd_dis world frame: +x is map-up, +y is map-left.
         # Both frames are field-fixed; robot yaw is not part of this conversion.
-        return -dx_map_m, -dy_map_m
+        return dy_map_m, -dx_map_m
 
     def _spin_until_future_done(self, future, timeout_sec: float) -> bool:
         deadline = time.monotonic() + max(0.0, float(timeout_sec))
@@ -364,6 +391,9 @@ class GotoNavigator(Node):
         deadline = time.monotonic() + max(0.0, duration_sec)
         while rclpy.ok() and time.monotonic() < deadline:
             self._spin_once_until(deadline)
+
+    def _wait_after(self, wait_sec: float) -> None:
+        self._sleep_with_spin(self._non_negative_float("wait_sec", wait_sec))
 
     def _spin_once_until(self, deadline: Optional[float]) -> None:
         timeout_sec = 0.05

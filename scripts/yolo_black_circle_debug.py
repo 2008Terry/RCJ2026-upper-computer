@@ -362,7 +362,7 @@ class YoloBlackCircleDebugNode(Node):
         self.declare_parameter("input_topic", "/black_feature_input_remap_node/image_remapped")
         self.declare_parameter(
             "model_path",
-            str(Path.home() / "Downloads" / "train-2" / "weights" / "best.pt"),
+            str(Path.home() / "Downloads" / "train-6" / "weights" / "best.pt"),
         )
         self.declare_parameter("confidence", 0.25)
         self.declare_parameter("iou", 0.45)
@@ -395,7 +395,7 @@ class YoloBlackCircleDebugNode(Node):
         if not self.model_path.exists():
             raise FileNotFoundError(
                 f"YOLO model not found: {self.model_path}. "
-                "Pass model_path:=/path/to/train-2 or /path/to/best.pt."
+                "Pass model_path:=/path/to/train-6 or /path/to/best.pt."
             )
 
         self.get_logger().info(f"Loading YOLO model: {self.model_path}")

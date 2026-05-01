@@ -15,13 +15,13 @@ except ModuleNotFoundError as exc:
 
 
 # HARDCODED_COMMANDS = [
-#     "cmd_dis 100 -100 *7841",
+#     "cmd_dis 100 -100 1 *F981",
 #     "cmd_turn 90 *1935",
-#     "cmd_dis 50 0 *798F",
+#     "cmd_dis 50 0 1 *F232",
 # ]
 
 HARDCODED_COMMANDS = [
-     "cmd_dis 100 -100 *7841",
+     "cmd_dis 100 -100 1 *F981",
 ]
 
 def main() -> int:

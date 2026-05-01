@@ -38,6 +38,7 @@ namespace
     CommandKind kind;
     double primary_value;
     double secondary_value;
+    int speed_profile = 1;
   };
 
   struct ParsedReply
@@ -107,7 +108,8 @@ namespace
     if (command.kind == CommandKind::Distance)
     {
       stream << ' ' << formatNumber(command.primary_value)
-             << ' ' << formatNumber(command.secondary_value);
+             << ' ' << formatNumber(command.secondary_value)
+             << ' ' << command.speed_profile;
     }
     else
     {
@@ -130,12 +132,32 @@ namespace
     if (command_name == "cmd_dis")
     {
       command.kind = CommandKind::Distance;
-      if (!(tokens >> command.primary_value >> command.secondary_value) ||
+      std::string speed_profile_token;
+      if (!(tokens >> command.primary_value >> command.secondary_value >> speed_profile_token) ||
           (tokens >> extra_token))
       {
         throw std::runtime_error(
-            "Invalid cmd_dis command '" + spec + "'. Expected: cmd_dis <primary> <secondary>");
+            "Invalid cmd_dis command '" + spec +
+            "'. Expected: cmd_dis <x_cm> <y_cm> <speed_profile 0|1|2>");
       }
+      std::size_t consumed = 0;
+      int speed_profile = 0;
+      try
+      {
+        speed_profile = std::stoi(speed_profile_token, &consumed, 10);
+      }
+      catch (const std::exception &)
+      {
+        throw std::runtime_error(
+            "Invalid cmd_dis command '" + spec + "'. speed_profile must be 0, 1, or 2.");
+      }
+      if (consumed != speed_profile_token.size() ||
+          speed_profile < 0 || speed_profile > 2)
+      {
+        throw std::runtime_error(
+            "Invalid cmd_dis command '" + spec + "'. speed_profile must be 0, 1, or 2.");
+      }
+      command.speed_profile = speed_profile;
       return command;
     }
 
@@ -290,9 +312,9 @@ public:
       : Node("stm32_behavior_node")
   {
     const std::vector<std::string> default_commands{
-        "cmd_dis 100 -100",
+        "cmd_dis 100 -100 1",
         "cmd_turn 90",
-        "cmd_dis 50 0",
+        "cmd_dis 50 0 1",
     };
 
     this->declare_parameter<std::string>("port", "/dev/ttyUSB0");

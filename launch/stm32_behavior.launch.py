@@ -121,10 +121,10 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "commands",
-                default_value='["cmd_dis 100 -100", "cmd_turn 90", "cmd_dis 50 0"]',
+                default_value='["cmd_dis 100 -100 1", "cmd_turn 90", "cmd_dis 50 0 1"]',
                 description=(
                     "STM32 command sequence. Use a Python list of strings or "
-                    "semicolon-separated commands, e.g. 'cmd_dis 100 -100; cmd_turn 90'."
+                    "semicolon-separated commands, e.g. 'cmd_dis 100 -100 1; cmd_turn 90'."
                 ),
             ),
             OpaqueFunction(function=build_nodes),

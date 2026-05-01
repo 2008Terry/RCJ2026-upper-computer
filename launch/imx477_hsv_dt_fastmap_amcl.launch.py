@@ -38,7 +38,6 @@ def generate_launch_description():
     enable_topdown_pf_localization_node_v2 = LaunchConfiguration(
         "enable_topdown_pf_localization_node_v2"
     )
-    odom_topic = LaunchConfiguration("odom_topic")
     use_stm32_gateway_odometry = LaunchConfiguration("use_stm32_gateway_odometry")
     stm32_command_service = LaunchConfiguration("stm32_command_service")
     stm32_request_timeout_ms = LaunchConfiguration("stm32_request_timeout_ms")
@@ -140,6 +139,8 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")
             ),  # Optional remapped-space robot mask image path
+            DeclareLaunchArgument("debug_jpeg_quality", default_value="80"),  # JPEG quality for compressed debug image topics
+            DeclareLaunchArgument("debug_image_max_fps", default_value="5.0"),  # Max FPS for lazy debug image topics
             DeclareLaunchArgument("use_latest_fastmap", default_value="false"),  # Whether to auto-select the latest Fastmap XML
             DeclareLaunchArgument(
                 "fastmap_file", default_value=""
@@ -325,15 +326,14 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "map_yaml_file", default_value=str(map_yaml_default)
             ),  # Nav2 map YAML path
-            DeclareLaunchArgument("use_fake_yaw", default_value="true"),  # Whether to use synthetic yaw
+            DeclareLaunchArgument("use_fake_yaw", default_value="false"),  # Whether to use synthetic yaw
             DeclareLaunchArgument("yaw_topic", default_value="/robot/yaw"),  # Robot yaw topic
             DeclareLaunchArgument(
                 "fake_yaw_degrees", default_value="0.0"
-            ),  # Fixed yaw angle used when use_fake_yaw is true
+            ),  # Fixed STM32 yaw angle used when use_fake_yaw is true
             DeclareLaunchArgument(
                 "yaw_zero_map_degrees", default_value="0.0"
             ),  # Field-heading offset for robot yaw 0; 0 means the top side of the field
-            DeclareLaunchArgument("odom_topic", default_value="/wheel_odometry"),  # Wheel odometry topic
             DeclareLaunchArgument(
                 "use_stm32_gateway_odometry", default_value="true"
             ),  # Whether AMCL requests odometry from the STM32 gateway
@@ -471,7 +471,7 @@ def generate_launch_description():
             DeclareLaunchArgument("odom_noise_y_from_y", default_value="0.06"),  # Lateral motion contribution to y variance
             DeclareLaunchArgument("odom_noise_y_from_theta", default_value="0.0025"),  # Rotation contribution to y variance
             DeclareLaunchArgument("odom_noise_y_bias", default_value="0.0001"),  # Constant y variance term
-            DeclareLaunchArgument("odom_noise_theta_from_x", default_value="0.30"),  # Forward motion contribution to heading variance
+            DeclareLaunchArgument("odom_noise_theta_from_x", default_value="0.60"),  # Forward motion contribution to heading variance
             DeclareLaunchArgument("odom_noise_theta_from_y", default_value="0.60"),  # Lateral motion contribution to heading variance
             DeclareLaunchArgument("odom_noise_theta_from_theta", default_value="0.09"),  # Rotation contribution to heading variance
             DeclareLaunchArgument("odom_noise_theta_bias", default_value="0.000304617"),  # Constant heading variance term
@@ -574,7 +574,6 @@ def generate_launch_description():
                         "yaw_zero_map_degrees": ParameterValue(
                             yaw_zero_map_degrees, value_type=float
                         ),
-                        "odom_topic": odom_topic,
                         "use_stm32_gateway_odometry": ParameterValue(
                             use_stm32_gateway_odometry, value_type=bool
                         ),

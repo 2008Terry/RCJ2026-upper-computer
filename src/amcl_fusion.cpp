@@ -108,15 +108,10 @@ double radiansToDegrees(double angle_rad) { return angle_rad * (180.0 / M_PI); }
 
 double fieldYawDegreesToRosMapRadians(double yaw_degrees,
                                       double zero_map_degrees) {
-  // Robot yaw is field-relative: 0=top/forward, 90=left, 180=back,
-  // 270=right. ROS map yaw is 0=+X/right, 90=+Y/top.
+  // Robot yaw is field-relative counter-clockwise from map-up:
+  // 0=top/forward, 90=left, 180=back, -90=right. ROS map yaw is:
+  // 0=+X/right, 90=+Y/top.
   return normalizeAngle(degreesToRadians(90.0 + zero_map_degrees + yaw_degrees));
-}
-
-double stm32XAxisDegreesToRosMapRadians(double zero_map_degrees) {
-  // STM32 dx is robot-left when robot yaw is 0, so it is 90 degrees left of
-  // the robot-forward field yaw.
-  return normalizeAngle(degreesToRadians(180.0 + zero_map_degrees));
 }
 
 void validateAxisMotionNoiseConfig(const rcj_loc::AxisMotionNoiseConfig &config,
@@ -189,12 +184,6 @@ public:
       if (use_stm32_gateway_odometry_) {
         stm32_command_client_ =
             this->create_client<Stm32Command>(stm32_command_service_);
-      } else {
-        odom_sub_ = this->create_subscription<
-            geometry_msgs::msg::PoseWithCovarianceStamped>(
-            odom_topic_, 10,
-            std::bind(&AmclFusionNode::odomCallback, this,
-                      std::placeholders::_1));
       }
 
       pose_pub_ =
@@ -219,7 +208,6 @@ public:
         "amcl_fusion started. mask_topic='%s', yaw_topic='%s', "
         "use_fake_yaw=%s, fake_yaw_degrees=%.3f, "
         "yaw_zero_map_degrees=%.3f, "
-        "odom_topic='%s', "
         "use_stm32_gateway_odometry=%s, stm32_command_service='%s', "
         "stm32_request_timeout_ms=%d, stm32_enable_odometry_log=%s, "
         "use_stm32_request_theta=%s, "
@@ -235,7 +223,6 @@ public:
         mask_topic_.c_str(), yaw_topic_.c_str(),
         use_fake_yaw_ ? "true" : "false", fake_yaw_degrees_,
         yaw_zero_map_degrees_,
-        odom_topic_.c_str(),
         use_stm32_gateway_odometry_ ? "true" : "false",
         stm32_command_service_.c_str(), stm32_request_timeout_ms_,
         stm32_enable_odometry_log_ ? "true" : "false",
@@ -293,7 +280,6 @@ private:
     this->declare_parameter("use_fake_yaw", false);
     this->declare_parameter("fake_yaw_degrees", 0.0);
     this->declare_parameter("yaw_zero_map_degrees", 0.0);
-    this->declare_parameter<std::string>("odom_topic", "/wheel_odometry");
     this->declare_parameter("use_stm32_gateway_odometry", false);
     this->declare_parameter<std::string>("stm32_command_service",
                                          "/stm32/send_command");
@@ -387,7 +373,6 @@ private:
           "Parameter 'particle_weight_marker_scale' must be a positive finite "
           "number.");
     }
-    odom_topic_ = this->get_parameter("odom_topic").as_string();
     use_stm32_gateway_odometry_ =
         this->get_parameter("use_stm32_gateway_odometry").as_bool();
     stm32_command_service_ =
@@ -783,7 +768,7 @@ private:
                  name == "debug_pointcloud_topic" || name == "map_topic" ||
                  name == "yaw_topic" || name == "use_fake_yaw" ||
                  name == "fake_yaw_degrees" ||
-                 name == "yaw_zero_map_degrees" || name == "odom_topic" ||
+                 name == "yaw_zero_map_degrees" ||
                  name == "use_stm32_gateway_odometry" ||
                  name == "stm32_command_service" ||
                  name == "use_stm32_request_theta" ||
@@ -874,16 +859,6 @@ private:
     return result;
   }
 
-  void resetOdomBaseline() {
-    if (!odom_initialized_) {
-      return;
-    }
-
-    prev_odom_x_ = odom_x_;
-    prev_odom_y_ = odom_y_;
-    prev_odom_theta_ = odom_theta_;
-  }
-
   void clearGatewayOdomState() {
     if (!use_stm32_gateway_odometry_) {
       return;
@@ -908,7 +883,6 @@ private:
     global_search_active_ = true;
     localized_candidate_count_ = 0;
     lost_candidate_count_ = 0;
-    resetOdomBaseline();
     clearGatewayOdomState();
 
     RCLCPP_WARN(
@@ -926,7 +900,6 @@ private:
     global_search_active_ = false;
     localized_candidate_count_ = 0;
     lost_candidate_count_ = 0;
-    resetOdomBaseline();
     clearGatewayOdomState();
 
     RCLCPP_INFO(this->get_logger(),
@@ -1000,38 +973,10 @@ private:
       global_search_active_ = true;
       localized_candidate_count_ = 0;
       lost_candidate_count_ = 0;
-      resetOdomBaseline();
       clearGatewayOdomState();
       RCLCPP_INFO(
           this->get_logger(),
           "AMCL fusion initialized global search particles across the map.");
-    }
-  }
-
-  void odomCallback(
-      const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
-    const double x = msg->pose.pose.position.x;
-    const double y = msg->pose.pose.position.y;
-
-    tf2::Quaternion q(
-        msg->pose.pose.orientation.x, msg->pose.pose.orientation.y,
-        msg->pose.pose.orientation.z, msg->pose.pose.orientation.w);
-    tf2::Matrix3x3 rotation_matrix(q);
-
-    double roll = 0.0;
-    double pitch = 0.0;
-    double yaw = 0.0;
-    rotation_matrix.getRPY(roll, pitch, yaw);
-
-    odom_x_ = x;
-    odom_y_ = y;
-    odom_theta_ = yaw;
-
-    if (!odom_initialized_) {
-      prev_odom_x_ = odom_x_;
-      prev_odom_y_ = odom_y_;
-      prev_odom_theta_ = odom_theta_;
-      odom_initialized_ = true;
     }
   }
 
@@ -1147,17 +1092,11 @@ private:
     const double absorbed_global_y_m = latest_failure.y - last_success.y;
     const double absorbed_dtheta_rad =
         normalizeAngle(latest_failure.theta - last_success.theta);
-    const double stm32_x_axis_map_rad =
-        stm32XAxisDegreesToRosMapRadians(yaw_zero_map_degrees_);
-    const double cos_axis = std::cos(stm32_x_axis_map_rad);
-    const double sin_axis = std::sin(stm32_x_axis_map_rad);
-    const double absorbed_stm32_x_m =
-        (cos_axis * absorbed_global_x_m) + (sin_axis * absorbed_global_y_m);
-    const double absorbed_stm32_y_m =
-        (-sin_axis * absorbed_global_x_m) + (cos_axis * absorbed_global_y_m);
+    const double absorbed_world_x_m = absorbed_global_y_m;
+    const double absorbed_world_y_m = -absorbed_global_x_m;
 
-    dx_cm -= absorbed_stm32_x_m * 100.0;
-    dy_cm -= absorbed_stm32_y_m * 100.0;
+    dx_cm -= absorbed_world_x_m * 100.0;
+    dy_cm -= absorbed_world_y_m * 100.0;
     dtheta_deg = radiansToDegrees(normalizeAngle(
         degreesToRadians(dtheta_deg) - absorbed_dtheta_rad));
     request_yaw_rad = latest_failure.theta;
@@ -1166,10 +1105,10 @@ private:
       RCLCPP_INFO(
           this->get_logger(),
           "Compensated STM32 odometry request %" PRIu64
-          ": raw=(%.6f, %.6f, %.6f), absorbed=(%.6f, %.6f, %.6f), "
+          ": request=(%.6f, %.6f, %.6f), absorbed=(%.6f, %.6f, %.6f), "
           "compensated=(%.6f, %.6f, %.6f).",
           result.request_id, result.dx_cm, result.dy_cm, result.dtheta_deg,
-          absorbed_stm32_x_m * 100.0, absorbed_stm32_y_m * 100.0,
+          absorbed_world_x_m * 100.0, absorbed_world_y_m * 100.0,
           radiansToDegrees(absorbed_dtheta_rad), dx_cm, dy_cm, dtheta_deg);
     }
 
@@ -1186,8 +1125,8 @@ private:
       return false;
     }
 
-    const double delta_x_stm32_m = dx_cm * 0.01;
-    const double delta_y_stm32_m = dy_cm * 0.01;
+    const double delta_x_world_m = dx_cm * 0.01;
+    const double delta_y_world_m = dy_cm * 0.01;
     const double delta_theta_rad = normalizeAngle(degreesToRadians(dtheta_deg));
     double absolute_yaw_rad = current_yaw_rad_;
     if (use_stm32_request_theta_) {
@@ -1203,16 +1142,10 @@ private:
       current_yaw_rad_ = result.theta_rad;
       yaw_initialized_ = true;
     }
-    const double stm32_x_axis_map_rad =
-        stm32XAxisDegreesToRosMapRadians(yaw_zero_map_degrees_);
-    const double cos_axis = std::cos(stm32_x_axis_map_rad);
-    const double sin_axis = std::sin(stm32_x_axis_map_rad);
-    const double delta_x_global_m =
-        (cos_axis * delta_x_stm32_m) - (sin_axis * delta_y_stm32_m);
-    const double delta_y_global_m =
-        (sin_axis * delta_x_stm32_m) + (cos_axis * delta_y_stm32_m);
+    const double delta_x_global_m = -delta_y_world_m;
+    const double delta_y_global_m = delta_x_world_m;
 
-    if (!std::isfinite(delta_x_stm32_m) || !std::isfinite(delta_y_stm32_m) ||
+    if (!std::isfinite(delta_x_world_m) || !std::isfinite(delta_y_world_m) ||
         !std::isfinite(delta_x_global_m) || !std::isfinite(delta_y_global_m) ||
         !std::isfinite(delta_theta_rad) ||
         !std::isfinite(absolute_yaw_rad) ||
@@ -1386,9 +1319,21 @@ private:
   void
   publishDebugPointCloud(const std_msgs::msg::Header &header,
                          const std::vector<rcj_loc::Point2D> &observations) {
+    std::optional<rcj_loc::Particle> pose_estimate;
+    {
+      std::lock_guard<std::mutex> lock(pose_mutex_);
+      pose_estimate = latest_pose_estimate_;
+    }
+    if (!pose_estimate.has_value()) {
+      return;
+    }
+
+    const double cos_t = std::cos(pose_estimate->theta);
+    const double sin_t = std::sin(pose_estimate->theta);
+
     sensor_msgs::msg::PointCloud2 cloud;
     cloud.header = header;
-    cloud.header.frame_id = "base_link";
+    cloud.header.frame_id = "map";
 
     sensor_msgs::PointCloud2Modifier modifier(cloud);
     modifier.setPointCloud2FieldsByString(1, "xyz");
@@ -1399,8 +1344,12 @@ private:
     sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
 
     for (const auto &observation : observations) {
-      *iter_x = static_cast<float>(observation.x);
-      *iter_y = static_cast<float>(observation.y);
+      const double map_x = pose_estimate->x + (observation.x * cos_t) -
+                           (observation.y * sin_t);
+      const double map_y = pose_estimate->y + (observation.x * sin_t) +
+                           (observation.y * cos_t);
+      *iter_x = static_cast<float>(map_x);
+      *iter_y = static_cast<float>(map_y);
       *iter_z = 0.0f;
       ++iter_x;
       ++iter_y;
@@ -1466,18 +1415,6 @@ private:
               gateway_result->status.c_str());
         }
       }
-    } else if (odom_initialized_) {
-      const double dx = odom_x_ - prev_odom_x_;
-      const double dy = odom_y_ - prev_odom_y_;
-      const double delta_theta = normalizeAngle(odom_theta_ - prev_odom_theta_);
-      const double request_yaw = prev_odom_theta_;
-
-      prev_odom_x_ = odom_x_;
-      prev_odom_y_ = odom_y_;
-      prev_odom_theta_ = odom_theta_;
-
-      pf_->predict(current_yaw_rad_, request_yaw, dx, dy, delta_theta);
-      motion_prediction_applied = true;
     }
 
     if (!motion_prediction_applied) {
@@ -1549,6 +1486,10 @@ private:
   publishVisualizationsAndTF(const std::vector<rcj_loc::Particle> &particles,
                              const rcj_loc::Particle &pose_estimate) {
     const rclcpp::Time now = this->now();
+    {
+      std::lock_guard<std::mutex> lock(pose_mutex_);
+      latest_pose_estimate_ = pose_estimate;
+    }
 
     geometry_msgs::msg::PoseArray cloud_msg;
     cloud_msg.header.stamp = now;
@@ -1671,8 +1612,6 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr mask_sub_;
   rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr yaw_sub_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
-      odom_sub_;
   rclcpp::Client<Stm32Command>::SharedPtr stm32_command_client_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr fake_yaw_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr
@@ -1691,9 +1630,11 @@ private:
 
   std::mutex obs_mutex_;
   std::mutex gateway_mutex_;
+  std::mutex pose_mutex_;
   std::vector<rcj_loc::Point2D> latest_observations_;
   std::unique_ptr<rcj_loc::ParticleFilterAmclFusion> pf_;
   std::optional<GatewayOdomResult> pending_gateway_result_;
+  std::optional<rcj_loc::Particle> latest_pose_estimate_;
 
   std::string mask_topic_;
   double meters_per_pixel_ = -1.0;
@@ -1714,7 +1655,6 @@ private:
   bool use_fake_yaw_ = false;
   double fake_yaw_degrees_ = 0.0;
   double yaw_zero_map_degrees_ = 0.0;
-  std::string odom_topic_;
   bool use_stm32_gateway_odometry_ = false;
   std::string stm32_command_service_;
   int stm32_request_timeout_ms_ = 200;
@@ -1734,13 +1674,6 @@ private:
   int lost_candidate_count_ = 0;
   double current_yaw_rad_ = 0.0;
   bool yaw_initialized_ = false;
-  double odom_x_ = 0.0;
-  double odom_y_ = 0.0;
-  double odom_theta_ = 0.0;
-  double prev_odom_x_ = 0.0;
-  double prev_odom_y_ = 0.0;
-  double prev_odom_theta_ = 0.0;
-  bool odom_initialized_ = false;
   bool gateway_request_in_flight_ = false;
   std::uint64_t next_gateway_request_id_ = 1;
   std::uint64_t gateway_request_total_count_ = 0;

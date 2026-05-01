@@ -45,11 +45,12 @@ class Stm32SquareLoopNode(Node):
 
         side = _format_number(side_cm)
         minus_side = _format_number(-side_cm)
+        # Public cmd_dis world axes are field-fixed: +x map-up, +y map-left.
         self._commands = [
-            f"cmd_dis {side} 0",
-            f"cmd_dis 0 {side}",
-            f"cmd_dis {minus_side} 0",
-            f"cmd_dis 0 {minus_side}",
+            f"cmd_dis {side} 0 1",
+            f"cmd_dis 0 {side} 1",
+            f"cmd_dis {minus_side} 0 1",
+            f"cmd_dis 0 {minus_side} 1",
         ]
 
         self._client = ActionClient(self, Stm32Motion, self._motion_action_name)

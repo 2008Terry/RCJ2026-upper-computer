@@ -29,8 +29,11 @@ enum class CommandKind
 {
   Distance,
   Turn,
+  DkMotor,
   Request,
   Suck,
+  Xqcx,
+  Dct,
   Conmotion,
   Infred,
   InfredMode,
@@ -52,6 +55,8 @@ struct Command
   CommandKind kind;
   double primary_value;
   double secondary_value;
+  double tertiary_value = 0.0;
+  bool has_tertiary_value = false;
   std::string text_value;
 };
 
@@ -61,6 +66,7 @@ struct ParsedReply
   std::string command_text;
   ReplyStatus status;
   int channel = 0;
+  int detected = -1;
   double dx = 0.0;
   double dy = 0.0;
   double dtheta = 0.0;
@@ -117,10 +123,16 @@ std::string commandName(CommandKind kind)
     return "cmd_dis";
   case CommandKind::Turn:
     return "cmd_turn";
+  case CommandKind::DkMotor:
+    return "cmd_dkmotor";
   case CommandKind::Request:
     return "cmd_request";
   case CommandKind::Suck:
     return "cmd_suck";
+  case CommandKind::Xqcx:
+    return "cmd_xqcx";
+  case CommandKind::Dct:
+    return "cmd_dct";
   case CommandKind::Conmotion:
     return "cmd_conmotion";
   case CommandKind::Infred:
@@ -156,13 +168,24 @@ std::string buildCommandText(const Command &command)
   if (command.kind == CommandKind::Distance)
   {
     stream << ' ' << formatNumber(command.primary_value)
+           << ' ' << formatNumber(command.secondary_value)
+           << ' ' << static_cast<int>(command.tertiary_value);
+  }
+  else if (command.kind == CommandKind::DkMotor)
+  {
+    stream << ' ' << static_cast<int>(command.primary_value)
            << ' ' << formatNumber(command.secondary_value);
+    if (command.has_tertiary_value)
+    {
+      stream << ' ' << static_cast<int>(command.tertiary_value);
+    }
   }
   else if (command.kind == CommandKind::Turn)
   {
     stream << ' ' << formatNumber(command.primary_value);
   }
   else if (command.kind == CommandKind::Suck ||
+           command.kind == CommandKind::Dct ||
            command.kind == CommandKind::Conmotion)
   {
     stream << ' ' << static_cast<int>(command.primary_value);
@@ -171,6 +194,15 @@ std::string buildCommandText(const Command &command)
   {
     stream << ' ' << command.text_value;
   }
+  return stream.str();
+}
+
+std::string buildLegacyDistanceCommandText(const Command &command)
+{
+  std::ostringstream stream;
+  stream << commandName(CommandKind::Distance)
+         << ' ' << formatNumber(command.primary_value)
+         << ' ' << formatNumber(command.secondary_value);
   return stream.str();
 }
 
@@ -235,12 +267,23 @@ Command parseCommandSpec(const std::string &spec)
   if (command_name == "cmd_dis")
   {
     command.kind = CommandKind::Distance;
-    if (!(tokens >> command.primary_value >> command.secondary_value) ||
+    std::string speed_profile_token;
+    if (!(tokens >> command.primary_value >> command.secondary_value >> speed_profile_token) ||
         (tokens >> extra_token))
     {
       throw std::runtime_error(
-          "Invalid cmd_dis command '" + spec + "'. Expected: cmd_dis <primary> <secondary>");
+          "Invalid cmd_dis command '" + spec +
+          "'. Expected: cmd_dis <x_cm> <y_cm> <speed_profile 0|1|2>");
     }
+
+    const int speed_profile = parseIntegerToken(speed_profile_token, command_name, spec);
+    if (speed_profile < 0 || speed_profile > 2)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_dis command '" + spec + "'. speed_profile must be 0, 1, or 2.");
+    }
+    command.tertiary_value = static_cast<double>(speed_profile);
+    command.has_tertiary_value = true;
     return command;
   }
 
@@ -253,6 +296,48 @@ Command parseCommandSpec(const std::string &spec)
           "Invalid cmd_turn command '" + spec + "'. Expected: cmd_turn <degrees>");
     }
     command.secondary_value = 0.0;
+    return command;
+  }
+
+  if (command_name == "cmd_dkmotor")
+  {
+    command.kind = CommandKind::DkMotor;
+    std::string speed_token;
+    std::string head_lock_token;
+    if (!(tokens >> speed_token >> command.secondary_value))
+    {
+      throw std::runtime_error(
+          "Invalid cmd_dkmotor command '" + spec +
+          "'. Expected: cmd_dkmotor <speed 0-100> <move_angle_deg> [head_lock]");
+    }
+
+    const int speed = parseIntegerToken(speed_token, command_name, spec);
+    if (speed < 0 || speed > 100)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_dkmotor command '" + spec + "'. Speed must be in range 0-100.");
+    }
+    command.primary_value = static_cast<double>(speed);
+
+    if (tokens >> head_lock_token)
+    {
+      if (tokens >> extra_token)
+      {
+        throw std::runtime_error(
+            "Invalid cmd_dkmotor command '" + spec +
+            "'. Expected: cmd_dkmotor <speed 0-100> <move_angle_deg> [head_lock]");
+      }
+
+      const int head_lock = parseIntegerToken(head_lock_token, command_name, spec);
+      if (head_lock != 0 && head_lock != 1)
+      {
+        throw std::runtime_error(
+            "Invalid cmd_dkmotor command '" + spec + "'. head_lock must be 0 or 1.");
+      }
+      command.tertiary_value = static_cast<double>(head_lock);
+      command.has_tertiary_value = true;
+    }
+    command.text_value.clear();
     return command;
   }
 
@@ -286,6 +371,40 @@ Command parseCommandSpec(const std::string &spec)
           "Invalid cmd_suck command '" + spec + "'. Speed must be in range 0-100.");
     }
     command.primary_value = static_cast<double>(speed);
+    command.secondary_value = 0.0;
+    return command;
+  }
+
+  if (command_name == "cmd_xqcx")
+  {
+    command.kind = CommandKind::Xqcx;
+    if (tokens >> extra_token)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_xqcx command '" + spec + "'. Expected: cmd_xqcx");
+    }
+    command.primary_value = 0.0;
+    command.secondary_value = 0.0;
+    return command;
+  }
+
+  if (command_name == "cmd_dct")
+  {
+    command.kind = CommandKind::Dct;
+    std::string enabled_token;
+    if (!(tokens >> enabled_token) || (tokens >> extra_token))
+    {
+      throw std::runtime_error(
+          "Invalid cmd_dct command '" + spec + "'. Expected: cmd_dct <0|1>");
+    }
+
+    const int enabled = parseIntegerToken(enabled_token, command_name, spec);
+    if (enabled != 0 && enabled != 1)
+    {
+      throw std::runtime_error(
+          "Invalid cmd_dct command '" + spec + "'. Value must be 0 or 1.");
+    }
+    command.primary_value = static_cast<double>(enabled);
     command.secondary_value = 0.0;
     return command;
   }
@@ -383,8 +502,8 @@ Command parseCommandSpec(const std::string &spec)
 
   throw std::runtime_error(
       "Unsupported STM32 command '" + command_name +
-      "'. Supported commands: cmd_dis, cmd_turn, cmd_request, cmd_suck, "
-      "cmd_conmotion, cmd_infred, cmd_infred_mode, cmd_anglecal, cmd_mcureset, "
+      "'. Supported commands: cmd_dis, cmd_turn, cmd_dkmotor, cmd_request, cmd_suck, "
+      "cmd_xqcx, cmd_dct, cmd_conmotion, cmd_infred, cmd_infred_mode, cmd_anglecal, cmd_mcureset, "
       "cmd_juststop");
 }
 
@@ -552,11 +671,39 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
   {
     Command command{};
     command.kind = CommandKind::Distance;
-    if (tokens >> status_text && status_text == "done" &&
-        tokens >> command.primary_value >> command.secondary_value &&
-        !(tokens >> extra_token))
+    const auto apply_distance_profile =
+        [](const std::string &profile_token, Command &distance_command) -> bool
     {
-      reply.command_text = buildCommandText(command);
+      const auto speed_profile = parseIntegerToken(profile_token);
+      if (!speed_profile.has_value() || *speed_profile < 0 || *speed_profile > 2)
+      {
+        return false;
+      }
+      distance_command.tertiary_value = static_cast<double>(*speed_profile);
+      distance_command.has_tertiary_value = true;
+      return true;
+    };
+    const auto distance_command_text =
+        [](const Command &distance_command) -> std::string
+    {
+      return distance_command.has_tertiary_value
+                 ? buildCommandText(distance_command)
+                 : buildLegacyDistanceCommandText(distance_command);
+    };
+
+    if (tokens >> status_text && status_text == "done" &&
+        tokens >> command.primary_value >> command.secondary_value)
+    {
+      std::string speed_profile_token;
+      if (tokens >> speed_profile_token)
+      {
+        if ((tokens >> extra_token) ||
+            !apply_distance_profile(speed_profile_token, command))
+        {
+          return std::nullopt;
+        }
+      }
+      reply.command_text = distance_command_text(command);
       reply.status = ReplyStatus::Done;
       return reply;
     }
@@ -564,15 +711,63 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
     tokens.clear();
     tokens.str(command_text);
     tokens >> reply.command_name;
-    if (tokens >> command.primary_value >> command.secondary_value >> status_text &&
-        !(tokens >> extra_token))
+    command = Command{};
+    command.kind = CommandKind::Distance;
+    if (tokens >> status_text >> command.primary_value >> command.secondary_value)
     {
       const auto status = parseReplyStatus(status_text);
       if (!status.has_value())
       {
         return std::nullopt;
       }
-      reply.command_text = buildCommandText(command);
+      std::string speed_profile_token;
+      if (tokens >> speed_profile_token)
+      {
+        if ((tokens >> extra_token) ||
+            !apply_distance_profile(speed_profile_token, command))
+        {
+          return std::nullopt;
+        }
+      }
+      reply.command_text = distance_command_text(command);
+      reply.status = *status;
+      return reply;
+    }
+
+    tokens.clear();
+    tokens.str(command_text);
+    tokens >> reply.command_name;
+    command = Command{};
+    command.kind = CommandKind::Distance;
+    if (tokens >> command.primary_value >> command.secondary_value)
+    {
+      std::string third_token;
+      if (!(tokens >> third_token))
+      {
+        return std::nullopt;
+      }
+      if (apply_distance_profile(third_token, command))
+      {
+        if (!(tokens >> status_text) || (tokens >> extra_token))
+        {
+          return std::nullopt;
+        }
+      }
+      else
+      {
+        status_text = third_token;
+        if (tokens >> extra_token)
+        {
+          return std::nullopt;
+        }
+      }
+
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      reply.command_text = distance_command_text(command);
       reply.status = *status;
       return reply;
     }
@@ -593,6 +788,21 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
     tokens.clear();
     tokens.str(command_text);
     tokens >> reply.command_name;
+    if (tokens >> status_text >> command.primary_value && !(tokens >> extra_token))
+    {
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
+
+    tokens.clear();
+    tokens.str(command_text);
+    tokens >> reply.command_name;
     if (tokens >> command.primary_value >> status_text && !(tokens >> extra_token))
     {
       const auto status = parseReplyStatus(status_text);
@@ -600,6 +810,40 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
       {
         return std::nullopt;
       }
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
+  }
+  else if (reply.command_name == "cmd_dkmotor")
+  {
+    Command command{};
+    command.kind = CommandKind::DkMotor;
+    int speed = 0;
+    std::string head_lock_token;
+    if (tokens >> status_text >> speed >> command.secondary_value)
+    {
+      if (tokens >> head_lock_token)
+      {
+        if (tokens >> extra_token)
+        {
+          return std::nullopt;
+        }
+        const auto head_lock = parseIntegerToken(head_lock_token);
+        if (!head_lock.has_value() || (*head_lock != 0 && *head_lock != 1))
+        {
+          return std::nullopt;
+        }
+        command.tertiary_value = static_cast<double>(*head_lock);
+        command.has_tertiary_value = true;
+      }
+
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value() || speed < 0 || speed > 100)
+      {
+        return std::nullopt;
+      }
+      command.primary_value = static_cast<double>(speed);
       reply.command_text = buildCommandText(command);
       reply.status = *status;
       return reply;
@@ -618,6 +862,50 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
         return std::nullopt;
       }
       command.primary_value = static_cast<double>(speed);
+      reply.command_text = buildCommandText(command);
+      reply.status = *status;
+      return reply;
+    }
+  }
+  else if (reply.command_name == "cmd_xqcx")
+  {
+    std::string value_text;
+    if (tokens >> value_text)
+    {
+      if (value_text == "busy")
+      {
+        reply.command_text = reply.command_name;
+        reply.status = ReplyStatus::Busy;
+        return reply;
+      }
+
+      if (tokens >> extra_token)
+      {
+        return std::nullopt;
+      }
+      const auto detected = parseIntegerToken(value_text);
+      if (detected.has_value() && (*detected == 0 || *detected == 1))
+      {
+        reply.command_text = reply.command_name;
+        reply.status = ReplyStatus::Ok;
+        reply.detected = *detected;
+        return reply;
+      }
+    }
+  }
+  else if (reply.command_name == "cmd_dct")
+  {
+    Command command{};
+    command.kind = CommandKind::Dct;
+    int enabled = 0;
+    if (tokens >> status_text >> enabled && !(tokens >> extra_token))
+    {
+      const auto status = parseReplyStatus(status_text);
+      if (!status.has_value() || (enabled != 0 && enabled != 1))
+      {
+        return std::nullopt;
+      }
+      command.primary_value = static_cast<double>(enabled);
       reply.command_text = buildCommandText(command);
       reply.status = *status;
       return reply;
@@ -644,8 +932,19 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
   else if (reply.command_name == "cmd_infred")
   {
     std::string value_text;
-    if (tokens >> value_text && !(tokens >> extra_token))
+    if (tokens >> value_text)
     {
+      if (value_text == "busy")
+      {
+        reply.command_text = reply.command_name;
+        reply.status = ReplyStatus::Busy;
+        return reply;
+      }
+
+      if (tokens >> extra_token)
+      {
+        return std::nullopt;
+      }
       const auto channel = parseIntegerToken(value_text);
       if (channel.has_value() && *channel >= 1 && *channel <= 7)
       {
@@ -660,10 +959,18 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
   {
     Command command{};
     command.kind = CommandKind::InfredMode;
-    if (tokens >> status_text >> command.text_value && !(tokens >> extra_token))
+    if (tokens >> status_text >> command.text_value)
     {
       const auto status = parseReplyStatus(status_text);
       if (!status.has_value())
+      {
+        return std::nullopt;
+      }
+      if (*status != ReplyStatus::Busy && (tokens >> extra_token))
+      {
+        return std::nullopt;
+      }
+      if (command.text_value != "pt" && command.text_value != "tz")
       {
         return std::nullopt;
       }
@@ -1323,6 +1630,11 @@ private:
     {
       return false;
     }
+    if (pending.command.kind == CommandKind::Distance &&
+        parsed_reply.command_text == buildLegacyDistanceCommandText(pending.command))
+    {
+      return true;
+    }
     return parsed_reply.command_text == pending.command_text ||
            parsed_reply.command_text == expected_command_name;
   }
@@ -1340,6 +1652,11 @@ private:
     // Motion actions must complete only on the full command ACK. A generic
     // "cmd_dis ok" / "cmd_turn ok" can only prove the STM32 parsed the command,
     // not that the movement finished.
+    if (pending.command.kind == CommandKind::Distance &&
+        parsed_reply.command_text == buildLegacyDistanceCommandText(pending.command))
+    {
+      return true;
+    }
     return parsed_reply.command_text == pending.command_text;
   }
 
@@ -1368,6 +1685,15 @@ private:
               "STM32 replied to '%s' with channel=%d.",
               parsed_reply.command_name.c_str(),
               parsed_reply.channel);
+        }
+        else if (active_command_->command.kind == CommandKind::Xqcx &&
+                 parsed_reply.detected >= 0)
+        {
+          RCLCPP_INFO(
+              get_logger(),
+              "STM32 replied to '%s' with detected=%d.",
+              parsed_reply.command_name.c_str(),
+              parsed_reply.detected);
         }
         else
         {
@@ -1403,6 +1729,15 @@ private:
             "ok",
             "STM32 infrared channel received: channel=" +
                 std::to_string(parsed_reply.channel) + ".");
+      }
+      else if (active_command_->command.kind == CommandKind::Xqcx &&
+               parsed_reply.detected >= 0)
+      {
+        finishActiveCommand(
+            true,
+            "ok",
+            "STM32 ball detection received: detected=" +
+                std::to_string(parsed_reply.detected) + ".");
       }
       else
       {

@@ -74,12 +74,12 @@ ros2 launch rcj_localization yolo_black_circle_debug.launch.py
 Then open `http://<robot-ip>:8081/` in a browser. If you are on the same
 machine, `http://localhost:8081/` also works.
 
-The default model path is `~/Downloads/train-2/weights/best.pt`. Override it
+The default model path is `~/Downloads/train-6/weights/best.pt`. Override it
 explicitly when needed:
 
 ```bash
 ros2 launch rcj_localization yolo_black_circle_debug.launch.py \
-  model_path:=~/Downloads/train-2/weights/best.pt confidence:=0.25 imgsz:=320
+  model_path:=~/Downloads/train-6/weights/best.pt confidence:=0.25 imgsz:=320
 ```
 
 The browser view streams annotated detections and live stats for received FPS,

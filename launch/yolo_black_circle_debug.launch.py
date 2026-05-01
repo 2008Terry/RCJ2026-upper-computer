@@ -217,7 +217,7 @@ def generate_launch_description():
             DeclareLaunchArgument("remap_timing_log_interval", default_value="30"),
             DeclareLaunchArgument(
                 "model_path",
-                default_value="~/Downloads/train-2/weights/best.pt",
+                default_value="~/Downloads/train-6/weights/best.pt",
             ),
             DeclareLaunchArgument("confidence", default_value="0.25"),
             DeclareLaunchArgument("iou", default_value="0.45"),

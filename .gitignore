@@ -21,7 +21,7 @@
 __pycache__/
 *.pyc
 
-# Local ML/YOLO environment and generated model outputs
+# Ignore local YOLO environment/config artifacts
 .venv-yolo/
 .yolo-bootstrap/
 .yolo-config/

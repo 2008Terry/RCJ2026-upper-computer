@@ -27,6 +27,7 @@
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float32.hpp>
@@ -35,7 +36,9 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "rcj_localization/msg/orange_ball_detection.hpp"
 #include "rcj_localization/orange_ball_hsv.hpp"
+#include "rcj_localization/white_line_debug_utils.hpp"
 
 namespace {
 
@@ -60,7 +63,7 @@ constexpr char kSearchDebugWindowName[] = "Orange Ball Search Debug";
 constexpr char kSearchAreaPriorWindowName[] = "Orange Ball Search Area-Prior";
 constexpr char kRoiWindowName[] = "Orange Ball ROI";
 constexpr char kRoiMaskWindowName[] = "Orange Ball ROI Mask";
-constexpr std::size_t kTimingStageCount = 8;
+constexpr std::size_t kTimingStageCount = 9;
 constexpr double kMinValidLutCoverageRatio = 0.35;
 constexpr double kMinTopBandValidRatio = 0.35;
 constexpr double kMinFillRatio = 0.15;
@@ -77,6 +80,7 @@ enum class TimingStage : std::size_t {
   Refine,
   Publish,
   Debug,
+  DebugCompression,
   CallbackTotal,
   UnaccountedOverhead,
 };
@@ -88,6 +92,7 @@ constexpr std::array<const char *, kTimingStageCount> kTimingLabels = {
   "refine",
   "publish",
   "debug",
+  "debug_compression",
   "callback_total",
   "unaccounted_overhead",
 };
@@ -360,8 +365,11 @@ struct DetectionDebugOptions
 struct DebugRequest
 {
   bool publish_raw_mask = false;
+  bool publish_raw_mask_compressed = false;
   bool publish_filtered_mask = false;
+  bool publish_filtered_mask_compressed = false;
   bool publish_overlay = false;
+  bool publish_overlay_compressed = false;
   bool show_input_image = false;
   bool show_threshold_mask = false;
   bool show_morph_mask = false;
@@ -393,17 +401,17 @@ struct DebugRequest
 
   bool needRawMask() const
   {
-    return publish_raw_mask || show_raw_mask;
+    return publish_raw_mask || publish_raw_mask_compressed || show_raw_mask;
   }
 
   bool needFilteredMask() const
   {
-    return publish_filtered_mask || show_filtered_mask;
+    return publish_filtered_mask || publish_filtered_mask_compressed || show_filtered_mask;
   }
 
   bool needOverlay() const
   {
-    return publish_overlay || show_overlay_image;
+    return publish_overlay || publish_overlay_compressed || show_overlay_image;
   }
 
   bool needAnyWindows() const
@@ -452,10 +460,19 @@ public:
       "~/ball_top_raw_px", 10);
     detected_pub_ = create_publisher<std_msgs::msg::Bool>("~/detected", 10);
     confidence_pub_ = create_publisher<std_msgs::msg::Float32>("~/confidence", 10);
+    detection_pub_ = create_publisher<rcj_localization::msg::OrangeBallDetection>(
+      "~/detection", 10);
     debug_mask_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug_mask", 10);
     debug_mask_filtered_pub_ = create_publisher<sensor_msgs::msg::Image>(
       "~/debug_mask_filtered", 10);
     debug_image_pub_ = create_publisher<sensor_msgs::msg::Image>("~/debug_image", 10);
+    debug_mask_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug_mask/compressed", 10);
+    debug_mask_filtered_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>(
+      "~/debug_mask_filtered/compressed", 10);
+    debug_image_compressed_pub_ =
+      create_publisher<sensor_msgs::msg::CompressedImage>("~/debug_image/compressed", 10);
     if (publish_processing_time_) {
       processing_time_pub_ =
         create_publisher<std_msgs::msg::Float32>(processing_time_topic_, 10);
@@ -519,6 +536,8 @@ private:
     declare_parameter("publish_processing_time", true);
     declare_parameter<std::string>("processing_time_topic", "~/processing_time_ms");
     declare_parameter("publish_debug_images", false);
+    declare_parameter("debug_jpeg_quality", 80);
+    declare_parameter("debug_image_max_fps", 5.0);
     declare_parameter("publish_raw_mask", true);
     declare_parameter("publish_filtered_mask", true);
     declare_parameter("publish_overlay_image", true);
@@ -591,6 +610,9 @@ private:
     publish_processing_time_ = get_parameter("publish_processing_time").as_bool();
     processing_time_topic_ = get_parameter("processing_time_topic").as_string();
     publish_debug_images_ = get_parameter("publish_debug_images").as_bool();
+    debug_jpeg_quality_ =
+      std::clamp(static_cast<int>(get_parameter("debug_jpeg_quality").as_int()), 1, 100);
+    debug_image_max_fps_ = std::max(0.0, get_parameter("debug_image_max_fps").as_double());
     publish_raw_mask_ = get_parameter("publish_raw_mask").as_bool();
     publish_filtered_mask_ = get_parameter("publish_filtered_mask").as_bool();
     publish_overlay_image_ = get_parameter("publish_overlay_image").as_bool();
@@ -1179,18 +1201,54 @@ private:
     syncWindow(kRoiMaskWindowName, false, roi_mask_window_created_);
   }
 
-  DebugRequest buildDebugRequest() const
+  template<typename PublisherT>
+  bool hasSubscribers(const std::shared_ptr<PublisherT> & publisher) const
   {
+    return publisher != nullptr && publisher->get_subscription_count() > 0U;
+  }
+
+  template<typename PublisherT>
+  bool shouldPublishDebugImage(
+    const std::shared_ptr<PublisherT> & publisher,
+    bool image_enabled,
+    TimePoint & last_publish_time,
+    const TimePoint & now) const
+  {
+    return publish_debug_images_ && image_enabled && hasSubscribers(publisher) &&
+           rcj_loc::vision::debug::consumeFpsGate(
+      debug_image_max_fps_,
+      now,
+      last_publish_time);
+  }
+
+  DebugRequest buildDebugRequest()
+  {
+    const TimePoint now = SteadyClock::now();
     DebugRequest request;
-    request.publish_raw_mask =
-      publish_debug_images_ && publish_raw_mask_ &&
-      debug_mask_pub_ && debug_mask_pub_->get_subscription_count() > 0U;
-    request.publish_filtered_mask =
-      publish_debug_images_ && publish_filtered_mask_ &&
-      debug_mask_filtered_pub_ && debug_mask_filtered_pub_->get_subscription_count() > 0U;
-    request.publish_overlay =
-      publish_debug_images_ && publish_overlay_image_ &&
-      debug_image_pub_ && debug_image_pub_->get_subscription_count() > 0U;
+    request.publish_raw_mask = shouldPublishDebugImage(
+      debug_mask_pub_, publish_raw_mask_, debug_mask_last_publish_time_, now);
+    request.publish_raw_mask_compressed = shouldPublishDebugImage(
+      debug_mask_compressed_pub_,
+      publish_raw_mask_,
+      debug_mask_compressed_last_publish_time_,
+      now);
+    request.publish_filtered_mask = shouldPublishDebugImage(
+      debug_mask_filtered_pub_,
+      publish_filtered_mask_,
+      debug_mask_filtered_last_publish_time_,
+      now);
+    request.publish_filtered_mask_compressed = shouldPublishDebugImage(
+      debug_mask_filtered_compressed_pub_,
+      publish_filtered_mask_,
+      debug_mask_filtered_compressed_last_publish_time_,
+      now);
+    request.publish_overlay = shouldPublishDebugImage(
+      debug_image_pub_, publish_overlay_image_, debug_image_last_publish_time_, now);
+    request.publish_overlay_compressed = shouldPublishDebugImage(
+      debug_image_compressed_pub_,
+      publish_overlay_image_,
+      debug_image_compressed_last_publish_time_,
+      now);
     request.show_input_image = input_window_created_;
     request.show_threshold_mask = threshold_mask_window_created_;
     request.show_morph_mask = morph_mask_window_created_;
@@ -1921,12 +1979,13 @@ private:
     const cv::Point2d & filtered_raw_center_px,
     const cv::Point2d & filtered_ground_center_m)
   {
-    // `ball_center_ground` is the physical ball-center estimate in `base_link`.
+    // `ball_center_ground` is the physical ball-center estimate in the
+    // orange-ball detector image-ground frame. See docs/coordinate_frames.md.
     // `ball_center_raw_px` is the tracked image-space representative center after EMA.
     // `ball_top_raw_px` is the raw-image representative point of the top-band envelope.
     geometry_msgs::msg::PoseStamped ground_msg;
     ground_msg.header = header;
-    ground_msg.header.frame_id = "base_link";
+    ground_msg.header.frame_id = "orange_ball_detector_ground";
     ground_msg.pose.position.x = filtered_ground_center_m.x;
     ground_msg.pose.position.y = filtered_ground_center_m.y;
     ground_msg.pose.position.z = lut_.ball_diameter_m * 0.5;
@@ -1950,12 +2009,71 @@ private:
     ball_top_raw_pub_->publish(top_msg);
   }
 
+  void publishUnifiedDetection(
+    const std_msgs::msg::Header & header,
+    bool detected,
+    double confidence,
+    const cv::Point2d & filtered_raw_center_px = cv::Point2d(),
+    const cv::Point2d & filtered_ground_center_m = cv::Point2d(),
+    const cv::Point2d & top_point_px = cv::Point2d())
+  {
+    rcj_localization::msg::OrangeBallDetection msg;
+    msg.header = header;
+    msg.header.frame_id = "orange_ball_detector_ground";
+    msg.detected = detected;
+    msg.confidence = static_cast<float>(confidence);
+    if (detected) {
+      msg.ball_center_m.x = filtered_ground_center_m.x;
+      msg.ball_center_m.y = filtered_ground_center_m.y;
+      msg.ball_center_m.z = lut_.ball_diameter_m * 0.5;
+      msg.ball_center_raw_px.x = filtered_raw_center_px.x;
+      msg.ball_center_raw_px.y = filtered_raw_center_px.y;
+      msg.ball_top_raw_px.x = top_point_px.x;
+      msg.ball_top_raw_px.y = top_point_px.y;
+    }
+    detection_pub_->publish(msg);
+  }
+
+  bool publishCompressedDebugImageIfNeeded(
+    const rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr & publisher,
+    bool image_enabled,
+    const std_msgs::msg::Header & header,
+    const std::string & encoding,
+    const cv::Mat & image,
+    long long & compressed_debug_us)
+  {
+    if (!image_enabled || !hasSubscribers(publisher)) {
+      return false;
+    }
+
+    long long encode_us = 0;
+    auto compressed_msg = rcj_loc::vision::debug::encodeJpegCompressedImage(
+      header,
+      encoding,
+      image,
+      debug_jpeg_quality_,
+      &encode_us);
+    compressed_debug_us += encode_us;
+    if (!compressed_msg.has_value()) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(),
+        *get_clock(),
+        2000,
+        "Failed to JPEG-compress orange debug image with encoding '%s'.",
+        encoding.c_str());
+      return false;
+    }
+    publisher->publish(*compressed_msg);
+    return true;
+  }
+
   void publishDebugImages(
     const sensor_msgs::msg::Image::ConstSharedPtr & msg,
     const cv::Mat & frame,
     const DetectorOutputs & outputs,
     TrackingMode mode,
-    const DebugRequest & debug_request)
+    const DebugRequest & debug_request,
+    long long & compressed_debug_us)
   {
     if (!debug_request.needAnyOutputs()) {
       return;
@@ -1983,6 +2101,20 @@ private:
       debug_mask_pub_->publish(
         *cv_bridge::CvImage(msg->header, "mono8", raw_debug_mask).toImageMsg());
     }
+    if (debug_request.publish_raw_mask_compressed) {
+      if (raw_debug_mask.empty()) {
+        raw_debug_mask = outputs.raw_debug_mask.empty() ?
+          cv::Mat::zeros(frame.size(), CV_8UC1) :
+          outputs.raw_debug_mask;
+      }
+      publishCompressedDebugImageIfNeeded(
+        debug_mask_compressed_pub_,
+        true,
+        msg->header,
+        "mono8",
+        raw_debug_mask,
+        compressed_debug_us);
+    }
 
     cv::Mat filtered_debug_mask;
     if (debug_request.publish_filtered_mask) {
@@ -1991,6 +2123,20 @@ private:
         outputs.filtered_debug_mask;
       debug_mask_filtered_pub_->publish(
         *cv_bridge::CvImage(msg->header, "mono8", filtered_debug_mask).toImageMsg());
+    }
+    if (debug_request.publish_filtered_mask_compressed) {
+      if (filtered_debug_mask.empty()) {
+        filtered_debug_mask = outputs.filtered_debug_mask.empty() ?
+          cv::Mat::zeros(frame.size(), CV_8UC1) :
+          outputs.filtered_debug_mask;
+      }
+      publishCompressedDebugImageIfNeeded(
+        debug_mask_filtered_compressed_pub_,
+        true,
+        msg->header,
+        "mono8",
+        filtered_debug_mask,
+        compressed_debug_us);
     }
 
     const auto maskOrZeros = [&frame](const cv::Mat & mask) {
@@ -2061,6 +2207,15 @@ private:
     if (debug_request.publish_overlay) {
       debug_image_pub_->publish(
         *cv_bridge::CvImage(msg->header, "bgr8", overlay).toImageMsg());
+    }
+    if (debug_request.publish_overlay_compressed) {
+      publishCompressedDebugImageIfNeeded(
+        debug_image_compressed_pub_,
+        true,
+        msg->header,
+        "bgr8",
+        overlay,
+        compressed_debug_us);
     }
 
     if (debug_request.show_input_image) {
@@ -2337,20 +2492,32 @@ private:
       lost_frame_count_ = 0;
       publishStatus(true, outputs.candidate.confidence);
       publishDetection(msg->header, outputs.candidate, filtered_raw_center_px_, filtered_ground_center_m_);
+      publishUnifiedDetection(
+        msg->header,
+        true,
+        outputs.candidate.confidence,
+        filtered_raw_center_px_,
+        filtered_ground_center_m_,
+        outputs.candidate.top_point_px);
     } else {
       ++lost_frame_count_;
       if (lost_frame_count_ >= lost_frame_tolerance_) {
         has_filtered_state_ = false;
       }
       publishStatus(false, 0.0);
+      publishUnifiedDetection(msg->header, false, 0.0);
     }
     stage_us[static_cast<std::size_t>(TimingStage::Publish)] =
       elapsedUs(stage_start, SteadyClock::now());
 
     stage_start = SteadyClock::now();
-    publishDebugImages(msg, frame, outputs, mode, debug_request);
+    long long compressed_debug_us = 0;
+    publishDebugImages(msg, frame, outputs, mode, debug_request, compressed_debug_us);
+    const long long debug_total_us = elapsedUs(stage_start, SteadyClock::now());
     stage_us[static_cast<std::size_t>(TimingStage::Debug)] =
-      elapsedUs(stage_start, SteadyClock::now());
+      std::max(0LL, debug_total_us - compressed_debug_us);
+    stage_us[static_cast<std::size_t>(TimingStage::DebugCompression)] =
+      compressed_debug_us;
 
     const TimePoint callback_end = SteadyClock::now();
     stage_us[static_cast<std::size_t>(TimingStage::CallbackTotal)] =
@@ -2386,9 +2553,13 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr ball_top_raw_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr detected_pub_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr confidence_pub_;
+  rclcpp::Publisher<rcj_localization::msg::OrangeBallDetection>::SharedPtr detection_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_mask_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_mask_filtered_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_mask_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_mask_filtered_compressed_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_image_compressed_pub_;
   rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr processing_time_pub_;
 
   std::string input_topic_;
@@ -2423,6 +2594,8 @@ private:
   bool publish_processing_time_ = true;
   std::string processing_time_topic_;
   bool publish_debug_images_ = false;
+  int debug_jpeg_quality_ = 80;
+  double debug_image_max_fps_ = 5.0;
   bool publish_raw_mask_ = true;
   bool publish_filtered_mask_ = true;
   bool publish_overlay_image_ = true;
@@ -2478,6 +2651,13 @@ private:
   bool search_area_prior_window_created_ = false;
   bool roi_window_created_ = false;
   bool roi_mask_window_created_ = false;
+
+  TimePoint debug_mask_last_publish_time_;
+  TimePoint debug_mask_compressed_last_publish_time_;
+  TimePoint debug_mask_filtered_last_publish_time_;
+  TimePoint debug_mask_filtered_compressed_last_publish_time_;
+  TimePoint debug_image_last_publish_time_;
+  TimePoint debug_image_compressed_last_publish_time_;
 
   std::size_t timing_frames_in_interval_ = 0;
   std::array<long long, kTimingStageCount> timing_interval_totals_us_{};

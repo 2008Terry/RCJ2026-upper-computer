@@ -25,6 +25,8 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/header.hpp>
 
+#include "rcj_localization/white_line_debug_utils.hpp"
+
 namespace {
 
 constexpr char kInputWindowName[] = "FastMap Remap Input";
@@ -119,6 +121,8 @@ public:
         declare_parameter("publish_debug_images", false);
         declare_parameter("publish_input_image", true);
         declare_parameter("publish_output_image", true);
+        declare_parameter("debug_jpeg_quality", 80);
+        declare_parameter("debug_image_max_fps", 5.0);
         declare_parameter("display_max_width", 960);
         declare_parameter("display_max_height", 720);
         declare_parameter("enable_timing_log", true);
@@ -136,13 +140,25 @@ public:
             this,
             outputTopic,
             rmw_qos_profile_sensor_data);
+        outputCompressedPublisher_ =
+            create_publisher<sensor_msgs::msg::CompressedImage>(
+                outputTopic + "/compressed",
+                rclcpp::SensorDataQoS());
         robotMaskPublisher_ = create_publisher<sensor_msgs::msg::Image>(
             "~/robot_mask",
             rclcpp::QoS(1).reliable().transient_local());
+        robotMaskCompressedPublisher_ =
+            create_publisher<sensor_msgs::msg::CompressedImage>(
+                "~/robot_mask/compressed",
+                rclcpp::QoS(1).reliable().transient_local());
         debugInputImagePublisher_ =
             create_publisher<sensor_msgs::msg::Image>("~/debug/input_image", 10);
         debugOutputImagePublisher_ =
             create_publisher<sensor_msgs::msg::Image>("~/debug/output_image", 10);
+        debugInputCompressedPublisher_ =
+            create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/input_image/compressed", 10);
+        debugOutputCompressedPublisher_ =
+            create_publisher<sensor_msgs::msg::CompressedImage>("~/debug/output_image/compressed", 10);
 
         subscription_ = image_transport::create_subscription(
             this,
@@ -220,6 +236,9 @@ private:
         publishDebugImages_ = get_parameter("publish_debug_images").as_bool();
         publishInputImage_ = get_parameter("publish_input_image").as_bool();
         publishOutputImage_ = get_parameter("publish_output_image").as_bool();
+        debugJpegQuality_ =
+            std::clamp(static_cast<int>(get_parameter("debug_jpeg_quality").as_int()), 1, 100);
+        debugImageMaxFps_ = std::max(0.0, get_parameter("debug_image_max_fps").as_double());
         displayMaxWidth_ = std::max(1, static_cast<int>(get_parameter("display_max_width").as_int()));
         displayMaxHeight_ = std::max(1, static_cast<int>(get_parameter("display_max_height").as_int()));
 
@@ -264,20 +283,105 @@ private:
                publisher->get_subscription_count() > 0U;
     }
 
+    template<typename PublisherT>
+    bool shouldPublishDebugImage(
+        const std::shared_ptr<PublisherT>& publisher,
+        bool image_enabled,
+        std::chrono::steady_clock::time_point& last_publish_time,
+        std::chrono::steady_clock::time_point now) const
+    {
+        return shouldPublishDebugImage(publisher, image_enabled) &&
+               rcj_loc::vision::debug::consumeFpsGate(
+                   debugImageMaxFps_,
+                   now,
+                   last_publish_time);
+    }
+
+    bool publishCompressedDebugImageIfNeeded(
+        const rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr& publisher,
+        bool image_enabled,
+        const std_msgs::msg::Header& header,
+        const std::string& encoding,
+        const cv::Mat& image,
+        std::chrono::steady_clock::time_point& last_publish_time,
+        std::chrono::steady_clock::time_point now,
+        long long& compressed_debug_us)
+    {
+        if (!shouldPublishDebugImage(publisher, image_enabled, last_publish_time, now)) {
+            return false;
+        }
+        long long encode_us = 0;
+        auto compressed_msg = rcj_loc::vision::debug::encodeJpegCompressedImage(
+            header,
+            encoding,
+            image,
+            debugJpegQuality_,
+            &encode_us);
+        compressed_debug_us += encode_us;
+        if (!compressed_msg.has_value()) {
+            RCLCPP_WARN_THROTTLE(
+                get_logger(),
+                *get_clock(),
+                2000,
+                "Failed to JPEG-compress debug image with encoding '%s'.",
+                encoding.c_str());
+            return false;
+        }
+        publisher->publish(*compressed_msg);
+        return true;
+    }
+
     void publishDebugImages(
         const std_msgs::msg::Header& header,
         const std::string& encoding,
         const cv::Mat& input_image,
-        const cv::Mat& output_image)
+        const cv::Mat& output_image,
+        long long& compressed_debug_us)
     {
-        if (shouldPublishDebugImage(debugInputImagePublisher_, publishInputImage_)) {
+        const auto now = std::chrono::steady_clock::now();
+        if (shouldPublishDebugImage(
+                debugInputImagePublisher_,
+                publishInputImage_,
+                debugInputLastPublishTime_,
+                now)) {
             debugInputImagePublisher_->publish(
                 *cv_bridge::CvImage(header, encoding, input_image).toImageMsg());
         }
-        if (shouldPublishDebugImage(debugOutputImagePublisher_, publishOutputImage_)) {
+        publishCompressedDebugImageIfNeeded(
+            debugInputCompressedPublisher_,
+            publishInputImage_,
+            header,
+            encoding,
+            input_image,
+            debugInputCompressedLastPublishTime_,
+            now,
+            compressed_debug_us);
+        if (shouldPublishDebugImage(
+                debugOutputImagePublisher_,
+                publishOutputImage_,
+                debugOutputLastPublishTime_,
+                now)) {
             debugOutputImagePublisher_->publish(
                 *cv_bridge::CvImage(header, encoding, output_image).toImageMsg());
         }
+        publishCompressedDebugImageIfNeeded(
+            debugOutputCompressedPublisher_,
+            publishOutputImage_,
+            header,
+            encoding,
+            output_image,
+            debugOutputCompressedLastPublishTime_,
+            now,
+            compressed_debug_us);
+        publishCompressedDebugImageIfNeeded(
+            outputCompressedPublisher_,
+            publishOutputImage_,
+            header,
+            encoding,
+            output_image,
+            outputCompressedLastPublishTime_,
+            now,
+            compressed_debug_us);
     }
 
     void destroyDebugWindows()
@@ -352,7 +456,7 @@ private:
         robotMaskPath_ = resolved_path.string();
     }
 
-    void publishRobotMask()
+    void publishRobotMask(long long* compressed_debug_us = nullptr)
     {
         if (!robotMaskEnabled_ || robotMaskPublisher_ == nullptr) {
             return;
@@ -362,6 +466,28 @@ private:
         header.stamp = now();
         robotMaskPublisher_->publish(
             *cv_bridge::CvImage(header, "mono8", robotAllowedMask_).toImageMsg());
+        if (compressed_debug_us == nullptr) {
+            long long ignored_compressed_debug_us = 0;
+            publishCompressedRobotMask(header, ignored_compressed_debug_us);
+        } else {
+            publishCompressedRobotMask(header, *compressed_debug_us);
+        }
+    }
+
+    void publishCompressedRobotMask(
+        const std_msgs::msg::Header& header,
+        long long& compressed_debug_us)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        publishCompressedDebugImageIfNeeded(
+            robotMaskCompressedPublisher_,
+            true,
+            header,
+            "mono8",
+            robotAllowedMask_,
+            robotMaskCompressedLastPublishTime_,
+            now,
+            compressed_debug_us);
     }
 
     void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
@@ -403,21 +529,30 @@ private:
 
             auto outputMsg = cv_bridge::CvImage(msg->header, msg->encoding, remappedImage_).toImageMsg();
             publisher_.publish(*outputMsg);
+            long long compressedDebugUs = 0;
             if (robotMaskEnabled_) {
-                publishRobotMask();
+                publishRobotMask(&compressedDebugUs);
             }
-            publishDebugImages(msg->header, msg->encoding, cvInput->image, remappedImage_);
+            publishDebugImages(
+                msg->header,
+                msg->encoding,
+                cvInput->image,
+                remappedImage_,
+                compressedDebugUs);
             showDebugImages(cvInput->image, remappedImage_);
 
             if (enableTimingLog_ &&
                 frameCount_ % static_cast<uint64_t>(timingLogInterval_) == 0U) {
                 RCLCPP_INFO(
                     get_logger(),
-                    "frame=%llu remap_us=%lld remap_ms=%.3f avg_remap_ms=%.3f",
+                    "frame=%llu remap_us=%lld remap_ms=%.3f avg_remap_ms=%.3f "
+                    "debug_compress_us=%lld debug_compress_ms=%.3f",
                     static_cast<unsigned long long>(frameCount_),
                     static_cast<long long>(remapDurationUs),
                     static_cast<double>(remapDurationUs) / 1000.0,
-                    averageRemapUs / 1000.0);
+                    averageRemapUs / 1000.0,
+                    static_cast<long long>(compressedDebugUs),
+                    static_cast<double>(compressedDebugUs) / 1000.0);
             }
         } catch (const cv_bridge::Exception& e) {
             RCLCPP_ERROR_THROTTLE(
@@ -438,9 +573,13 @@ private:
 
     image_transport::Subscriber subscription_;
     image_transport::Publisher publisher_;
+    rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr outputCompressedPublisher_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr robotMaskPublisher_;
+    rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr robotMaskCompressedPublisher_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debugInputImagePublisher_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debugOutputImagePublisher_;
+    rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debugInputCompressedPublisher_;
+    rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debugOutputCompressedPublisher_;
     cv::Mat fastMap1_;
     cv::Mat fastMap2_;
     cv::Mat remappedImage_;
@@ -458,6 +597,14 @@ private:
     bool publishDebugImages_ = false;
     bool publishInputImage_ = true;
     bool publishOutputImage_ = true;
+    int debugJpegQuality_ = 80;
+    double debugImageMaxFps_ = 5.0;
+    std::chrono::steady_clock::time_point outputCompressedLastPublishTime_;
+    std::chrono::steady_clock::time_point robotMaskCompressedLastPublishTime_;
+    std::chrono::steady_clock::time_point debugInputLastPublishTime_;
+    std::chrono::steady_clock::time_point debugOutputLastPublishTime_;
+    std::chrono::steady_clock::time_point debugInputCompressedLastPublishTime_;
+    std::chrono::steady_clock::time_point debugOutputCompressedLastPublishTime_;
     bool headlessWarned_ = false;
     bool inputWindowCreated_ = false;
     bool outputWindowCreated_ = false;
