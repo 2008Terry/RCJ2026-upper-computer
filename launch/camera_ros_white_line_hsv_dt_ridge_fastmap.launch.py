@@ -15,7 +15,6 @@ from rcj_shared_launch_params import (
 
 
 def generate_launch_description():
-    package_share = Path(get_package_share_directory("rcj_localization"))
     return LaunchDescription(
         [
             *declare_camera_ros_arguments(),
@@ -37,14 +36,6 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")
             ),  # Optional remapped-space robot mask image path
-            DeclareLaunchArgument(
-                "fastmap_file",
-                default_value=str(
-                    package_share
-                    / "config"
-                    / "camera1_undistort_map_20260420_082314_fast.xml"
-                ),
-            ),  # Fastmap XML path
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
             declare_remap_interpolation_argument(),
             DeclareLaunchArgument(

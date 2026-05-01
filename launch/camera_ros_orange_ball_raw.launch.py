@@ -17,11 +17,11 @@ from rcj_shared_launch_params import (
     hsv_green_white_black_launch_arguments,
     hsv_green_white_black_parameters,
 )
+from rcj_camera_config import resolve_raw_ball_lut_file
 
 
 def generate_launch_description():
-    package_share = Path(get_package_share_directory("rcj_localization"))
-    default_lut = package_share / "config" / "camera1_raw_ball_top_lut_20260422_104020.xml"
+    default_lut = resolve_raw_ball_lut_file()
 
     camera_index = LaunchConfiguration("camera_index")
     role = LaunchConfiguration("role")
@@ -40,7 +40,6 @@ def generate_launch_description():
     awb_enable = LaunchConfiguration("awb_enable")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     input_topic = LaunchConfiguration("input_topic")
-    lut_file = LaunchConfiguration("lut_file")
     robot_mask_path = LaunchConfiguration("robot_mask_path")
 
     return LaunchDescription(
@@ -58,7 +57,6 @@ def generate_launch_description():
             DeclareLaunchArgument("camera_info_topic", default_value="/camera/camera_info"),  # CameraInfo topic name
             DeclareLaunchArgument("input_topic", default_value="/camera/image_raw"),  # Raw image topic name
             *declare_camera_control_arguments(),
-            DeclareLaunchArgument("lut_file", default_value=str(default_lut)),  # LUT XML file for pixel-to-ground projection
             DeclareLaunchArgument(
                 "robot_mask_path",
                 default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "mask.png"),
@@ -199,7 +197,7 @@ def generate_launch_description():
                 parameters=[
                     {
                         "input_topic": input_topic,
-                        "lut_file": lut_file,
+                        "lut_file": str(default_lut),
                         "robot_mask_path": robot_mask_path,
                         "orange_h_min": ParameterValue(
                             LaunchConfiguration("orange_h_min"), value_type=int

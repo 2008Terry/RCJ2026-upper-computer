@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -9,13 +10,16 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rcj_camera_config import resolve_raw_ball_lut_file
+
 
 def generate_launch_description():
     package_share = Path(get_package_share_directory("rcj_localization"))
     imx_amcl_launch_file = (
         package_share / "launch" / "imx477_hsv_dt_fastmap_amcl.launch.py"
     )
-    default_lut = package_share / "config" / "camera1_raw_ball_top_lut_20260422_104020.xml"
+    default_lut = resolve_raw_ball_lut_file()
     default_robot_mask = package_share / "config" / "mask.png"
 
     input_topic = LaunchConfiguration("input_topic")
@@ -23,7 +27,6 @@ def generate_launch_description():
     enable_amcl_stack = LaunchConfiguration("enable_amcl_stack")
     enable_orange_ball_detector = LaunchConfiguration("enable_orange_ball_detector")
     enable_camera_compressed_debug = LaunchConfiguration("enable_camera_compressed_debug")
-    lut_file = LaunchConfiguration("lut_file")
     orange_robot_mask_path = LaunchConfiguration("orange_robot_mask_path")
     yaw_zero_map_degrees = LaunchConfiguration("yaw_zero_map_degrees")
 
@@ -63,11 +66,6 @@ def generate_launch_description():
                 "enable_camera_compressed_debug",
                 default_value="true",
                 description="Start the lazy /camera/image_raw/compressed_debug relay.",
-            ),
-            DeclareLaunchArgument(
-                "lut_file",
-                default_value=str(default_lut),
-                description="Orange ball pixel-to-ground LUT XML file.",
             ),
             DeclareLaunchArgument(
                 "orange_robot_mask_path",
@@ -185,7 +183,7 @@ def generate_launch_description():
                 parameters=[
                     {
                         "input_topic": input_topic,
-                        "lut_file": lut_file,
+                        "lut_file": str(default_lut),
                         "robot_mask_path": orange_robot_mask_path,
                         "orange_h_min": ParameterValue(
                             LaunchConfiguration("orange_h_min"), value_type=int

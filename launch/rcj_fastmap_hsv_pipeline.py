@@ -1,4 +1,3 @@
-from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from launch.substitutions import LaunchConfiguration
@@ -9,6 +8,7 @@ from rcj_shared_launch_params import (
     camera_ros_parameters,
     hsv_green_white_black_parameters,
 )
+from rcj_camera_config import resolve_fastmap_file
 
 
 def optional_launch_config(name, default_value):
@@ -26,20 +26,6 @@ def read_fastmap_source_size(fastmap_file):
     return int(source_width), int(source_height)
 
 
-def resolve_fastmap_file(context):
-    fastmap_file_value = LaunchConfiguration("fastmap_file").perform(context).strip()
-
-    if not fastmap_file_value:
-        raise RuntimeError("Launch argument 'fastmap_file' must be set.")
-
-    fastmap_path = Path(fastmap_file_value).expanduser()
-    if not fastmap_path.is_absolute():
-        fastmap_path = fastmap_path.resolve()
-    if not fastmap_path.exists():
-        raise FileNotFoundError(f"Fastmap XML file does not exist: {fastmap_path}")
-    return fastmap_path
-
-
 def resolve_camera_size(context, fastmap_file):
     default_width, default_height = read_fastmap_source_size(fastmap_file)
     width_value = int(
@@ -52,7 +38,7 @@ def resolve_camera_size(context, fastmap_file):
 
 
 def build_camera_hsv_fastmap_nodes(context, *, use_apply_mask_argument=False):
-    selected_fastmap_file = resolve_fastmap_file(context)
+    selected_fastmap_file = resolve_fastmap_file()
     width_value, height_value = resolve_camera_size(context, selected_fastmap_file)
 
     input_topic = LaunchConfiguration("input_topic")

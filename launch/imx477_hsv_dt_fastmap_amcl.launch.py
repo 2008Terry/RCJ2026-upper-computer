@@ -141,14 +141,6 @@ def generate_launch_description():
             ),  # Optional remapped-space robot mask image path
             DeclareLaunchArgument("debug_jpeg_quality", default_value="80"),  # JPEG quality for compressed debug image topics
             DeclareLaunchArgument("debug_image_max_fps", default_value="5.0"),  # Max FPS for lazy debug image topics
-            DeclareLaunchArgument(
-                "fastmap_file",
-                default_value=str(
-                    package_share
-                    / "config"
-                    / "camera1_undistort_map_20260420_082314_fast.xml"
-                ),
-            ),  # Fastmap XML path
             DeclareLaunchArgument("input_transport", default_value="raw"),  # Remap input transport
             declare_remap_interpolation_argument(),
             DeclareLaunchArgument(

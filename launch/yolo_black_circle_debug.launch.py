@@ -16,6 +16,7 @@ from rcj_shared_launch_params import (
     declare_camera_control_arguments,
     declare_remap_interpolation_argument,
 )
+from rcj_camera_config import resolve_fastmap_file
 
 
 def read_fastmap_source_size(fastmap_file):
@@ -29,22 +30,8 @@ def read_fastmap_source_size(fastmap_file):
     return int(source_width), int(source_height)
 
 
-def resolve_fastmap_file(context):
-    fastmap_file_value = LaunchConfiguration("fastmap_file").perform(context).strip()
-
-    if not fastmap_file_value:
-        raise RuntimeError("Launch argument 'fastmap_file' must be set.")
-
-    fastmap_path = Path(fastmap_file_value).expanduser()
-    if not fastmap_path.is_absolute():
-        fastmap_path = fastmap_path.resolve()
-    if not fastmap_path.exists():
-        raise FileNotFoundError(f"Fastmap XML file does not exist: {fastmap_path}")
-    return fastmap_path
-
-
 def build_nodes(context):
-    selected_fastmap_file = resolve_fastmap_file(context)
+    selected_fastmap_file = resolve_fastmap_file()
     default_width, default_height = read_fastmap_source_size(selected_fastmap_file)
     width_value = int(
         LaunchConfiguration("width").perform(context).strip() or str(default_width)
@@ -189,14 +176,6 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "remap_topic",
                 default_value="/black_feature_input_remap_node/image_remapped",
-            ),
-            DeclareLaunchArgument(
-                "fastmap_file",
-                default_value=str(
-                    package_share
-                    / "config"
-                    / "camera1_undistort_map_20260420_082314_fast.xml"
-                ),
             ),
             DeclareLaunchArgument(
                 "robot_mask_path",
