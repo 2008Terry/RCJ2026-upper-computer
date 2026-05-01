@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from competition_robot import CompetitionRobot
 
 # Edit only run_task(robot) for normal competition programming.
+# Quick API documentation: docs/task_runner_quick.md
 # Full API documentation: docs/task_logic_api.md
 # Coordinate-frame reference: docs/coordinate_frames.md
 # Keep CompetitionRobot yaw_zero_map_degrees equal to amcl_fusion's value when
