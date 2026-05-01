@@ -25,7 +25,7 @@ STATE_KICK_BALL = "KICK_BALL"
 # FORCE_STATE = STATE_DEFENSE
 # FORCE_STATE = STATE_FIND_BALL
 # FORCE_STATE = STATE_KICK_BALL
-FORCE_STATE: Optional[str] = STATE_DEFENSE
+FORCE_STATE: Optional[str] = STATE_FIND_BALL
 
 
 def run_task(robot: Any) -> None:
@@ -34,7 +34,7 @@ def run_task(robot: Any) -> None:
     runtime = DuelRuntime(robot)
 
     robot.motion_enable()
-    robot.infrared_modulated_mode()
+    # robot.infrared_modulated_mode()
     robot.suck_off()
     robot.turn(angle_deg=ATTACK_YAW_DEG)
 

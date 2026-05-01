@@ -197,7 +197,7 @@ def run_task(robot: CompetitionRobot) -> None:
     
     
     
-    ### successfully catched the ball
+    ### successfully catched the ball and shoot
     # ball = robot.find_ball(timeout_sec=5.0, min_confidence=0.5)
     # if ball is None:
     #     ball = robot.spin_find_ball(
@@ -226,7 +226,9 @@ def run_task(robot: CompetitionRobot) -> None:
             
     #     robot.turn_to_point(x_m=0.0, y_m=0.0)
     #     robot.goto(x_m=0.0, y_m=0.0,speed_profile=2)
-    #     robot.suck_off()
+    #     robot.suck_on(speed_percent=10)
+    #     robot.timer(duration_sec=3.0)
+    #     robot.relay_on()
             
     # else:
     #     print("Ball not found")
@@ -267,11 +269,11 @@ def run_task(robot: CompetitionRobot) -> None:
     
     
     ### walk points
-    # robot.goto(x_m=-0.40, y_m=-0.60)
-    # robot.turn(angle_deg=90)
-    # robot.goto(x_m=0.40, y_m=-0.60)
-    # robot.turn(angle_deg=0)
-    # robot.goto(x_m=-0.40, y_m=0.60)
-    # robot.turn(angle_deg=-90)
-    # robot.goto(x_m=0.40, y_m=0.60)
+    robot.goto(x_m=-0.40, y_m=-0.60)
+    robot.turn(angle_deg=90)
+    robot.goto(x_m=0.40, y_m=-0.60)
+    robot.turn(angle_deg=0)
+    robot.goto(x_m=-0.40, y_m=0.60)
+    robot.turn(angle_deg=-90)
+    robot.goto(x_m=0.40, y_m=0.60)
    
