@@ -20,3 +20,10 @@
 # Ignore Python cache files
 __pycache__/
 *.pyc
+
+# Ignore local YOLO environment/config artifacts
+.venv-yolo/
+.yolo-bootstrap/
+.yolo-config/
+runs/
+*.pt

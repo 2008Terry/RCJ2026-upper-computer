@@ -1,0 +1,28 @@
+# Quietly expose the repo-local YOLO virtual environment whenever this package's
+# workspace setup file is sourced.
+_rcj_yolo_repo_root="@CMAKE_CURRENT_SOURCE_DIR@"
+_rcj_yolo_venv="${YOLO_VENV_DIR:-${_rcj_yolo_repo_root}/.venv-yolo}"
+
+if [ -d "$_rcj_yolo_venv" ]; then
+  case ":$PATH:" in
+    *":$_rcj_yolo_venv/bin:"*) ;;
+    *) export PATH="$_rcj_yolo_venv/bin:$PATH" ;;
+  esac
+
+  for _rcj_yolo_site in "$_rcj_yolo_venv"/lib/python*/site-packages; do
+    if [ -d "$_rcj_yolo_site" ]; then
+      case ":${PYTHONPATH:-}:" in
+        *":$_rcj_yolo_site:"*) ;;
+        *) export PYTHONPATH="$_rcj_yolo_site${PYTHONPATH:+:$PYTHONPATH}" ;;
+      esac
+    fi
+  done
+
+  export YOLO_CONFIG_DIR="${YOLO_CONFIG_DIR:-${_rcj_yolo_repo_root}/.yolo-config}"
+  export MPLCONFIGDIR="${MPLCONFIGDIR:-${_rcj_yolo_repo_root}/.yolo-config/matplotlib}"
+  mkdir -p "$YOLO_CONFIG_DIR" "$MPLCONFIGDIR" 2>/dev/null || true
+fi
+
+unset _rcj_yolo_repo_root
+unset _rcj_yolo_venv
+unset _rcj_yolo_site

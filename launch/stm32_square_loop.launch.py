@@ -18,7 +18,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(
                 "start_gateway",
-                default_value="false",
+                default_value="true",
                 description=(
                     "Start stm32_serial_gateway_node. Set false if it is already running."
                 ),

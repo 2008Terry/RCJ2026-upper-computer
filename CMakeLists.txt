@@ -29,6 +29,10 @@ find_package(OpenMP REQUIRED)
 find_package(OpenCV REQUIRED)
 include_directories(include)
 
+ament_environment_hooks(
+  "${CMAKE_CURRENT_SOURCE_DIR}/env-hooks/rcj_localization_yolo.sh.in"
+)
+
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BlackFeatureDetection.msg"
   "msg/BlackFeatureDetectionArray.msg"
@@ -182,6 +186,9 @@ install(PROGRAMS
   "scripts/stm32_square_loop.py"
   "scripts/task_runner.py"
   "scripts/duel_runner.py"
+  "scripts/remapped_photo_capture_ui.py"
+  "scripts/test_yolo_auto_env.sh"
+  "scripts/yolo_black_circle_debug.py"
   "scripts/defense_runner.py"
   DESTINATION lib/${PROJECT_NAME}
 )
