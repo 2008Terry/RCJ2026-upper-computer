@@ -26,6 +26,7 @@
 
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <rcl_interfaces/msg/set_parameters_result.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
@@ -446,6 +447,8 @@ public:
     loadRobotMask();
     loadLutFile();
     syncImageViewState();
+    parameter_callback_handle_ = add_on_set_parameters_callback(
+      std::bind(&OrangeBallDetectorNode::handleParameterUpdate, this, std::placeholders::_1));
 
     image_sub_ = create_subscription<sensor_msgs::msg::Image>(
       input_topic_,
@@ -679,6 +682,69 @@ private:
     if (lut_file_.empty()) {
       throw std::runtime_error("Parameter 'lut_file' must not be empty.");
     }
+  }
+
+  rcl_interfaces::msg::SetParametersResult handleParameterUpdate(
+    const std::vector<rclcpp::Parameter> & parameters)
+  {
+    bool candidate_publish_debug_images = publish_debug_images_;
+    bool candidate_publish_raw_mask = publish_raw_mask_;
+    bool candidate_publish_filtered_mask = publish_filtered_mask_;
+    bool candidate_publish_overlay_image = publish_overlay_image_;
+    int candidate_debug_jpeg_quality = debug_jpeg_quality_;
+    double candidate_debug_image_max_fps = debug_image_max_fps_;
+
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+
+    for (const auto & parameter : parameters) {
+      const std::string & name = parameter.get_name();
+      try {
+        if (name == "publish_debug_images") {
+          candidate_publish_debug_images = parameter.as_bool();
+        } else if (name == "publish_raw_mask") {
+          candidate_publish_raw_mask = parameter.as_bool();
+        } else if (name == "publish_filtered_mask") {
+          candidate_publish_filtered_mask = parameter.as_bool();
+        } else if (name == "publish_overlay_image") {
+          candidate_publish_overlay_image = parameter.as_bool();
+        } else if (name == "debug_jpeg_quality") {
+          candidate_debug_jpeg_quality =
+            std::clamp(static_cast<int>(parameter.as_int()), 1, 100);
+        } else if (name == "debug_image_max_fps") {
+          const double value = parameter.as_double();
+          if (!std::isfinite(value) || value < 0.0) {
+            result.successful = false;
+            result.reason = "debug_image_max_fps must be finite and non-negative";
+            return result;
+          }
+          candidate_debug_image_max_fps = value;
+        } else if (
+          name == "input_topic" || name == "lut_file" || name == "robot_mask_path" ||
+          name == "processing_time_topic")
+        {
+          result.successful = false;
+          result.reason = "Parameter '" + name + "' requires restarting orange_ball_detector";
+          return result;
+        } else {
+          result.successful = false;
+          result.reason = "Unsupported dynamic parameter: " + name;
+          return result;
+        }
+      } catch (const rclcpp::ParameterTypeException & exc) {
+        result.successful = false;
+        result.reason = "Invalid type for parameter '" + name + "': " + exc.what();
+        return result;
+      }
+    }
+
+    publish_debug_images_ = candidate_publish_debug_images;
+    publish_raw_mask_ = candidate_publish_raw_mask;
+    publish_filtered_mask_ = candidate_publish_filtered_mask;
+    publish_overlay_image_ = candidate_publish_overlay_image;
+    debug_jpeg_quality_ = candidate_debug_jpeg_quality;
+    debug_image_max_fps_ = candidate_debug_image_max_fps;
+    return result;
   }
 
   void loadRobotMask()
@@ -2548,6 +2614,7 @@ private:
   }
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr parameter_callback_handle_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr ball_center_ground_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr ball_center_raw_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr ball_top_raw_pub_;

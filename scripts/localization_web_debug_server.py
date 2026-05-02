@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import cv2
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped
@@ -303,6 +304,8 @@ INDEX_HTML = """<!doctype html>
       ["hsv", "publish_green_mask"], ["hsv", "publish_black_mask"], ["hsv", "publish_noise_mask"],
       ["hsv", "publish_overlay_image"], ["remap", "publish_debug_images"],
       ["ridge", "publish_debug_images"], ["ridge", "publish_debug_image"],
+      ["orange", "publish_debug_images"], ["orange", "publish_raw_mask"],
+      ["orange", "publish_filtered_mask"], ["orange", "publish_overlay_image"],
       ["localization", "publish_debug_pointcloud"]
     ];
     const state = {
@@ -646,12 +649,16 @@ STREAMS = [
     StreamConfig("ridge_side", "Side Support", "/white_line_dt_ridge_filter_node/side_support_mask/compressed", "/white_line_dt_ridge_filter_node/side_support_mask"),
     StreamConfig("ridge_reconstructed", "Reconstructed", "/white_line_dt_ridge_filter_node/reconstructed_mask/compressed", "/white_line_dt_ridge_filter_node/reconstructed_mask"),
     StreamConfig("ridge_final", "Final White", "/white_line_dt_ridge_filter_node/white_final_mask/compressed", "/white_line_dt_ridge_filter_node/white_final_mask"),
+    StreamConfig("orange_raw", "Orange Raw Mask", "/orange_ball_detector/debug_mask/compressed", "/orange_ball_detector/debug_mask"),
+    StreamConfig("orange_filtered", "Orange Filtered", "/orange_ball_detector/debug_mask_filtered/compressed", "/orange_ball_detector/debug_mask_filtered"),
+    StreamConfig("orange_overlay", "Orange Overlay", "/orange_ball_detector/debug_image/compressed", "/orange_ball_detector/debug_image"),
 ]
 
 PARAM_NODES = {
     "hsv": "/white_line_hsv_white_node",
     "remap": "/white_line_hsv_input_remap_node",
     "ridge": "/white_line_dt_ridge_filter_node",
+    "orange": "/orange_ball_detector",
     "localization": "/amcl_fusion",
 }
 
@@ -667,6 +674,12 @@ PARAMETER_NAMES = {
         "publish_debug_images", "publish_debug_image", "publish_ridge_mask",
         "publish_orientation_valid_mask", "publish_side_support_mask",
         "publish_reconstructed_mask", "publish_white_final_mask",
+    ],
+    "orange": [
+        "publish_debug_images", "publish_raw_mask", "publish_filtered_mask",
+        "publish_overlay_image", "orange_h_min", "orange_h_max", "orange_s_min",
+        "orange_v_min", "min_blob_area_px", "max_blob_area_px", "roi_scale",
+        "lost_frame_tolerance", "ema_alpha", "force_search_mode",
     ],
     "localization": [
         "num_particles", "sigma_hit", "noise_xy", "noise_theta",
@@ -696,6 +709,9 @@ STREAM_ENABLE_PARAMS = {
         {"publish_debug_images": True, "publish_reconstructed_mask": True},
     ),
     "ridge_final": ("ridge", {"publish_debug_images": True, "publish_white_final_mask": True}),
+    "orange_raw": ("orange", {"publish_debug_images": True, "publish_raw_mask": True}),
+    "orange_filtered": ("orange", {"publish_debug_images": True, "publish_filtered_mask": True}),
+    "orange_overlay": ("orange", {"publish_debug_images": True, "publish_overlay_image": True}),
 }
 
 
@@ -743,6 +759,15 @@ class StreamState:
             self.source = "raw fallback"
             self.condition.notify_all()
         return True
+
+    def reset_waiting(self):
+        with self.condition:
+            self.latest_jpeg = None
+            self.latest_sequence += 1
+            self.updated_at = None
+            self.source = "waiting"
+            self.last_raw_encode_at = 0.0
+            self.condition.notify_all()
 
     def snapshot(self) -> bytes | None:
         with self.lock:
@@ -910,9 +935,12 @@ class LocalizationWebDebugNode(Node):
             raise ValueError(f"Unknown stream '{stream_id}'")
 
         with self.active_stream_lock:
-            if stream_id != self.active_stream_id:
+            stream_changed = stream_id != self.active_stream_id
+            if stream_changed:
                 self._destroy_active_stream_subscriptions_locked()
                 self.active_stream_id = stream_id
+            if stream_changed or auto_enable:
+                self.streams[stream_id].reset_waiting()
             self._ensure_active_compressed_subscription_locked()
 
         warnings = []
@@ -1206,6 +1234,47 @@ def normalize_stream_id(path_part: str) -> str:
     return path_part
 
 
+def make_placeholder_jpeg(label: str, detail: str, quality: int) -> bytes:
+    image = np.full((360, 640, 3), (12, 15, 18), dtype=np.uint8)
+    cv2.rectangle(image, (0, 0), (639, 359), (38, 48, 58), 2)
+    cv2.putText(
+        image,
+        "Waiting for stream",
+        (36, 132),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (210, 222, 234),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        image,
+        label[:42],
+        (36, 182),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.78,
+        (86, 182, 194),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        image,
+        detail[:70],
+        (36, 230),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (160, 170, 180),
+        1,
+        cv2.LINE_AA,
+    )
+    ok, encoded = cv2.imencode(
+        ".jpg",
+        image,
+        [cv2.IMWRITE_JPEG_QUALITY, max(1, min(100, quality))],
+    )
+    return encoded.tobytes() if ok else b""
+
+
 def make_handler(node: LocalizationWebDebugNode):
     class LocalizationWebHandler(BaseHTTPRequestHandler):
         server_version = "LocalizationWebDebug/1.0"
@@ -1309,10 +1378,17 @@ def make_handler(node: LocalizationWebDebugNode):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             sequence = -1
+            placeholder = make_placeholder_jpeg(
+                stream.config.label,
+                f"ROS topic: {stream.config.compressed_topic}",
+                node.jpeg_quality,
+            )
             while stream.running:
                 payload, sequence = stream.wait_for_frame_after(sequence)
                 if payload is None:
-                    continue
+                    payload = placeholder
+                    if not payload:
+                        continue
                 try:
                     self.wfile.write(b"--frame\r\n")
                     self.wfile.write(b"Content-Type: image/jpeg\r\n")
