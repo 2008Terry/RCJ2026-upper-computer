@@ -4,10 +4,10 @@ from typing import Any, Optional
 
 import rclpy
 
-from duel_behaviors import (
+from offence_behaviors import (
     ATTACK_YAW_DEG,
     LOOP_SLEEP_SEC,
-    DuelRuntime,
+    OffenceRuntime,
     handle_defense,
     handle_find_ball,
     handle_kick,
@@ -25,13 +25,13 @@ STATE_KICK_BALL = "KICK_BALL"
 # FORCE_STATE = STATE_DEFENSE
 # FORCE_STATE = STATE_FIND_BALL
 # FORCE_STATE = STATE_KICK_BALL
-FORCE_STATE: Optional[str] = STATE_FIND_BALL
+FORCE_STATE: Optional[str] = STATE_DEFENSE
 
 
 def run_task(robot: Any) -> None:
-    """Run the duel state machine until ROS shuts down or Ctrl-C."""
+    """Run the offence state machine until ROS shuts down or Ctrl-C."""
 
-    runtime = DuelRuntime(robot)
+    runtime = OffenceRuntime(robot)
 
     robot.motion_enable()
     # robot.infrared_modulated_mode()
@@ -76,7 +76,7 @@ def _validate_force_state() -> None:
         )
 
 
-def _run_forced_state(robot: Any, runtime: DuelRuntime, state: str) -> None:
+def _run_forced_state(robot: Any, runtime: OffenceRuntime, state: str) -> None:
     if state == STATE_DEFENSE:
         runtime.report_state(STATE_DEFENSE, "forced")
         runtime.suck.set(robot, 0)

@@ -61,7 +61,7 @@ class BallCue:
         return "infrared"
 
 
-class DuelRuntime:
+class OffenceRuntime:
     def __init__(self, robot: Any) -> None:
         self.drive = DriveCache()
         self.suck = SuckCache()
@@ -73,7 +73,7 @@ class DuelRuntime:
             return
         self._state = state
         suffix = f": {detail}" if detail else ""
-        self._robot.get_logger().info(f"State -> {state}{suffix}")
+        self._robot.get_logger().info(f"Offence state -> {state}{suffix}")
 
 
 class DriveCache:
