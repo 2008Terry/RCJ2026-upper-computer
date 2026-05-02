@@ -367,6 +367,8 @@ INDEX_HTML = """<!doctype html>
         setMessage(String(err), true);
       }
       $("streamPlaceholder").textContent = "Waiting for " + streamLabel(state.streams[state.active] || {id: state.active}) + "...";
+      $("streamPlaceholder").style.display = "block";
+      $("stream").style.display = "none";
       $("stream").src = "/stream/" + encodeURIComponent(state.active) + ".mjpg?t=" + Date.now();
       $("activeStream").textContent = streamLabel(state.streams[state.active] || {id: state.active});
       renderStreams();
@@ -595,6 +597,15 @@ INDEX_HTML = """<!doctype html>
     $("applyToggles").onclick = function() { applyToggles(); };
     $("refreshParams").onclick = function() { refreshParams().catch(function(e) { setMessage(String(e), true); }); };
     $("buildExport").onclick = function() { buildExport().catch(function(e) { setMessage(String(e), true); }); };
+    $("stream").onload = function() {
+      $("streamPlaceholder").style.display = "none";
+      $("stream").style.display = "block";
+    };
+    $("stream").onerror = function() {
+      $("streamPlaceholder").style.display = "block";
+      $("stream").style.display = "none";
+      $("streamPlaceholder").textContent = "Stream request failed for " + streamLabel(state.streams[state.active] || {id: state.active}) + ".";
+    };
     $("rvizDisplayToggle").onchange = function(event) {
       setRvizDisplay(event.target.checked).catch(function(e) {
         event.target.checked = !event.target.checked;
@@ -1188,6 +1199,13 @@ def format_launch_value(value: Any) -> str:
     return str(value)
 
 
+def normalize_stream_id(path_part: str) -> str:
+    for suffix in (".mjpg", ".jpg", ".jpeg"):
+        if path_part.endswith(suffix):
+            return path_part[: -len(suffix)]
+    return path_part
+
+
 def make_handler(node: LocalizationWebDebugNode):
     class LocalizationWebHandler(BaseHTTPRequestHandler):
         server_version = "LocalizationWebDebug/1.0"
@@ -1261,6 +1279,7 @@ def make_handler(node: LocalizationWebDebugNode):
                 self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
 
         def handle_snapshot(self, stream_id: str):
+            stream_id = normalize_stream_id(stream_id)
             stream = node.streams.get(stream_id)
             if stream is None:
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -1272,6 +1291,7 @@ def make_handler(node: LocalizationWebDebugNode):
             self.send_bytes(payload, mimetypes.types_map.get(".jpg", "image/jpeg"))
 
         def handle_stream(self, stream_id: str):
+            stream_id = normalize_stream_id(stream_id)
             stream = node.streams.get(stream_id)
             if stream is None:
                 self.send_error(HTTPStatus.NOT_FOUND)
