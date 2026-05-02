@@ -16,6 +16,7 @@ from rcj_shared_launch_params import (
     declare_remap_interpolation_argument,
     declare_camera_ros_arguments,
     declare_hsv_green_white_black_arguments,
+    declare_stm32_port_argument,
 )
 
 
@@ -376,7 +377,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "lost_min_updates", default_value="5"
             ),  # Consecutive low alpha-ratio updates required to mark lost
-            DeclareLaunchArgument("stm32_port", default_value="/dev/ttyUSB0"),  # STM32 serial port
+            declare_stm32_port_argument(),
             DeclareLaunchArgument("stm32_baudrate", default_value="115200"),  # STM32 serial baudrate
             DeclareLaunchArgument(
                 "stm32_tick_period_ms", default_value="10"

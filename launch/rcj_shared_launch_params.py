@@ -51,6 +51,11 @@ REMAP_DEFAULTS = {
 }
 
 
+STM32_DEFAULTS = {
+    "stm32_port": "/dev/ttyUSB0",
+}
+
+
 def declare_camera_ros_arguments():
     return [
         DeclareLaunchArgument(
@@ -166,6 +171,14 @@ def declare_remap_interpolation_argument():
         "interpolation",
         default_value=REMAP_DEFAULTS["interpolation"],
     )  # Remap interpolation mode
+
+
+def declare_stm32_port_argument():
+    return DeclareLaunchArgument(
+        "stm32_port",
+        default_value=STM32_DEFAULTS["stm32_port"],
+        description="Serial port connected to the STM32.",
+    )
 
 
 def declare_hsv_green_white_black_arguments():

@@ -12,6 +12,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rcj_camera_config import resolve_raw_ball_lut_file
+from rcj_shared_launch_params import declare_stm32_port_argument
 
 
 def generate_launch_description():
@@ -29,6 +30,15 @@ def generate_launch_description():
     enable_camera_compressed_debug = LaunchConfiguration("enable_camera_compressed_debug")
     orange_robot_mask_path = LaunchConfiguration("orange_robot_mask_path")
     yaw_zero_map_degrees = LaunchConfiguration("yaw_zero_map_degrees")
+    stm32_port = LaunchConfiguration("stm32_port")
+    stm32_baudrate = LaunchConfiguration("stm32_baudrate")
+    stm32_enable_odometry_log = LaunchConfiguration("stm32_enable_odometry_log")
+    stm32_enable_serial_log = LaunchConfiguration("stm32_enable_serial_log")
+    stm32_enable_raw_reply_log = LaunchConfiguration("stm32_enable_raw_reply_log")
+    ridge_publish_debug_images = LaunchConfiguration("ridge_publish_debug_images")
+    ridge_publish_debug_image = LaunchConfiguration("ridge_publish_debug_image")
+    publish_debug_pointcloud = LaunchConfiguration("publish_debug_pointcloud")
+    publish_particle_weight_markers = LaunchConfiguration("publish_particle_weight_markers")
 
     return LaunchDescription(
         [
@@ -79,6 +89,47 @@ def generate_launch_description():
                     "Map yaw offset used by AMCL and CompetitionRobot when "
                     "converting between ROS map yaw and STM32 yaw."
                 ),
+            ),
+            declare_stm32_port_argument(),
+            DeclareLaunchArgument(
+                "stm32_baudrate",
+                default_value="115200",
+                description="STM32 serial baudrate.",
+            ),
+            DeclareLaunchArgument(
+                "stm32_enable_odometry_log",
+                default_value="false",
+                description="Log every AMCL STM32 odometry response.",
+            ),
+            DeclareLaunchArgument(
+                "stm32_enable_serial_log",
+                default_value="false",
+                description="Log every queued/sent STM32 command summary.",
+            ),
+            DeclareLaunchArgument(
+                "stm32_enable_raw_reply_log",
+                default_value="false",
+                description="Log raw STM32 serial chunks and reply lines.",
+            ),
+            DeclareLaunchArgument(
+                "ridge_publish_debug_images",
+                default_value="false",
+                description="Publish the ridge detector debug image bundle.",
+            ),
+            DeclareLaunchArgument(
+                "ridge_publish_debug_image",
+                default_value="false",
+                description="Publish the ridge detector composite debug image.",
+            ),
+            DeclareLaunchArgument(
+                "publish_debug_pointcloud",
+                default_value="false",
+                description="Publish AMCL field-line debug point cloud.",
+            ),
+            DeclareLaunchArgument(
+                "publish_particle_weight_markers",
+                default_value="false",
+                description="Publish AMCL particle-weight marker debug output.",
             ),
             DeclareLaunchArgument("orange_h_min", default_value="5"),
             DeclareLaunchArgument("orange_h_max", default_value="30"),
@@ -149,6 +200,15 @@ def generate_launch_description():
                     "use_fake_yaw": "true",
                     "use_stm32_request_theta": "true",
                     "yaw_zero_map_degrees": yaw_zero_map_degrees,
+                    "stm32_port": stm32_port,
+                    "stm32_baudrate": stm32_baudrate,
+                    "stm32_enable_odometry_log": stm32_enable_odometry_log,
+                    "stm32_enable_serial_log": stm32_enable_serial_log,
+                    "stm32_enable_raw_reply_log": stm32_enable_raw_reply_log,
+                    "ridge_publish_debug_images": ridge_publish_debug_images,
+                    "ridge_publish_debug_image": ridge_publish_debug_image,
+                    "publish_debug_pointcloud": publish_debug_pointcloud,
+                    "publish_particle_weight_markers": publish_particle_weight_markers,
                 }.items(),
             ),
             Node(
