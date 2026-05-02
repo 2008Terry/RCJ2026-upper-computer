@@ -15,6 +15,7 @@ from offence_behaviors import (
     handle_defense,
     handle_find_ball,
     handle_kick,
+    handle_no_vision_defense,
     safe_stop,
     sense_ball,
     should_kick,
@@ -86,8 +87,13 @@ def run_task(robot: Any) -> None:
                         ),
                     )
                     runtime.suck.set(robot, 0)
-                    handle_defense(robot, runtime.drive)
+                    handle_no_vision_defense(
+                        robot,
+                        runtime.drive,
+                        runtime.no_vision_return,
+                    )
                 elif cue.ball is not None and should_kick(cue.ball):
+                    runtime.no_vision_return.reset()
                     runtime.report_state(STATE_KICK_BALL, "ball close and centered")
                     runtime.report_decision(
                         STATE_KICK_BALL,
@@ -95,6 +101,7 @@ def run_task(robot: Any) -> None:
                     )
                     handle_kick(robot, runtime.drive, runtime.suck)
                 else:
+                    runtime.no_vision_return.reset()
                     runtime.report_state(STATE_FIND_BALL, cue.source)
                     runtime.report_decision(
                         STATE_FIND_BALL,
