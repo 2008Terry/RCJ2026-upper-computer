@@ -391,6 +391,7 @@ private:
         int candidate_filter_period_ms = filter_period_ms_;
         bool candidate_enable_timing_log = enable_timing_log_;
         int candidate_timing_log_interval = timing_log_interval_;
+        bool candidate_publish_debug_pointcloud = publish_debug_pointcloud_;
 
         bool reinitialize_particles = false;
         bool recreate_timer = false;
@@ -444,10 +445,11 @@ private:
                 candidate_enable_timing_log = parameter.as_bool();
             } else if (name == "timing_log_interval") {
                 candidate_timing_log_interval = static_cast<int>(parameter.as_int());
+            } else if (name == "publish_debug_pointcloud") {
+                candidate_publish_debug_pointcloud = parameter.as_bool();
             } else if (
                 name == "mask_topic" || name == "enable_localization" ||
-                name == "publish_debug_pointcloud" || name == "debug_pointcloud_topic" ||
-                name == "map_topic" || name == "yaw_topic" ||
+                name == "debug_pointcloud_topic" || name == "map_topic" || name == "yaw_topic" ||
                 name == "use_fake_yaw" || name == "fake_yaw_degrees" ||
                 name == "yaw_zero_map_degrees" ||
                 name == "publish_processing_time" || name == "processing_time_topic") {
@@ -481,8 +483,11 @@ private:
         filter_period_ms_ = candidate_filter_period_ms;
         enable_timing_log_ = candidate_enable_timing_log;
         timing_log_interval_ = candidate_timing_log_interval;
+        publish_debug_pointcloud_ = candidate_publish_debug_pointcloud;
         forward_axis_ = parseAxisMapping(forward_axis_name_);
         left_axis_ = parseAxisMapping(left_axis_name_);
+
+        syncDebugPointCloudPublisher();
 
         if (pf_) {
             pf_->setConfig(filter_config_);
@@ -587,7 +592,7 @@ private:
             latest_observations_ = observations;
         }
 
-        if (publish_debug_pointcloud_) {
+        if (publish_debug_pointcloud_ && debug_pointcloud_pub_) {
             publishDebugPointCloud(msg->header, observations);
         }
     }
@@ -617,6 +622,22 @@ private:
         }
 
         debug_pointcloud_pub_->publish(cloud);
+    }
+
+    void syncDebugPointCloudPublisher() {
+        if (publish_debug_pointcloud_ && !debug_pointcloud_pub_) {
+            debug_pointcloud_pub_ =
+                this->create_publisher<sensor_msgs::msg::PointCloud2>(
+                    debug_pointcloud_topic_,
+                    10);
+            RCLCPP_INFO(
+                this->get_logger(),
+                "Enabled debug point cloud publisher on '%s'.",
+                debug_pointcloud_topic_.c_str());
+        } else if (!publish_debug_pointcloud_ && debug_pointcloud_pub_) {
+            debug_pointcloud_pub_.reset();
+            RCLCPP_INFO(this->get_logger(), "Disabled debug point cloud publisher.");
+        }
     }
 
     void filterLoop() {

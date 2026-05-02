@@ -7,7 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 # Expected config filenames:
 #   <CAMERA_CONFIG_ID>_undistort_map_*.xml
 #   <CAMERA_CONFIG_ID>_raw_ball_top_lut_*.xml
-CAMERA_CONFIG_ID = "camera1"
+CAMERA_CONFIG_ID = "camera3"
 
 
 def _config_dir():

@@ -407,10 +407,32 @@ private:
         fs["output_height"] >> outputHeight_;
         fs["fast_map_1"] >> fastMap1_;
         fs["fast_map_2"] >> fastMap2_;
+        cv::Mat map_x;
+        cv::Mat map_y;
+        if (fastMap1_.empty() || fastMap2_.empty()) {
+            fs["map_x"] >> map_x;
+            fs["map_y"] >> map_y;
+        }
         fs.release();
 
         if (fastMap1_.empty() || fastMap2_.empty()) {
-            throw std::runtime_error("Fast map file is missing fast_map_1 or fast_map_2: " + fastMapPath);
+            if (map_x.empty() || map_y.empty()) {
+                throw std::runtime_error(
+                    "Remap file is missing both fast_map_1/fast_map_2 and map_x/map_y: " +
+                    fastMapPath);
+            }
+            if (map_x.size() != map_y.size()) {
+                throw std::runtime_error("Float remap matrices have different sizes: " + fastMapPath);
+            }
+            if (map_x.type() != CV_32FC1 || map_y.type() != CV_32FC1) {
+                throw std::runtime_error(
+                    "Float remap matrices map_x/map_y must be CV_32FC1: " + fastMapPath);
+            }
+            cv::convertMaps(map_x, map_y, fastMap1_, fastMap2_, CV_16SC2);
+            RCLCPP_INFO(
+                get_logger(),
+                "Converted float remap XML map_x/map_y to fixed-point FastMap format: %s",
+                fastMapPath.c_str());
         }
 
         if (fastMap1_.size() != fastMap2_.size()) {

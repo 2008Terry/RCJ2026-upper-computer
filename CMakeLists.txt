@@ -189,6 +189,7 @@ install(PROGRAMS
   "scripts/remapped_photo_capture_ui.py"
   "scripts/test_yolo_auto_env.sh"
   "scripts/yolo_black_circle_debug.py"
+  "scripts/localization_web_debug_server.py"
   "scripts/defense_runner.py"
   DESTINATION lib/${PROJECT_NAME}
 )
