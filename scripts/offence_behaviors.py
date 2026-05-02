@@ -5,6 +5,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from infrared_smoothing import InfraredAngleFilter
+
 
 # Field assumptions for the default competition setup:
 # - own half is map -y
@@ -47,12 +49,16 @@ IR_CHANNEL_TO_MOVE_ANGLE_DEG = {
     6: 60.0,
     7: 90.0,
 }
+IR_HISTORY_SIZE = 8
+IR_EWMA_ALPHA = 0.35
+IR_CLEAR_AFTER_MISSES = 3
 
 
 @dataclass(frozen=True)
 class BallCue:
     ball: Optional[Any]
     infrared_channel: Optional[int]
+    infrared_angle_deg: Optional[float]
 
     @property
     def source(self) -> str:
@@ -65,6 +71,12 @@ class OffenceRuntime:
     def __init__(self, robot: Any) -> None:
         self.drive = DriveCache()
         self.suck = SuckCache()
+        self.infrared = InfraredAngleFilter(
+            channel_to_angle_deg=IR_CHANNEL_TO_MOVE_ANGLE_DEG,
+            history_size=IR_HISTORY_SIZE,
+            ewma_alpha=IR_EWMA_ALPHA,
+            clear_after_misses=IR_CLEAR_AFTER_MISSES,
+        )
         self._robot = robot
         self._state: Optional[str] = None
 
@@ -124,17 +136,30 @@ class SuckCache:
         self._last_speed = speed_percent
 
 
-def sense_ball(robot: Any) -> Optional[BallCue]:
+def sense_ball(
+    robot: Any,
+    infrared_filter: InfraredAngleFilter,
+) -> Optional[BallCue]:
     ball = robot.find_ball(
         timeout_sec=VISION_TIMEOUT_SEC,
         min_confidence=MIN_BALL_CONFIDENCE,
     )
     if ball is not None:
-        return BallCue(ball=ball, infrared_channel=None)
+        return BallCue(
+            ball=ball,
+            infrared_channel=None,
+            infrared_angle_deg=None,
+        )
 
     channel = _read_infrared_channel(robot)
     if channel is not None:
-        return BallCue(ball=None, infrared_channel=channel)
+        angle = infrared_filter.update(channel)
+        return BallCue(
+            ball=None,
+            infrared_channel=channel,
+            infrared_angle_deg=angle,
+        )
+    infrared_filter.mark_missed()
     return None
 
 
@@ -153,14 +178,13 @@ def handle_defense(robot: Any, drive_cache: DriveCache) -> None:
 
 def handle_find_ball(robot: Any, drive_cache: DriveCache, cue: BallCue) -> None:
     if cue.ball is None:
-        channel = cue.infrared_channel
-        if channel is None:
+        if cue.infrared_angle_deg is None:
             drive_cache.stop(robot)
             return
         drive_cache.drive(
             robot,
             speed_percent=IR_CHASE_SPEED_PERCENT,
-            move_angle_deg=IR_CHANNEL_TO_MOVE_ANGLE_DEG[channel],
+            move_angle_deg=cue.infrared_angle_deg,
         )
         return
 

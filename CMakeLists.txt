@@ -198,6 +198,7 @@ install(FILES
   "scripts/competition_robot.py"
   "scripts/goto_point.py"
   "scripts/task_logic.py"
+  "scripts/infrared_smoothing.py"
   "scripts/offence_logic.py"
   "scripts/offence_behaviors.py"
   "scripts/defense_logic.py"

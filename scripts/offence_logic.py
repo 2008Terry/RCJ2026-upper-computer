@@ -47,7 +47,7 @@ def run_task(robot: Any) -> None:
                 robot.timer(duration_sec=LOOP_SLEEP_SEC)
                 continue
 
-            cue = sense_ball(robot)
+            cue = sense_ball(robot, runtime.infrared)
 
             if cue is None:
                 runtime.report_state(STATE_DEFENSE)
@@ -84,7 +84,7 @@ def _run_forced_state(robot: Any, runtime: OffenceRuntime, state: str) -> None:
         return
 
     if state == STATE_FIND_BALL:
-        cue = sense_ball(robot)
+        cue = sense_ball(robot, runtime.infrared)
         detail = "forced"
         if cue is not None:
             detail = f"forced: {cue.source}"

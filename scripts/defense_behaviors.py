@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import math
 import time
-from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Optional
+from typing import Any, Optional
+
+from infrared_smoothing import InfraredAngleFilter
 
 
 # Default field setup:
@@ -69,7 +70,12 @@ class DefenseCue:
 class DefenseRuntime:
     def __init__(self, robot: Any) -> None:
         self.drive = HeadLockDriveCache()
-        self.infrared = InfraredAngleFilter()
+        self.infrared = InfraredAngleFilter(
+            channel_to_angle_deg=IR_CHANNEL_TO_BEARING_DEG,
+            history_size=IR_HISTORY_SIZE,
+            ewma_alpha=IR_EWMA_ALPHA,
+            clear_after_misses=IR_CLEAR_AFTER_MISSES,
+        )
         self._robot = robot
         self._state: Optional[str] = None
 
@@ -116,58 +122,6 @@ class HeadLockDriveCache:
         self._last_speed = 0
         self._last_angle_deg = None
         self._last_sent_time = time.monotonic()
-
-
-class InfraredAngleFilter:
-    def __init__(
-        self,
-        *,
-        history_size: int = IR_HISTORY_SIZE,
-        ewma_alpha: float = IR_EWMA_ALPHA,
-    ) -> None:
-        self._samples: Deque[float] = deque(maxlen=history_size)
-        self._ewma_alpha = _clamp(ewma_alpha, 0.0, 1.0)
-        self._smoothed_angle_deg: Optional[float] = None
-        self._miss_count = 0
-
-    def update(self, channel: int) -> Optional[float]:
-        raw_angle = IR_CHANNEL_TO_BEARING_DEG.get(channel)
-        if raw_angle is None:
-            self.mark_missed()
-            return self._smoothed_angle_deg
-
-        self._samples.append(raw_angle)
-        averaged_angle = self._weighted_average_angle()
-        if self._smoothed_angle_deg is None:
-            self._smoothed_angle_deg = averaged_angle
-        else:
-            delta = _normalize_angle_deg(averaged_angle - self._smoothed_angle_deg)
-            self._smoothed_angle_deg = _normalize_angle_deg(
-                self._smoothed_angle_deg + self._ewma_alpha * delta
-            )
-        self._miss_count = 0
-        return self._smoothed_angle_deg
-
-    def mark_missed(self) -> None:
-        self._miss_count += 1
-        if self._miss_count >= IR_CLEAR_AFTER_MISSES:
-            self.clear()
-
-    def clear(self) -> None:
-        self._samples.clear()
-        self._smoothed_angle_deg = None
-        self._miss_count = 0
-
-    def _weighted_average_angle(self) -> float:
-        weighted_sum = 0.0
-        total_weight = 0.0
-        for index, angle in enumerate(self._samples, start=1):
-            weight = float(index)
-            weighted_sum += angle * weight
-            total_weight += weight
-        if total_weight <= 0.0:
-            return 0.0
-        return weighted_sum / total_weight
 
 
 def prepare_defense(robot: Any) -> None:
