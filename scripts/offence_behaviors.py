@@ -34,6 +34,8 @@ ANGLE_RESEND_DELTA_DEG = 6.0
 
 DEFENSE_TOLERANCE_M = 0.08
 DEFENSE_SPEED_PERCENT = 18
+NO_VISION_REVERSE_SEC = 0.45
+NO_VISION_REVERSE_SPEED_PERCENT = 18
 CHASE_SPEED_PERCENT = 24
 IR_CHASE_SPEED_PERCENT = 18
 KICK_DRIVE_SPEED_PERCENT = 20
@@ -86,6 +88,7 @@ class OffenceRuntime:
             ewma_alpha=IR_EWMA_ALPHA,
             clear_after_misses=IR_CLEAR_AFTER_MISSES,
         )
+        self.no_vision_return = NoVisionReturn()
         self._robot = robot
         self._state: Optional[str] = None
         self._last_status_time = 0.0
@@ -153,6 +156,23 @@ class SuckCache:
         self._last_speed = speed_percent
 
 
+class NoVisionReturn:
+    def __init__(self) -> None:
+        self._reverse_until: Optional[float] = None
+
+    def reset(self) -> None:
+        self._reverse_until = None
+
+    def should_reverse(self) -> bool:
+        if NO_VISION_REVERSE_SEC <= 0.0:
+            return False
+
+        now = time.monotonic()
+        if self._reverse_until is None:
+            self._reverse_until = now + NO_VISION_REVERSE_SEC
+        return now < self._reverse_until
+
+
 def sense_ball(
     robot: Any,
     infrared_filter: InfraredAngleFilter,
@@ -216,6 +236,22 @@ def handle_defense(robot: Any, drive_cache: DriveCache) -> None:
     )
     if reached:
         drive_cache.stop(robot)
+
+
+def handle_no_vision_defense(
+    robot: Any,
+    drive_cache: DriveCache,
+    no_vision_return: NoVisionReturn,
+) -> None:
+    if no_vision_return.should_reverse():
+        drive_cache.drive(
+            robot,
+            speed_percent=NO_VISION_REVERSE_SPEED_PERCENT,
+            move_angle_deg=180.0,
+        )
+        return
+
+    handle_defense(robot, drive_cache)
 
 
 def handle_find_ball(robot: Any, drive_cache: DriveCache, cue: BallCue) -> None:
@@ -292,7 +328,9 @@ def should_kick(ball: Any) -> bool:
 def describe_defense_action(*, use_infrared: bool = True) -> str:
     cue_text = "vision/infrared" if use_infrared else "vision"
     return (
-        f"no {cue_text} cue -> return to defense point "
+        f"no {cue_text} cue -> reverse then return to defense point "
+        f"reverse={NO_VISION_REVERSE_SEC:.2f}s "
+        f"reverse_speed={NO_VISION_REVERSE_SPEED_PERCENT}% "
         f"target=({DEFENSE_POINT_X_M:.2f}, {DEFENSE_POINT_Y_M:.2f}) "
         f"speed={DEFENSE_SPEED_PERCENT}% tol={DEFENSE_TOLERANCE_M:.2f}m"
     )
