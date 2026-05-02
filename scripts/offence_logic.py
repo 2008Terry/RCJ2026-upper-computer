@@ -29,7 +29,7 @@ STATE_KICK_BALL = "KICK_BALL"
 # FORCE_STATE = STATE_DEFENSE
 # FORCE_STATE = STATE_FIND_BALL
 # FORCE_STATE = STATE_KICK_BALL
-FORCE_STATE: Optional[str] = None
+FORCE_STATE: Optional[str] = STATE_FIND_BALL
 
 # Set this to False when offence should find balls with vision only.
 USE_INFRARED_TO_FIND_BALL = False
