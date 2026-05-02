@@ -31,6 +31,14 @@ class Stm32Infrared:
     attempts: int
     message: str
 
+    @property
+    def is_behind(self) -> bool:
+        return self.channel == -1
+
+    @property
+    def has_direction(self) -> bool:
+        return 1 <= self.channel <= 7
+
 
 @dataclass(frozen=True)
 class RobotPose:
@@ -304,14 +312,14 @@ class CompetitionRobot(GotoNavigator):
     def read_infrared(self, *, wait_sec: float = 0.0) -> Stm32Infrared:
         wait_after = self._non_negative_float("wait_sec", wait_sec)
         response = self._send_command_until_success("cmd_infred")
-        match = re.search(r"channel=(\d+)", str(response.message))
+        match = re.search(r"channel=(-?\d+)", str(response.message))
         if match is None:
             raise RuntimeError(
                 "STM32 infrared response did not include a channel: "
                 f"{response.message}"
             )
         channel = int(match.group(1))
-        if channel < 1 or channel > 7:
+        if channel != -1 and (channel < 1 or channel > 7):
             raise RuntimeError(f"STM32 infrared channel out of range: {channel}")
         result = Stm32Infrared(
             channel=channel,

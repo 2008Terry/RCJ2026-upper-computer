@@ -36,7 +36,7 @@
 | `robot.get_pose()` | 读当前定位 |
 | `robot.reset_yaw()` | STM32 yaw 归零 |
 | `robot.relay_on()` / `robot.relay_off()` | 继电器开/关 |
-| `robot.infrared_channel()` | 读红外通道 `1-7` |
+| `robot.infrared_channel()` | 读红外通道 `-1/1-7` |
 
 ## ball 字段
 

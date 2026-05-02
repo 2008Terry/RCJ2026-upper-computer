@@ -684,11 +684,16 @@ print(ir.channel)
 
 Sends STM32 `cmd_infred` and returns a `Stm32Infrared` object:
 
-- `ir.channel`: strongest BE-1732 infrared channel, from `1` to `7`.
+- `ir.channel`: strongest BE-1732 infrared channel, from `1` to `7`; `-1`
+  means the STM32 judged the ball to be behind the robot.
+- `ir.is_behind`: `True` when `ir.channel == -1`.
+- `ir.has_direction`: `True` when `ir.channel` is one of `1-7`.
 - `ir.attempts`: gateway send attempts used for this command.
 - `ir.message`: gateway summary text.
 
-The wrapper validates that the returned channel is in range.
+The wrapper validates that the returned channel is either `-1` or in `1-7`.
+The offence task treats `-1` as a rear-ball cue when vision has no ball, and
+backs up to search.
 
 Example:
 
@@ -705,7 +710,8 @@ channel = robot.infrared_channel(wait_sec=0.0)
 ```
 
 Convenience wrapper for `robot.read_infrared().channel`. Use this when only the
-channel number matters.
+channel number matters. It may return `-1` for a rear-ball cue, or `1-7` for a
+directional infrared channel.
 
 Example:
 

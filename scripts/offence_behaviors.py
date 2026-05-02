@@ -62,11 +62,14 @@ class BallCue:
     ball: Optional[Any]
     infrared_channel: Optional[int]
     infrared_angle_deg: Optional[float]
+    infrared_behind: bool = False
 
     @property
     def source(self) -> str:
         if self.ball is not None:
             return "vision"
+        if self.infrared_behind:
+            return "infrared_behind"
         return "infrared"
 
 
@@ -160,15 +163,25 @@ def sense_ball(
             ball=ball,
             infrared_channel=None,
             infrared_angle_deg=None,
+            infrared_behind=False,
         )
 
     channel = _read_infrared_channel(robot)
+    if channel == -1:
+        infrared_filter.clear()
+        return BallCue(
+            ball=None,
+            infrared_channel=channel,
+            infrared_angle_deg=None,
+            infrared_behind=True,
+        )
     if channel is not None:
         angle = infrared_filter.update(channel)
         return BallCue(
             ball=None,
             infrared_channel=channel,
             infrared_angle_deg=angle,
+            infrared_behind=False,
         )
     infrared_filter.mark_missed()
     return None
@@ -189,6 +202,13 @@ def handle_defense(robot: Any, drive_cache: DriveCache) -> None:
 
 def handle_find_ball(robot: Any, drive_cache: DriveCache, cue: BallCue) -> None:
     if cue.ball is None:
+        if cue.infrared_behind:
+            drive_cache.drive(
+                robot,
+                speed_percent=IR_CHASE_SPEED_PERCENT,
+                move_angle_deg=180.0,
+            )
+            return
         if cue.infrared_angle_deg is None:
             drive_cache.stop(robot)
             return
@@ -253,6 +273,11 @@ def describe_defense_action() -> str:
 
 def describe_find_ball_action(cue: BallCue) -> str:
     if cue.ball is None:
+        if cue.infrared_behind:
+            return (
+                "infrared ch=-1 behind -> reverse search "
+                f"angle=180.0deg speed={IR_CHASE_SPEED_PERCENT}%"
+            )
         if cue.infrared_angle_deg is None:
             return "forced find-ball but no vision/infrared cue -> stop drive"
         return (
@@ -305,6 +330,8 @@ def _read_infrared_channel(robot: Any) -> Optional[int]:
         return None
 
     if channel not in IR_CHANNEL_TO_MOVE_ANGLE_DEG:
+        if channel == -1:
+            return channel
         return None
     return channel
 

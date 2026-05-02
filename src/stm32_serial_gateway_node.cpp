@@ -946,7 +946,7 @@ std::optional<ParsedReply> parseReplyLine(const std::string &line)
         return std::nullopt;
       }
       const auto channel = parseIntegerToken(value_text);
-      if (channel.has_value() && *channel >= 1 && *channel <= 7)
+      if (channel.has_value() && (*channel == -1 || (*channel >= 1 && *channel <= 7)))
       {
         reply.command_text = reply.command_name;
         reply.status = ReplyStatus::Ok;

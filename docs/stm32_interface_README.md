@@ -9,6 +9,7 @@ STM32F407 底盘驱动工程，用于 RCJ 机器人底盘控制。工程基于 S
 - 姿态：BNO085 通过 I2C1 读取 yaw 和 gyro z，用于航向保持和里程计更新。
 - 红外复眼：BE-1732 通过 I2C2 读取 7 路红外光强方向。
 - 电机通信：CAN1 控制底盘电机和功能电机。
+- 踢球电机：CAN ID 5，复用 CAN 电机驱动，支持串口设置速度和方向。
 - 吸力电机：TIM4_CH1 输出 PWM，支持 0-100% 速度设置。
 - 吸球检测：PB15/xqwd 输入微动开关，支持串口查询是否吸到球。
 - 继电器：PD0/JD1 输出控制，支持串口开关。
@@ -29,6 +30,7 @@ STM32F407 底盘驱动工程，用于 RCJ 机器人底盘控制。工程基于 S
 │   ├── Inc/
 │   └── Src/
 │       ├── bsp_motor.c           # CAN 电机反馈和电流发送
+│       ├── bsp_kick_motor.c      # CAN ID 5 踢球电机速度控制
 │       ├── bsp_chassis.c         # 底盘运动学、PID、角度保持
 │       ├── bsp_chassis_odom.c    # 里程计估计和目标点控制
 │       ├── bsp_bno085.c          # BNO085 初始化、报文读取、yaw 计算
@@ -51,7 +53,7 @@ STM32F407 底盘驱动工程，用于 RCJ 机器人底盘控制。工程基于 S
 ├── CMakeLists.txt                # 工程顶层 CMake 配置
 ├── CMakePresets.json             # Debug/Release 构建预设
 ├── RCJchassisdiver.ioc           # STM32CubeMX 工程配置
-├── STM32F407XX_FLASH.ld          # 链接脚本
+├── STM32F407XX_FLASH.ld          # 链接脚本，保留最后 128K Flash sector 存放运行参数
 └── startup_stm32f407xx.s         # 启动文件
 ```
 
@@ -60,15 +62,16 @@ STM32F407 底盘驱动工程，用于 RCJ 机器人底盘控制。工程基于 S
 `Core/Src/main.c` 完成 HAL、系统时钟、GPIO、CAN、USART、I2C、TIM 初始化后，依次初始化：
 
 1. `BspMotor_Init()`：启动 CAN 电机通信。
-2. `BspSuctionMotor_Init()`：启动吸力电机 PWM。
-3. `BspSuctionDetect_Init()`：初始化吸球检测 BSP。
-4. `BspBe1732_Init()`：初始化 BE-1732 红外复眼，默认进入调制检测模式。
-5. `BspDct_Init()`：关闭 PD0/JD1 继电器输出。
-6. `AppChassisTask_Init()`：初始化底盘任务状态机。
-7. `AppPiComm_Init()`：启动 USART6 中断接收。
-8. `Bno085_Init()` 和 `Bno085_EnableDefaultReports()`：初始化 IMU 并开启默认报告。
+2. `BspKickMotor_Init()`：初始化 CAN ID 5 踢球电机速度控制。
+3. `BspSuctionMotor_Init()`：启动吸力电机 PWM。
+4. `BspSuctionDetect_Init()`：初始化吸球检测 BSP。
+5. `BspBe1732_Init()`：初始化 BE-1732 红外复眼，默认进入调制检测模式。
+6. `BspDct_Init()`：关闭 PD0/JD1 继电器输出。
+7. `AppChassisTask_Init()`：初始化底盘任务状态机。
+8. `AppPiComm_Init()`：启动 USART6 中断接收。
+9. `Bno085_Init()` 和 `Bno085_EnableDefaultReports()`：初始化 IMU 并开启默认报告。
 
-主循环中持续处理串口命令、读取 BNO085 数据、处理 BNO_KEY 短按/长按、更新底盘任务，并执行吸力电机测试任务。
+主循环中持续处理串口命令、读取 BNO085 数据、处理 BNO_KEY 短按/长按、更新底盘任务和踢球电机速度环，并执行吸力电机测试任务。
 
 ## 外设连接
 
@@ -150,7 +153,7 @@ openocd -f interface/stlink.cfg -f target/stm32f4x.cfg \
 
 说明：
 
-- `payload` 是实际命令内容，例如 `cmd_dis 10 0 1`。
+- `payload` 是实际命令内容，例如 `cmd_dis 10 0`。
 - `*` 后面是 4 位大写十六进制 CRC。
 - CRC 算法为 CRC16-CCITT，初值 `0xFFFF`，多项式 `0x1021`，无最终异或。
 - CRC 只计算 `payload`，不包含 ` *CRC`、`\r`、`\n`。
@@ -186,23 +189,20 @@ uint16_t crc16_ccitt(const uint8_t *data, uint16_t size)
 
 ### `cmd_dis`
 
-控制底盘按世界系里程计坐标做相对位移，单位为 cm。执行过程中保持当前 yaw。
-该世界系为场地固定轴：`x_cm > 0` 为地图上边，也就是 ROS map `+y`；
-`y_cm > 0` 为地图左边，也就是 ROS map `-x`。
+控制底盘按当前里程计坐标做相对位移，单位为 cm。执行过程中保持当前 yaw。
 
 ```text
-cmd_dis <x_cm> <y_cm> <speed_profile> *<CRC16>
+cmd_dis <x_cm> <y_cm> [speed_profile] *<CRC16>
 ```
 
 示例：
 
 ```text
-cmd_dis 10 0 1 *F493
-cmd_dis 10 0 0 *E4B2
+cmd_dis 10 0 *B37E
+cmd_dis 10 0 0 *....
 ```
 
-含义：向世界系 x 正方向，也就是地图上方，移动 10 cm；y 方向不变。上层封装
-默认发送 `speed_profile=1`，不再生成两参数 `cmd_dis`。
+含义：向里程计 x 方向移动 10 cm，y 方向不变。`speed_profile` 可省略，默认 `1`。
 
 速度曲线档位：
 
@@ -213,16 +213,16 @@ cmd_dis 10 0 0 *E4B2
 可能回复：
 
 ```text
-cmd_dis ok 10 0 1 *....
-cmd_dis busy 10 0 1 *....
-cmd_dis done 10 0 1 *....
+cmd_dis ok 10 0 *....
+cmd_dis ok 10 0 0 *....
+cmd_dis busy 10 0 *....
+cmd_dis done 10 0 *....
 err arg *....
 ```
 
 ### `cmd_turn`
 
-控制底盘转到绝对目标 yaw 角，单位为度。`0 deg` 为地图上方，`90 deg` 为地图
-左方，`-90 deg` 为地图右方。目标角会被归一化到 0-360 度。
+控制底盘转到绝对目标 yaw 角，单位为度。目标角会被归一化到 0-360 度。
 
 ```text
 cmd_turn <target_yaw_deg> *<CRC16>
@@ -245,7 +245,7 @@ err arg *....
 
 ### `cmd_dkmotor`
 
-进入底盘持续速度控制模式。该模式不做加减速规划，只使用轮速闭环；需要停止时发送速度 `0`。
+进入底盘持续速度控制模式。该模式不做加减速规划，使用轮速闭环和车头角度保持；需要停止时发送速度 `0`。
 
 ```text
 cmd_dkmotor <speed_percent> <move_angle_deg> [head_lock] *<CRC16>
@@ -255,7 +255,7 @@ cmd_dkmotor <speed_percent> <move_angle_deg> [head_lock] *<CRC16>
 
 - `speed_percent`：速度映射值，范围 `0-100`。当前 `100` 对应 `APP_CHASSIS_TASK_DKMOTOR_MAX_SPEED_MM_S`，默认 `650 mm/s`。
 - `move_angle_deg`：运动角度，单位度，`0` 为小车前方，`90` 为小车左方。
-- `head_lock`：锁头使能，可省略，默认 `1`。`1` 表示保持当前车头方向不变，按运动角度整体平移；`0` 表示先转到对应角度，再朝小车前方直行。
+- `head_lock`：锁头使能，可省略，默认 `1`。`1` 表示保持当前车头方向不变，按运动角度整体平移；`0` 表示先转到对应角度，再朝小车前方直行。两种模式都会使用角度环。
 
 示例：
 
@@ -314,6 +314,37 @@ cmd_suck 50 *5752
 ```text
 cmd_suck ok 50 *....
 cmd_suck busy 50 *....
+err arg *....
+```
+
+### `cmd_tqdj`
+
+设置踢球电机速度和方向。踢球电机使用 CAN ID 5，速度闭环由固件周期执行；速度为 `0` 时立即停止输出。
+
+```text
+cmd_tqdj <speed_percent> <direction> *<CRC16>
+```
+
+参数说明：
+
+- `speed_percent`：速度百分比，范围 `0-100`。当前 `100` 对应 `BSP_KICK_MOTOR_MAX_RPM`，默认 `5000 rpm`。
+- `direction`：方向，`0` 为正转，`1` 为反转。
+
+示例：
+
+```text
+cmd_tqdj 80 0 *....
+cmd_tqdj 80 1 *....
+cmd_tqdj 0 0 *....
+```
+
+可能回复：
+
+```text
+cmd_tqdj ok 80 0 *....
+cmd_tqdj ok 80 1 *....
+cmd_tqdj ok 0 0 *....
+cmd_tqdj busy 80 0 *....
 err arg *....
 ```
 
@@ -407,8 +438,8 @@ cmd_request <dx_cm> <dy_cm> <dyaw_deg> <yaw_deg> *<CRC16>
 
 字段说明：
 
-- `dx_cm`：距离上次查询的世界系 x 位移，单位 cm；正方向与 `cmd_dis x_cm` 相同，为地图上边。
-- `dy_cm`：距离上次查询的世界系 y 位移，单位 cm；正方向与 `cmd_dis y_cm` 相同，为地图左边。
+- `dx_cm`：距离上次查询的 x 位移，单位 cm。
+- `dy_cm`：距离上次查询的 y 位移，单位 cm。
 - `dyaw_deg`：距离上次查询的 yaw 变化，单位度。
 - `yaw_deg`：当前 yaw，单位度。
 
@@ -416,7 +447,7 @@ cmd_request <dx_cm> <dy_cm> <dyaw_deg> <yaw_deg> *<CRC16>
 
 ### `cmd_infred`
 
-查询 BE-1732 红外复眼当前模式下最强红外信号所在通道。命令无参数，返回值为 `1-7`。
+查询 BE-1732 红外复眼当前模式下最强红外信号所在通道。命令无参数，正常返回 `1-7`；最大光值连续 30 次 `<=4` 时返回 `-1`，表示未检测到可靠红外信号。
 
 ```text
 cmd_infred *8E0C
@@ -433,12 +464,48 @@ cmd_infred <channel> *<CRC16>
 ```text
 cmd_infred 1 *D98F
 cmd_infred 7 *B949
+cmd_infred -1 *<CRC16>
 ```
 
 如果 I2C 读取失败：
 
 ```text
 cmd_infred busy <status> <i2cerr> *<CRC16>
+```
+
+### `cmd_redzhi`
+
+查询 BE-1732 当前模式下的最大光值，对应手册命令 `9`。
+
+```text
+cmd_redzhi *58ED
+```
+
+回复格式：
+
+```text
+cmd_redzhi <value> *<CRC16>
+```
+
+### `cmd_xgred`
+
+修改无红外判断的最大光值比较阈值，默认值为 `4`。阈值会写入 STM32 内部 Flash 最后一个 sector，复位和断电后仍然生效。
+
+```text
+cmd_xgred <value> *<CRC16>
+cmd_xgred 6 *DCC5
+```
+
+成功回复：
+
+```text
+cmd_xgred ok <value> *<CRC16>
+```
+
+如果 Flash 写入失败：
+
+```text
+cmd_xgred busy <status> <flasherr> *<CRC16>
 ```
 
 ### `cmd_infred_mode`
