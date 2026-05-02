@@ -16,14 +16,16 @@ DEFENSE_LINE_CENTER_X_M = 0.0
 DEFENSE_LINE_Y_M = -0.65
 DEFENSE_LINE_HALF_LENGTH_M = 0.35
 
-VISION_TIMEOUT_SEC = 0.04
+# Defense should not wait on the slower camera path in the normal loop. A
+# zero timeout reads the latest published vision state only.
+VISION_TIMEOUT_SEC = 0.0
 MIN_BALL_CONFIDENCE = 0.5
 POSE_TIMEOUT_SEC = 0.2
 LOOP_SLEEP_SEC = 0.04
 INFRARED_WARN_PERIOD_SEC = 2.0
 
-DRIVE_RESEND_SEC = 0.14
-ANGLE_RESEND_DELTA_DEG = 5.0
+DRIVE_RESEND_SEC = 0.08
+ANGLE_RESEND_DELTA_DEG = 3.0
 
 VISION_TRACK_SPEED_PERCENT = 20
 IR_TRACK_MIN_SPEED_PERCENT = 12
@@ -36,10 +38,12 @@ NEUTRAL_TOLERANCE_M = 0.045
 
 IR_DEADBAND_DEG = 8.0
 IR_HISTORY_SIZE = 8
-IR_EWMA_ALPHA = 0.35
-IR_CLEAR_AFTER_MISSES = 3
+IR_EWMA_ALPHA = 0.6
+IR_RECENT_WEIGHT_POWER = 2.0
+IR_CLEAR_AFTER_MISSES = 2
 IR_STEP_MIN_M = 0.06
 IR_STEP_MAX_M = 0.20
+VISION_FAR_DISTANCE_M = 0.55
 _last_infrared_warn_time = 0.0
 
 # Tune this if the BE-1732 physical channel order is mounted differently.
@@ -77,6 +81,7 @@ class DefenseRuntime:
             history_size=IR_HISTORY_SIZE,
             ewma_alpha=IR_EWMA_ALPHA,
             clear_after_misses=IR_CLEAR_AFTER_MISSES,
+            recent_weight_power=IR_RECENT_WEIGHT_POWER,
         )
         self._robot = robot
         self._state: Optional[str] = None
@@ -137,10 +142,25 @@ def sense_defense_cue(
     robot: Any,
     infrared_filter: InfraredAngleFilter,
 ) -> DefenseCue:
-    ball = robot.find_ball(
-        timeout_sec=VISION_TIMEOUT_SEC,
-        min_confidence=MIN_BALL_CONFIDENCE,
-    )
+    channel = _read_infrared_channel(robot)
+    if channel is not None:
+        angle = infrared_filter.update(channel)
+        far_ball = _find_far_vision_ball(robot)
+        if far_ball is not None:
+            return DefenseCue(
+                ball=far_ball,
+                infrared_channel=channel,
+                infrared_angle_deg=angle,
+            )
+
+        return DefenseCue(
+            ball=None,
+            infrared_channel=channel,
+            infrared_angle_deg=angle,
+        )
+
+    infrared_filter.mark_missed()
+    ball = _find_vision_ball(robot)
     if ball is not None:
         return DefenseCue(
             ball=ball,
@@ -148,20 +168,10 @@ def sense_defense_cue(
             infrared_angle_deg=None,
         )
 
-    channel = _read_infrared_channel(robot)
-    if channel is None:
-        infrared_filter.mark_missed()
-        return DefenseCue(
-            ball=None,
-            infrared_channel=None,
-            infrared_angle_deg=None,
-        )
-
-    angle = infrared_filter.update(channel)
     return DefenseCue(
         ball=None,
-        infrared_channel=channel,
-        infrared_angle_deg=angle,
+        infrared_channel=None,
+        infrared_angle_deg=None,
     )
 
 
@@ -290,6 +300,24 @@ def _read_infrared_channel(robot: Any) -> Optional[int]:
     if channel not in IR_CHANNEL_TO_BEARING_DEG:
         return None
     return channel
+
+
+def _find_far_vision_ball(robot: Any) -> Optional[Any]:
+    ball = _find_vision_ball(robot)
+    if ball is None or _ball_distance_m(ball) < VISION_FAR_DISTANCE_M:
+        return None
+    return ball
+
+
+def _find_vision_ball(robot: Any) -> Optional[Any]:
+    return robot.find_ball(
+        timeout_sec=VISION_TIMEOUT_SEC,
+        min_confidence=MIN_BALL_CONFIDENCE,
+    )
+
+
+def _ball_distance_m(ball: Any) -> float:
+    return math.hypot(float(ball.base_x_m), float(ball.base_y_m))
 
 
 def _warn_infrared_read_skipped(robot: Any, error: Exception) -> None:

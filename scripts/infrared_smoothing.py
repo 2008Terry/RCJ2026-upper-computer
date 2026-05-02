@@ -12,11 +12,13 @@ class InfraredAngleFilter:
         history_size: int = 8,
         ewma_alpha: float = 0.35,
         clear_after_misses: int = 3,
+        recent_weight_power: float = 1.0,
     ) -> None:
         self._channel_to_angle_deg = dict(channel_to_angle_deg)
         self._samples: Deque[float] = deque(maxlen=max(1, int(history_size)))
         self._ewma_alpha = _clamp(float(ewma_alpha), 0.0, 1.0)
         self._clear_after_misses = max(1, int(clear_after_misses))
+        self._recent_weight_power = max(1.0, float(recent_weight_power))
         self._smoothed_angle_deg: Optional[float] = None
         self._miss_count = 0
 
@@ -52,7 +54,7 @@ class InfraredAngleFilter:
         weighted_sum = 0.0
         total_weight = 0.0
         for index, angle in enumerate(self._samples, start=1):
-            weight = float(index)
+            weight = float(index) ** self._recent_weight_power
             weighted_sum += angle * weight
             total_weight += weight
         if total_weight <= 0.0:

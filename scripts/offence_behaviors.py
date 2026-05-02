@@ -20,8 +20,11 @@ FIELD_X_MAX_M = 0.72
 FIELD_Y_MIN_M = -1.00
 FIELD_Y_MAX_M = 1.00
 
-VISION_TIMEOUT_SEC = 0.04
-MIN_BALL_CONFIDENCE = 0.5
+# Use the latest published vision state instead of waiting for a new frame each
+# loop. With timeout 0, robot.find_ball() keeps using the last positive vision
+# detection until the detector publishes an explicit negative detection.
+VISION_TIMEOUT_SEC = 0.0
+MIN_BALL_CONFIDENCE = 0.3
 POSE_TIMEOUT_SEC = 0.2
 LOOP_SLEEP_SEC = 0.04
 LOG_STATUS_PERIOD_SEC = 0.5
@@ -154,6 +157,8 @@ def sense_ball(
     robot: Any,
     infrared_filter: InfraredAngleFilter,
 ) -> Optional[BallCue]:
+    infrared_cue = _sense_infrared(robot, infrared_filter)
+
     ball = robot.find_ball(
         timeout_sec=VISION_TIMEOUT_SEC,
         min_confidence=MIN_BALL_CONFIDENCE,
@@ -166,6 +171,13 @@ def sense_ball(
             infrared_behind=False,
         )
 
+    return infrared_cue
+
+
+def _sense_infrared(
+    robot: Any,
+    infrared_filter: InfraredAngleFilter,
+) -> Optional[BallCue]:
     channel = _read_infrared_channel(robot)
     if channel == -1:
         infrared_filter.clear()
@@ -220,6 +232,14 @@ def handle_find_ball(robot: Any, drive_cache: DriveCache, cue: BallCue) -> None:
         return
 
     ball = cue.ball
+    if ball.base_x_m < 0.0:
+        drive_cache.drive(
+            robot,
+            speed_percent=IR_CHASE_SPEED_PERCENT,
+            move_angle_deg=ball.angle_deg,
+        )
+        return
+
     target_x_m = _clamp(ball.absolute_x_m, FIELD_X_MIN_M, FIELD_X_MAX_M)
     target_y_m = _clamp(
         ball.absolute_y_m - CHASE_BEHIND_OFFSET_M,
@@ -287,6 +307,12 @@ def describe_find_ball_action(cue: BallCue) -> str:
         )
 
     ball = cue.ball
+    if ball.base_x_m < 0.0:
+        return (
+            f"vision {_format_ball(ball)} -> ball behind robot, rear-side chase "
+            f"angle={ball.angle_deg:.1f}deg speed={IR_CHASE_SPEED_PERCENT}%"
+        )
+
     target_x_m = _clamp(ball.absolute_x_m, FIELD_X_MIN_M, FIELD_X_MAX_M)
     target_y_m = _clamp(
         ball.absolute_y_m - CHASE_BEHIND_OFFSET_M,
