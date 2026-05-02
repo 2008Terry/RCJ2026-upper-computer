@@ -13,7 +13,7 @@ from infrared_smoothing import InfraredAngleFilter
 # - attack direction is map +y, STM32 yaw 0 deg
 ATTACK_YAW_DEG = 0.0
 DEFENSE_POINT_X_M = 0.0
-DEFENSE_POINT_Y_M = -0.30
+DEFENSE_POINT_Y_M = -0.40
 
 FIELD_X_MIN_M = -0.72
 FIELD_X_MAX_M = 0.72
@@ -24,6 +24,8 @@ VISION_TIMEOUT_SEC = 0.04
 MIN_BALL_CONFIDENCE = 0.5
 POSE_TIMEOUT_SEC = 0.2
 LOOP_SLEEP_SEC = 0.04
+LOG_STATUS_PERIOD_SEC = 0.5
+INFRARED_WARN_PERIOD_SEC = 2.0
 DRIVE_RESEND_SEC = 0.16
 ANGLE_RESEND_DELTA_DEG = 6.0
 
@@ -35,9 +37,9 @@ KICK_DRIVE_SPEED_PERCENT = 20
 
 CHASE_BEHIND_OFFSET_M = 0.24
 CHASE_BEHIND_TOLERANCE_M = 0.08
-KICK_DISTANCE_M = 0.20
-KICK_ANGLE_DEG = 18.0
-KICK_SUCK_SPEED_PERCENT = 20
+KICK_DISTANCE_M = 0.30
+KICK_ANGLE_DEG = 30.0
+KICK_SUCK_SPEED_PERCENT = 15
 
 # Tune this if the BE-1732 physical channel order is mounted differently.
 IR_CHANNEL_TO_MOVE_ANGLE_DEG = {
@@ -52,6 +54,7 @@ IR_CHANNEL_TO_MOVE_ANGLE_DEG = {
 IR_HISTORY_SIZE = 8
 IR_EWMA_ALPHA = 0.35
 IR_CLEAR_AFTER_MISSES = 3
+_last_infrared_warn_time = 0.0
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,7 @@ class OffenceRuntime:
         )
         self._robot = robot
         self._state: Optional[str] = None
+        self._last_status_time = 0.0
 
     def report_state(self, state: str, detail: str = "") -> None:
         if state == self._state:
@@ -86,6 +90,13 @@ class OffenceRuntime:
         self._state = state
         suffix = f": {detail}" if detail else ""
         self._robot.get_logger().info(f"Offence state -> {state}{suffix}")
+
+    def report_decision(self, state: str, detail: str) -> None:
+        now = time.monotonic()
+        if now - self._last_status_time < LOG_STATUS_PERIOD_SEC:
+            return
+        self._last_status_time = now
+        self._robot.get_logger().info(f"Offence decision [{state}]: {detail}")
 
 
 class DriveCache:
@@ -232,6 +243,49 @@ def should_kick(ball: Any) -> bool:
     )
 
 
+def describe_defense_action() -> str:
+    return (
+        "no vision/infrared cue -> return to defense point "
+        f"target=({DEFENSE_POINT_X_M:.2f}, {DEFENSE_POINT_Y_M:.2f}) "
+        f"speed={DEFENSE_SPEED_PERCENT}% tol={DEFENSE_TOLERANCE_M:.2f}m"
+    )
+
+
+def describe_find_ball_action(cue: BallCue) -> str:
+    if cue.ball is None:
+        if cue.infrared_angle_deg is None:
+            return "forced find-ball but no vision/infrared cue -> stop drive"
+        return (
+            f"infrared ch={cue.infrared_channel} "
+            f"angle={cue.infrared_angle_deg:.1f}deg -> chase by IR "
+            f"speed={IR_CHASE_SPEED_PERCENT}%"
+        )
+
+    ball = cue.ball
+    target_x_m = _clamp(ball.absolute_x_m, FIELD_X_MIN_M, FIELD_X_MAX_M)
+    target_y_m = _clamp(
+        ball.absolute_y_m - CHASE_BEHIND_OFFSET_M,
+        FIELD_Y_MIN_M,
+        FIELD_Y_MAX_M,
+    )
+    return (
+        f"vision {_format_ball(ball)} -> chase behind ball "
+        f"target=({target_x_m:.2f}, {target_y_m:.2f}) "
+        f"speed={CHASE_SPEED_PERCENT}% tol={CHASE_BEHIND_TOLERANCE_M:.2f}m"
+    )
+
+
+def describe_kick_action(ball: Optional[Any] = None) -> str:
+    ball_detail = ""
+    if ball is not None:
+        ball_detail = f"{_format_ball(ball)} -> "
+    return (
+        f"{ball_detail}kick window met "
+        f"(base_x<= {KICK_DISTANCE_M:.2f}m, abs(angle)<= {KICK_ANGLE_DEG:.1f}deg) "
+        f"-> suck={KICK_SUCK_SPEED_PERCENT}% drive={KICK_DRIVE_SPEED_PERCENT}%"
+    )
+
+
 def safe_stop(robot: Any, drive_cache: DriveCache, suck_cache: SuckCache) -> None:
     for action in (
         lambda: drive_cache.stop(robot),
@@ -247,12 +301,22 @@ def _read_infrared_channel(robot: Any) -> Optional[int]:
     try:
         channel = robot.infrared_channel()
     except Exception as error:
-        robot.get_logger().warn(f"Infrared read skipped: {error}")
+        _warn_infrared_read_skipped(robot, error)
         return None
 
     if channel not in IR_CHANNEL_TO_MOVE_ANGLE_DEG:
         return None
     return channel
+
+
+def _warn_infrared_read_skipped(robot: Any, error: Exception) -> None:
+    global _last_infrared_warn_time
+
+    now = time.monotonic()
+    if now - _last_infrared_warn_time < INFRARED_WARN_PERIOD_SEC:
+        return
+    _last_infrared_warn_time = now
+    robot.get_logger().warn(f"Infrared read skipped: {error}")
 
 
 def _drive_towards_map_point(
@@ -287,3 +351,12 @@ def _normalize_angle_deg(angle_deg: float) -> float:
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
+
+
+def _format_ball(ball: Any) -> str:
+    return (
+        "ball "
+        f"abs=({ball.absolute_x_m:.2f}, {ball.absolute_y_m:.2f}) "
+        f"base_x={ball.base_x_m:.2f}m angle={ball.angle_deg:.1f}deg "
+        f"conf={ball.confidence:.2f}"
+    )

@@ -157,12 +157,16 @@ def run_task(robot: CompetitionRobot) -> None:
     # robot.motion_disable()
     # robot.suck_on(speed_percent=10)
     # robot.timer(duration_sec=5)
-    # robot.suck_off()
+    robot.suck_off()
+    while(1):
+        print(robot.infrared_channel())
+        robot.timer(duration_sec=0.5)
     # robot.set_relay(enabled=True)
     # robot.relay_on()
     # robot.timer(duration_sec=3)
     # robot.relay_off()
     # robot.timer(duration_sec=100)
+    # robot.turn(angle_deg=0)
     
 
     # Example task sequence. Coordinates are absolute map-frame meters.
@@ -260,25 +264,25 @@ def run_task(robot: CompetitionRobot) -> None:
     
     ### T4
     # robot.suck_off()
-    robot.motion_enable()
-    robot.suck_on(speed_percent=15)
-    robot.move(x_cm=10,y_cm=0,speed_profile=2)
-    robot.timer(duration_sec=3)
-    # robot.turn(angle_deg=90,timeout_sec=5)
-    # robot.turn(angle_deg=45)
-    # robot.turn(angle_deg=90)
-    # robot.turn(angle_deg=135)
-    robot.turn(angle_deg=180)
-    robot.timer(duration_sec=3)
-    # robot.suck_on(speed_percent=5
-    robot.suck_off()
-    robot.timer(duration_sec=0.5)
-    # robot.move(x_cm=-10,y_cm=0,speed_profile=2)
-    # robot.drive()
-    robot.relay_on()
-    robot.timer(duration_sec=3)
-    robot.relay_off()
-    robot.suck_off()
+    # robot.motion_enable()
+    # robot.suck_on(speed_percent=15)
+    # robot.move(x_cm=10,y_cm=0,speed_profile=2)
+    # robot.timer(duration_sec=3)
+    # # robot.turn(angle_deg=90,timeout_sec=5)
+    # # robot.turn(angle_deg=45)
+    # # robot.turn(angle_deg=90)
+    # # robot.turn(angle_deg=135)
+    # robot.turn(angle_deg=180)
+    # robot.timer(duration_sec=3)
+    # # robot.suck_on(speed_percent=5
+    # robot.suck_off()
+    # robot.timer(duration_sec=0.5)
+    # # robot.move(x_cm=-10,y_cm=0,speed_profile=2)
+    # # robot.drive()
+    # robot.relay_on()
+    # robot.timer(duration_sec=3)
+    # robot.relay_off()
+    # robot.suck_off()
     
     # for i in range(0,180):
     #     robot.drive(speed_percent=0, move_angle_deg=i, head_lock=False)

@@ -347,7 +347,7 @@ class GotoNavigator(Node):
             result_response = result_future.result()
             result = result_response.result
             if result.success:
-                self.get_logger().info(
+                self.get_logger().debug(
                     f"Motion command ok: {command} "
                     f"(status={result.status}, attempts={result.attempts})"
                 )

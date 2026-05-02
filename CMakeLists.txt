@@ -199,6 +199,7 @@ install(FILES
   "scripts/goto_point.py"
   "scripts/task_logic.py"
   "scripts/infrared_smoothing.py"
+  "scripts/keyboard_stop.py"
   "scripts/offence_logic.py"
   "scripts/offence_behaviors.py"
   "scripts/defense_logic.py"

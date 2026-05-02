@@ -20,6 +20,7 @@ VISION_TIMEOUT_SEC = 0.04
 MIN_BALL_CONFIDENCE = 0.5
 POSE_TIMEOUT_SEC = 0.2
 LOOP_SLEEP_SEC = 0.04
+INFRARED_WARN_PERIOD_SEC = 2.0
 
 DRIVE_RESEND_SEC = 0.14
 ANGLE_RESEND_DELTA_DEG = 5.0
@@ -39,6 +40,7 @@ IR_EWMA_ALPHA = 0.35
 IR_CLEAR_AFTER_MISSES = 3
 IR_STEP_MIN_M = 0.06
 IR_STEP_MAX_M = 0.20
+_last_infrared_warn_time = 0.0
 
 # Tune this if the BE-1732 physical channel order is mounted differently.
 IR_CHANNEL_TO_BEARING_DEG = {
@@ -282,12 +284,22 @@ def _read_infrared_channel(robot: Any) -> Optional[int]:
     try:
         channel = robot.infrared_channel()
     except Exception as error:
-        robot.get_logger().warn(f"Infrared read skipped: {error}")
+        _warn_infrared_read_skipped(robot, error)
         return None
 
     if channel not in IR_CHANNEL_TO_BEARING_DEG:
         return None
     return channel
+
+
+def _warn_infrared_read_skipped(robot: Any, error: Exception) -> None:
+    global _last_infrared_warn_time
+
+    now = time.monotonic()
+    if now - _last_infrared_warn_time < INFRARED_WARN_PERIOD_SEC:
+        return
+    _last_infrared_warn_time = now
+    robot.get_logger().warn(f"Infrared read skipped: {error}")
 
 
 def _scale_ir_step(abs_angle_deg: float) -> float:

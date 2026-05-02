@@ -14,6 +14,7 @@ from defense_behaviors import (
     safe_stop,
     sense_defense_cue,
 )
+from keyboard_stop import KeyboardStop
 
 
 STATE_VISION_TRACK = "VISION_TRACK"
@@ -29,35 +30,39 @@ def run_task(robot: Any) -> None:
     prepare_defense(robot)
 
     try:
-        while rclpy.ok():
-            cue = sense_defense_cue(robot, runtime.infrared)
+        with KeyboardStop(robot.get_logger(), "Defense") as keyboard_stop:
+            while rclpy.ok():
+                if keyboard_stop.should_stop():
+                    break
 
-            if cue.ball is not None:
-                runtime.report_state(
-                    STATE_VISION_TRACK,
-                    f"ball_x={cue.ball.absolute_x_m:.3f}",
-                )
-                handle_vision_defense(robot, runtime.drive, cue.ball)
-            elif cue.infrared_angle_deg is not None:
-                runtime.report_state(
-                    STATE_INFRARED_TRACK,
-                    (
-                        f"channel={cue.infrared_channel}, "
-                        f"angle={cue.infrared_angle_deg:.1f}"
-                    ),
-                )
-                handle_infrared_defense(
-                    robot,
-                    runtime.drive,
-                    cue.infrared_angle_deg,
-                )
-            else:
-                reached = handle_neutral_defense(robot, runtime.drive)
-                if reached:
-                    runtime.report_state(STATE_HOLD_NEUTRAL)
+                cue = sense_defense_cue(robot, runtime.infrared)
+
+                if cue.ball is not None:
+                    runtime.report_state(
+                        STATE_VISION_TRACK,
+                        f"ball_x={cue.ball.absolute_x_m:.3f}",
+                    )
+                    handle_vision_defense(robot, runtime.drive, cue.ball)
+                elif cue.infrared_angle_deg is not None:
+                    runtime.report_state(
+                        STATE_INFRARED_TRACK,
+                        (
+                            f"channel={cue.infrared_channel}, "
+                            f"angle={cue.infrared_angle_deg:.1f}"
+                        ),
+                    )
+                    handle_infrared_defense(
+                        robot,
+                        runtime.drive,
+                        cue.infrared_angle_deg,
+                    )
                 else:
-                    runtime.report_state(STATE_RETURN_NEUTRAL)
+                    reached = handle_neutral_defense(robot, runtime.drive)
+                    if reached:
+                        runtime.report_state(STATE_HOLD_NEUTRAL)
+                    else:
+                        runtime.report_state(STATE_RETURN_NEUTRAL)
 
-            robot.timer(duration_sec=LOOP_SLEEP_SEC)
+                robot.timer(duration_sec=LOOP_SLEEP_SEC)
     finally:
         safe_stop(robot, runtime.drive)

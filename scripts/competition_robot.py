@@ -912,7 +912,7 @@ class CompetitionRobot(GotoNavigator):
 
         while rclpy.ok():
             self._wait_for_motion_server()
-            self.get_logger().info(
+            self.get_logger().debug(
                 f"STM32 motion attempt {attempt}: {command}"
             )
             try:
@@ -952,7 +952,7 @@ class CompetitionRobot(GotoNavigator):
                 self._sleep_with_spin(retry_delay)
                 continue
 
-            self.get_logger().info(f"STM32 command attempt {attempt}: {command}")
+            self.get_logger().debug(f"STM32 command attempt {attempt}: {command}")
             try:
                 response = self._send_command_once(
                     command, timeout_sec=command_timeout
@@ -963,7 +963,7 @@ class CompetitionRobot(GotoNavigator):
                     f"STM32 command attempt {attempt} raised: {command}; {error}"
                 )
             if response is not None and response.success:
-                self.get_logger().info(
+                self.get_logger().debug(
                     f"STM32 command ok: {command} "
                     f"(status={response.status}, attempts={response.attempts})"
                 )

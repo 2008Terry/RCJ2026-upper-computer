@@ -7,6 +7,7 @@ from typing import Optional
 import rclpy
 
 from competition_robot import CompetitionRobot
+from keyboard_stop import KeyboardInterruptStop
 from task_logic import run_task
 
 
@@ -16,7 +17,8 @@ def main(args: Optional[list[str]] = None) -> int:
     exit_code = 0
 
     try:
-        run_task(robot)
+        with KeyboardInterruptStop(robot.get_logger(), "Task"):
+            run_task(robot)
     except KeyboardInterrupt:
         robot.get_logger().warn("Task interrupted by user.")
         exit_code = 130

@@ -1,13 +1,93 @@
+import os
+import select
+import sys
+import termios
+import threading
+import tty
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, TimerAction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, RegisterEventHandler
+from launch.actions import TimerAction
 from launch.conditions import IfCondition
+from launch.event_handlers import OnShutdown
+from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
+_KEYBOARD_STOP_KEYS = ("q", "Q", "\x1b")
+_keyboard_terminal_fd = None
+_keyboard_terminal_settings = None
+_keyboard_listener_started = False
+
+
 def _is_mode(mode: str) -> PythonExpression:
     return PythonExpression(["'", LaunchConfiguration("mode"), "' == '", mode, "'"])
+
+
+def _start_keyboard_shutdown_listener(context):
+    global _keyboard_listener_started
+    global _keyboard_terminal_fd
+    global _keyboard_terminal_settings
+
+    if _keyboard_listener_started:
+        return []
+    _keyboard_listener_started = True
+
+    if sys.stdin is None or not sys.stdin.isatty():
+        print("[competition_one_key] Keyboard shutdown disabled: stdin is not a TTY.")
+        return []
+
+    _keyboard_terminal_fd = sys.stdin.fileno()
+    _keyboard_terminal_settings = termios.tcgetattr(_keyboard_terminal_fd)
+    tty.setcbreak(_keyboard_terminal_fd)
+    print("[competition_one_key] Press q or Esc to shutdown this launch.")
+
+    def _listen_for_stop_key():
+        try:
+            while True:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if not ready:
+                    continue
+
+                key = os.read(_keyboard_terminal_fd, 1).decode(errors="ignore")
+                if key in _KEYBOARD_STOP_KEYS:
+                    print("[competition_one_key] Keyboard shutdown requested.")
+                    context.emit_event_sync(
+                        Shutdown(reason="competition keyboard stop")
+                    )
+                    return
+        finally:
+            _restore_keyboard_terminal()
+
+    thread = threading.Thread(
+        target=_listen_for_stop_key,
+        name="competition_keyboard_shutdown",
+        daemon=True,
+    )
+    thread.start()
+    return []
+
+
+def _restore_keyboard_terminal():
+    global _keyboard_terminal_fd
+    global _keyboard_terminal_settings
+
+    if _keyboard_terminal_fd is None or _keyboard_terminal_settings is None:
+        return
+    termios.tcsetattr(
+        _keyboard_terminal_fd,
+        termios.TCSADRAIN,
+        _keyboard_terminal_settings,
+    )
+    _keyboard_terminal_fd = None
+    _keyboard_terminal_settings = None
+
+
+def _on_launch_shutdown(event, context):
+    _restore_keyboard_terminal()
+    return []
 
 
 def generate_launch_description():
@@ -31,6 +111,8 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            OpaqueFunction(function=_start_keyboard_shutdown_listener),
+            RegisterEventHandler(OnShutdown(on_shutdown=_on_launch_shutdown)),
             DeclareLaunchArgument(
                 "mode",
                 default_value="offence",
