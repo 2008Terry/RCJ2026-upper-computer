@@ -154,7 +154,7 @@ if TYPE_CHECKING:
 def run_task(robot: CompetitionRobot) -> None:
     """Edit this function to write the competition task sequence."""
     # robot.reset_yaw()
-    # robot.motion_enable()
+    # robot.motion_disable()
     # robot.suck_on(speed_percent=10)
     # robot.timer(duration_sec=5)
     # robot.suck_off()
@@ -201,53 +201,90 @@ def run_task(robot: CompetitionRobot) -> None:
     
     
     
-    ### successfully catched the ball and shoot
-    ball = robot.find_ball(timeout_sec=5.0, min_confidence=0.5)
-    if ball is None:
-        ball = robot.spin_find_ball(
-            step_deg=20.0,
-            direction=1,
-            max_turn_deg=360.0,
-            min_confidence=0.5,
-            settle_sec=0.2,
-            confirm_settle_sec=0.5,
-            confirm_timeout_sec=1.0,
-        )
-    if ball is not None:
-        robot.turn(angle_deg=ball.absolute_angle_deg)
-        robot.goto_ball_standoff(ball, stand_off_m=0.30,goal_tolerance_m=0.08)
+    ### successfully catched the ball and shoot (T2)
+    # ball = robot.find_ball(timeout_sec=5.0, min_confidence=0.5)
+    # if ball is None:
+    #     ball = robot.spin_find_ball(
+    #         step_deg=20.0,
+    #         direction=1,
+    #         max_turn_deg=360.0,
+    #         min_confidence=0.5,
+    #         settle_sec=0.2,
+    #         confirm_settle_sec=0.5,
+    #         confirm_timeout_sec=1.0,
+    #     )
+    # if ball is not None:
+    #     robot.turn(angle_deg=ball.absolute_angle_deg)
+    #     robot.goto_ball_standoff(ball, stand_off_m=0.30,goal_tolerance_m=0.08)
         
-        robot.suck_on(speed_percent=15)
-        robot.reset_ball_sucked_detector(required_detected_count=5, sample_interval_sec=0.2)
-        while(1):
-            ball = robot.find_ball(timeout_sec=0.1)
-            if ball is not None:
-                robot.drive(speed_percent=10, move_angle_deg=ball.absolute_angle_deg, head_lock=False)
-            else:
-                print("Ball not found")
-            if robot.poll_ball_sucked(stop_on_success=True):
-                break
+    #     robot.suck_on(speed_percent=15)
+    #     robot.reset_ball_sucked_detector(required_detected_count=5, sample_interval_sec=0.2)
+    #     while(1):
+    #         ball = robot.find_ball(timeout_sec=0.1)
+    #         if ball is not None:
+    #             robot.drive(speed_percent=10, move_angle_deg=ball.absolute_angle_deg, head_lock=False)
+    #         else:
+    #             print("Ball not found")
+    #         if robot.poll_ball_sucked(stop_on_success=True):
+    #             break
             
+    #     print("donedonedonedonedonedonedonedonedonedonedonedonedonedonedonedonedone")
+    #     robot.turn_to_point(x_m=-0.4, y_m=-0.60)
+    #     robot.goto(x_m=-0.4, y_m=-0.6,speed_profile=2,goal_tolerance_m=0.08)
+    #     # robot.turn_to_point(x_m=-0.4, y_m=-0.60)
+    #     robot.turn(angle_deg=0)
+    #     robot.goto(x_m=-0.5, y_m=-0.0,speed_profile=2,goal_tolerance_m=0.08)
+    #     # robot.turn_to_point(x_m=-0.4, y_m=-0.60)
+    #     robot.goto(x_m=-0.4, y_m=0.4,speed_profile=2,goal_tolerance_m=0.08)
+    #     # robot.suck_off()
+    #     robot.turn(angle_deg=-45)
+    #     robot.suck_on(speed_percent=10)
+    #     robot.timer(duration_sec=3.0)
+    #     robot.relay_on()
+    #     robot.timer(duration_sec=3.0)
+    #     robot.relay_off()
+    #     robot.suck_off()
             
-        print("donedonedonedonedonedonedonedonedonedonedonedonedonedonedonedonedone")
-        robot.turn_to_point(x_m=-0.4, y_m=-0.60)
-        robot.goto(x_m=-0.4, y_m=-0.6,speed_profile=2,goal_tolerance_m=0.08)
-        # robot.turn_to_point(x_m=-0.4, y_m=-0.60)
-        robot.turn(angle_deg=0)
-        robot.goto(x_m=-0.5, y_m=-0.0,speed_profile=2,goal_tolerance_m=0.08)
-        # robot.turn_to_point(x_m=-0.4, y_m=-0.60)
-        robot.goto(x_m=-0.4, y_m=0.4,speed_profile=2,goal_tolerance_m=0.08)
-        # robot.suck_off()
-        robot.turn(angle_deg=-45)
-        robot.suck_on(speed_percent=10)
-        robot.timer(duration_sec=3.0)
-        robot.relay_on()
-        robot.timer(duration_sec=3.0)
-        robot.relay_off()
-        robot.suck_off()
-            
-    else:
-        print("Ball not found")
+    # else:
+    #     print("Ball not found")
+    
+    
+    ### T3
+    # robot.suck_on(speed_percent=10)
+    # robot.timer(duration_sec=5)
+    # robot.relay_on()
+    # robot.timer(duration_sec=3)
+    # robot.relay_off()
+    # robot.suck_off()
+    
+    
+    ### T4
+    # robot.suck_off()
+    robot.motion_enable()
+    robot.suck_on(speed_percent=15)
+    robot.move(x_cm=10,y_cm=0,speed_profile=2)
+    robot.timer(duration_sec=3)
+    # robot.turn(angle_deg=90,timeout_sec=5)
+    # robot.turn(angle_deg=45)
+    # robot.turn(angle_deg=90)
+    # robot.turn(angle_deg=135)
+    robot.turn(angle_deg=180)
+    robot.timer(duration_sec=3)
+    # robot.suck_on(speed_percent=5
+    robot.suck_off()
+    robot.timer(duration_sec=0.5)
+    # robot.move(x_cm=-10,y_cm=0,speed_profile=2)
+    # robot.drive()
+    robot.relay_on()
+    robot.timer(duration_sec=3)
+    robot.relay_off()
+    robot.suck_off()
+    
+    # for i in range(0,180):
+    #     robot.drive(speed_percent=0, move_angle_deg=i, head_lock=False)
+    #     robot.timer(duration_sec=0.01)
+    
+    
     
     
     

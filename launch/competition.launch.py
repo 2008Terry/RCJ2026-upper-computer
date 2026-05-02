@@ -106,7 +106,7 @@ def generate_launch_description():
             DeclareLaunchArgument("lost_frame_tolerance", default_value="3"),
             DeclareLaunchArgument("ema_alpha", default_value="0.5"),
             DeclareLaunchArgument("force_search_mode", default_value="false"),
-            DeclareLaunchArgument("orange_enable_timing_log", default_value="true"),
+            DeclareLaunchArgument("orange_enable_timing_log", default_value="false"),
             DeclareLaunchArgument("orange_timing_log_interval", default_value="30"),
             DeclareLaunchArgument("publish_processing_time", default_value="true"),
             DeclareLaunchArgument(

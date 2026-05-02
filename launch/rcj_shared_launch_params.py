@@ -20,30 +20,30 @@ CAMERA_NODE_DEFAULTS = {
 }
 
 
-# HSV_GREEN_WHITE_BLACK_DEFAULTS = {
-#     "white_h_min": "0",
-#     "white_h_max": "179",
-#     "white_s_max": "208",
-#     "white_v_min": "160",
-#     "black_v_max": "45",
-#     "green_h_min": "35",
-#     "green_h_max": "100",
-#     "green_s_min": "160",
-#     "green_v_min": "120",
-# }
-
-
 HSV_GREEN_WHITE_BLACK_DEFAULTS = {
     "white_h_min": "0",
     "white_h_max": "179",
-    "white_s_max": "153",
-    "white_v_min": "118",
+    "white_s_max": "208",
+    "white_v_min": "160",
     "black_v_max": "45",
     "green_h_min": "35",
     "green_h_max": "100",
-    "green_s_min": "166",
-    "green_v_min": "67",
+    "green_s_min": "160",
+    "green_v_min": "120",
 }
+
+
+# HSV_GREEN_WHITE_BLACK_DEFAULTS = {
+#     "white_h_min": "0",
+#     "white_h_max": "179",
+#     "white_s_max": "153",
+#     "white_v_min": "118",
+#     "black_v_max": "45",
+#     "green_h_min": "35",
+#     "green_h_max": "100",
+#     "green_s_min": "166",
+#     "green_v_min": "67",
+# }
 
 
 REMAP_DEFAULTS = {
