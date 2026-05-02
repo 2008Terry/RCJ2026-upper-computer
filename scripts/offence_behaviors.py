@@ -156,8 +156,14 @@ class SuckCache:
 def sense_ball(
     robot: Any,
     infrared_filter: InfraredAngleFilter,
+    *,
+    use_infrared: bool = True,
 ) -> Optional[BallCue]:
-    infrared_cue = _sense_infrared(robot, infrared_filter)
+    infrared_cue = None
+    if use_infrared:
+        infrared_cue = _sense_infrared(robot, infrared_filter)
+    else:
+        infrared_filter.clear()
 
     ball = robot.find_ball(
         timeout_sec=VISION_TIMEOUT_SEC,
@@ -283,15 +289,20 @@ def should_kick(ball: Any) -> bool:
     )
 
 
-def describe_defense_action() -> str:
+def describe_defense_action(*, use_infrared: bool = True) -> str:
+    cue_text = "vision/infrared" if use_infrared else "vision"
     return (
-        "no vision/infrared cue -> return to defense point "
+        f"no {cue_text} cue -> return to defense point "
         f"target=({DEFENSE_POINT_X_M:.2f}, {DEFENSE_POINT_Y_M:.2f}) "
         f"speed={DEFENSE_SPEED_PERCENT}% tol={DEFENSE_TOLERANCE_M:.2f}m"
     )
 
 
-def describe_find_ball_action(cue: BallCue) -> str:
+def describe_find_ball_action(
+    cue: BallCue,
+    *,
+    use_infrared: bool = True,
+) -> str:
     if cue.ball is None:
         if cue.infrared_behind:
             return (
@@ -299,7 +310,8 @@ def describe_find_ball_action(cue: BallCue) -> str:
                 f"angle=180.0deg speed={IR_CHASE_SPEED_PERCENT}%"
             )
         if cue.infrared_angle_deg is None:
-            return "forced find-ball but no vision/infrared cue -> stop drive"
+            cue_text = "vision/infrared" if use_infrared else "vision"
+            return f"forced find-ball but no {cue_text} cue -> stop drive"
         return (
             f"infrared ch={cue.infrared_channel} "
             f"angle={cue.infrared_angle_deg:.1f}deg -> chase by IR "

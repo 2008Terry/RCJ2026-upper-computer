@@ -31,12 +31,16 @@ STATE_KICK_BALL = "KICK_BALL"
 # FORCE_STATE = STATE_KICK_BALL
 FORCE_STATE: Optional[str] = None
 
+# Set this to False when offence should find balls with vision only.
+USE_INFRARED_TO_FIND_BALL = False
+
 
 
 def run_task(robot: Any) -> None:
     """Run the offence state machine until ROS shuts down or Ctrl-C."""
 
     runtime = OffenceRuntime(robot)
+    use_infrared_to_find_ball = USE_INFRARED_TO_FIND_BALL
 
     robot.motion_enable()
     # robot.infrared_modulated_mode()
@@ -47,7 +51,8 @@ def run_task(robot: Any) -> None:
     force_state = FORCE_STATE if FORCE_STATE is not None else "auto"
     robot.get_logger().info(
         f"Offence task started: attack_yaw={ATTACK_YAW_DEG:.1f}deg "
-        f"mode={force_state} loop={LOOP_SLEEP_SEC:.2f}s"
+        f"mode={force_state} find_ir={'on' if use_infrared_to_find_ball else 'off'} "
+        f"loop={LOOP_SLEEP_SEC:.2f}s"
     )
 
     try:
@@ -57,15 +62,29 @@ def run_task(robot: Any) -> None:
                     break
 
                 if FORCE_STATE is not None:
-                    _run_forced_state(robot, runtime, FORCE_STATE)
+                    _run_forced_state(
+                        robot,
+                        runtime,
+                        FORCE_STATE,
+                        use_infrared=use_infrared_to_find_ball,
+                    )
                     robot.timer(duration_sec=LOOP_SLEEP_SEC)
                     continue
 
-                cue = sense_ball(robot, runtime.infrared)
+                cue = sense_ball(
+                    robot,
+                    runtime.infrared,
+                    use_infrared=use_infrared_to_find_ball,
+                )
 
                 if cue is None:
                     runtime.report_state(STATE_DEFENSE)
-                    runtime.report_decision(STATE_DEFENSE, describe_defense_action())
+                    runtime.report_decision(
+                        STATE_DEFENSE,
+                        describe_defense_action(
+                            use_infrared=use_infrared_to_find_ball,
+                        ),
+                    )
                     runtime.suck.set(robot, 0)
                     handle_defense(robot, runtime.drive)
                 elif cue.ball is not None and should_kick(cue.ball):
@@ -79,7 +98,10 @@ def run_task(robot: Any) -> None:
                     runtime.report_state(STATE_FIND_BALL, cue.source)
                     runtime.report_decision(
                         STATE_FIND_BALL,
-                        describe_find_ball_action(cue),
+                        describe_find_ball_action(
+                            cue,
+                            use_infrared=use_infrared_to_find_ball,
+                        ),
                     )
                     runtime.suck.set(robot, 0)
                     handle_find_ball(robot, runtime.drive, cue)
@@ -100,32 +122,44 @@ def _validate_force_state() -> None:
         )
 
 
-def _run_forced_state(robot: Any, runtime: OffenceRuntime, state: str) -> None:
+def _run_forced_state(
+    robot: Any,
+    runtime: OffenceRuntime,
+    state: str,
+    *,
+    use_infrared: bool,
+) -> None:
     if state == STATE_DEFENSE:
         runtime.report_state(STATE_DEFENSE, "forced")
         runtime.report_decision(
             STATE_DEFENSE,
-            f"forced state -> {describe_defense_action()}",
+            f"forced state -> {describe_defense_action(use_infrared=use_infrared)}",
         )
         runtime.suck.set(robot, 0)
         handle_defense(robot, runtime.drive)
         return
 
     if state == STATE_FIND_BALL:
-        cue = sense_ball(robot, runtime.infrared)
+        cue = sense_ball(
+            robot,
+            runtime.infrared,
+            use_infrared=use_infrared,
+        )
         detail = "forced"
         if cue is not None:
             detail = f"forced: {cue.source}"
         runtime.report_state(STATE_FIND_BALL, detail)
         if cue is None:
+            cue_text = "vision/infrared" if use_infrared else "vision"
             runtime.report_decision(
                 STATE_FIND_BALL,
-                "forced state -> no vision/infrared cue -> stop drive",
+                f"forced state -> no {cue_text} cue -> stop drive",
             )
         else:
             runtime.report_decision(
                 STATE_FIND_BALL,
-                f"forced state -> {describe_find_ball_action(cue)}",
+                "forced state -> "
+                f"{describe_find_ball_action(cue, use_infrared=use_infrared)}",
             )
         runtime.suck.set(robot, 0)
         if cue is None:
