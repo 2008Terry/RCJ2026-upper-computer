@@ -134,7 +134,7 @@ def generate_launch_description():
                 default_value="/white_line_hsv_white_node/white_mask",
             ),  # White mask topic
             DeclareLaunchArgument(
-                "apply_mask", default_value="true"
+                "apply_mask", default_value="false"
             ),  # Whether to enable remap-stage robot masking
             DeclareLaunchArgument(
                 "robot_mask_path", default_value=str(Path(get_package_share_directory("rcj_localization")) / "config" / "remapped_mask.png")

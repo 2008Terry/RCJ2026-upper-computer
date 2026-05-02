@@ -155,11 +155,14 @@ def run_task(robot: CompetitionRobot) -> None:
     """Edit this function to write the competition task sequence."""
     # robot.reset_yaw()
     # robot.motion_enable()
-    robot.suck_on(speed_percent=10)
-    robot.timer(duration_sec=10)
-    robot.suck_off()
+    # robot.suck_on(speed_percent=10)
+    # robot.timer(duration_sec=5)
+    # robot.suck_off()
     # robot.set_relay(enabled=True)
+    # robot.relay_on()
+    # robot.timer(duration_sec=3)
     # robot.relay_off()
+    # robot.timer(duration_sec=100)
     
 
     # Example task sequence. Coordinates are absolute map-frame meters.
@@ -199,40 +202,52 @@ def run_task(robot: CompetitionRobot) -> None:
     
     
     ### successfully catched the ball and shoot
-    # ball = robot.find_ball(timeout_sec=5.0, min_confidence=0.5)
-    # if ball is None:
-    #     ball = robot.spin_find_ball(
-    #         step_deg=20.0,
-    #         direction=1,
-    #         max_turn_deg=360.0,
-    #         min_confidence=0.5,
-    #         settle_sec=0.2,
-    #         confirm_settle_sec=0.5,
-    #         confirm_timeout_sec=1.0,
-    #     )
-    # if ball is not None:
-    #     robot.turn(angle_deg=ball.absolute_angle_deg)
-    #     robot.goto_ball_standoff(ball, stand_off_m=0.30)
+    ball = robot.find_ball(timeout_sec=5.0, min_confidence=0.5)
+    if ball is None:
+        ball = robot.spin_find_ball(
+            step_deg=20.0,
+            direction=1,
+            max_turn_deg=360.0,
+            min_confidence=0.5,
+            settle_sec=0.2,
+            confirm_settle_sec=0.5,
+            confirm_timeout_sec=1.0,
+        )
+    if ball is not None:
+        robot.turn(angle_deg=ball.absolute_angle_deg)
+        robot.goto_ball_standoff(ball, stand_off_m=0.30,goal_tolerance_m=0.08)
         
-    #     robot.suck_on(speed_percent=15)
-    #     robot.reset_ball_sucked_detector(required_detected_count=5, sample_interval_sec=0.2)
-    #     while(1):
-    #         ball = robot.find_ball(timeout_sec=0.1)
-    #         if ball is not None:
-    #             robot.drive(speed_percent=10, move_angle_deg=ball.absolute_angle_deg, head_lock=False)
-    #         else:
-    #             print("Ball not found")
-    #         if robot.poll_ball_sucked(stop_on_success=True):
-    #             break
+        robot.suck_on(speed_percent=15)
+        robot.reset_ball_sucked_detector(required_detected_count=5, sample_interval_sec=0.2)
+        while(1):
+            ball = robot.find_ball(timeout_sec=0.1)
+            if ball is not None:
+                robot.drive(speed_percent=10, move_angle_deg=ball.absolute_angle_deg, head_lock=False)
+            else:
+                print("Ball not found")
+            if robot.poll_ball_sucked(stop_on_success=True):
+                break
             
-    #     robot.turn_to_point(x_m=0.0, y_m=0.0)
-    #     robot.goto(x_m=0.0, y_m=0.0,speed_profile=2)
-    #     robot.suck_on(speed_percent=10)
-    #     robot.timer(duration_sec=3.0)
-    #     robot.relay_on()
             
-    # else:
-    #     print("Ball not found")
+        print("donedonedonedonedonedonedonedonedonedonedonedonedonedonedonedonedone")
+        robot.turn_to_point(x_m=-0.4, y_m=-0.60)
+        robot.goto(x_m=-0.4, y_m=-0.6,speed_profile=2,goal_tolerance_m=0.08)
+        # robot.turn_to_point(x_m=-0.4, y_m=-0.60)
+        robot.turn(angle_deg=0)
+        robot.goto(x_m=-0.5, y_m=-0.0,speed_profile=2,goal_tolerance_m=0.08)
+        # robot.turn_to_point(x_m=-0.4, y_m=-0.60)
+        robot.goto(x_m=-0.4, y_m=0.4,speed_profile=2,goal_tolerance_m=0.08)
+        # robot.suck_off()
+        robot.turn(angle_deg=-45)
+        robot.suck_on(speed_percent=10)
+        robot.timer(duration_sec=3.0)
+        robot.relay_on()
+        robot.timer(duration_sec=3.0)
+        robot.relay_off()
+        robot.suck_off()
+            
+    else:
+        print("Ball not found")
     
     
     
@@ -270,11 +285,25 @@ def run_task(robot: CompetitionRobot) -> None:
     
     
     ### walk points
-    robot.goto(x_m=-0.40, y_m=-0.60)
-    robot.turn(angle_deg=90)
-    robot.goto(x_m=0.40, y_m=-0.60)
-    robot.turn(angle_deg=0)
-    robot.goto(x_m=-0.40, y_m=0.60)
-    robot.turn(angle_deg=-90)
-    robot.goto(x_m=0.40, y_m=0.60)
-   
+    # robot.goto(x_m=-0.40, y_m=-0.60)
+    # robot.turn(angle_deg=90)
+    # robot.goto(x_m=0.40, y_m=-0.60)
+    # robot.turn(angle_deg=0)
+    # robot.goto(x_m=-0.40, y_m=0.60)
+    # # robot.turn(angle_deg=-90)
+    # robot.goto(x_m=0.40, y_m=0.60)
+    
+    
+    
+    # robot.goto(x_m=0.0, y_m=-0.315)
+    # robot.sleep(duration_sec=2)
+    # robot.goto(x_m=-0.30, y_m=0.0)
+    # robot.sleep(duration_sec=2)
+    # robot.goto(x_m=0.0, y_m=0.315)
+    # robot.sleep(duration_sec=2)
+    # robot.goto(x_m=0.20, y_m=0.0)
+    # robot.sleep(duration_sec=2)
+    # robot.goto(x_m=0.0, y_m=-0.315)
+    # robot.sleep(duration_sec=2)
+    # robot.goto(x_m=-0.40, y_m=-0.60)
+    
