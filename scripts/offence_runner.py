@@ -6,6 +6,7 @@ from typing import Optional
 
 import rclpy
 
+from competition_start_gate import wait_for_ready_and_start
 from competition_robot import CompetitionRobot
 from offence_logic import run_task
 
@@ -16,6 +17,7 @@ def main(args: Optional[list[str]] = None) -> int:
     exit_code = 0
 
     try:
+        wait_for_ready_and_start(robot, "Offence")
         run_task(robot)
     except KeyboardInterrupt:
         robot.get_logger().warn("Offence task interrupted by user.")

@@ -200,6 +200,7 @@ install(FILES
   "scripts/task_logic.py"
   "scripts/infrared_smoothing.py"
   "scripts/keyboard_stop.py"
+  "scripts/competition_start_gate.py"
   "scripts/offence_logic.py"
   "scripts/offence_behaviors.py"
   "scripts/defense_logic.py"

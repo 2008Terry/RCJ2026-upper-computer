@@ -140,6 +140,61 @@ class CompetitionRobot(GotoNavigator):
             f"yaw_zero_map_degrees={self.yaw_zero_map_degrees:.3f}"
         )
 
+    def wait_until_ready(self, *, require_pose: bool = True) -> None:
+        """Warm up ROS connections before the competition logic is released."""
+
+        self.get_logger().info(
+            f"Preflight: waiting for STM32 motion action '{self.motion_action_name}'."
+        )
+        self._wait_for_motion_server()
+        self.get_logger().info(
+            f"Preflight: STM32 motion action '{self.motion_action_name}' is ready."
+        )
+
+        self.get_logger().info(
+            f"Preflight: waiting for STM32 command service "
+            f"'{self.stm32_command_service}'."
+        )
+        while rclpy.ok():
+            if self._command_client.wait_for_service(
+                timeout_sec=self.command_service_wait_sec
+            ):
+                break
+            self.get_logger().warn(
+                f"Preflight: still waiting for STM32 command service "
+                f"'{self.stm32_command_service}'."
+            )
+            self._sleep_with_spin(self.command_retry_delay_sec)
+        if not rclpy.ok():
+            raise RuntimeError(
+                f"ROS shutdown while waiting for STM32 command service "
+                f"'{self.stm32_command_service}'."
+            )
+        self.get_logger().info(
+            f"Preflight: STM32 command service '{self.stm32_command_service}' "
+            "is ready."
+        )
+
+        if require_pose:
+            self.get_logger().info(
+                f"Preflight: waiting for pose on '{self.pose_topic}'."
+            )
+            while rclpy.ok():
+                try:
+                    self.wait_for_pose(timeout_sec=self.pose_wait_timeout_sec)
+                    break
+                except GotoError:
+                    self.get_logger().warn(
+                        f"Preflight: still waiting for pose on '{self.pose_topic}'."
+                    )
+            if not rclpy.ok():
+                raise RuntimeError(
+                    f"ROS shutdown while waiting for pose on '{self.pose_topic}'."
+                )
+            self.get_logger().info(
+                f"Preflight: pose on '{self.pose_topic}' is ready."
+            )
+
     def move(
         self,
         *,
