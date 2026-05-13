@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@
 #include <message_filters/subscriber.hpp>
 #include <message_filters/sync_policies/exact_time.hpp>
 #include <message_filters/synchronizer.hpp>
+#include <rcl_interfaces/msg/set_parameters_result.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 
@@ -28,14 +30,14 @@ namespace
   constexpr int kByteMax = 255;
   constexpr char kOverlayWindowName[] = "YOLO ROI Black Mask Overlay";
 
-  int clampHue(int value)
+  bool isHueInRange(int value)
   {
-    return std::clamp(value, 0, kHueMax);
+    return value >= 0 && value <= kHueMax;
   }
 
-  int clampByte(int value)
+  bool isByteInRange(int value)
   {
-    return std::clamp(value, 0, kByteMax);
+    return value >= 0 && value <= kByteMax;
   }
 
   cv::Mat thresholdBlackMask(
@@ -165,6 +167,12 @@ public:
       overlay_window_created_ = true;
     }
 
+    parameter_callback_handle_ = add_on_set_parameters_callback(
+        std::bind(
+            &YoloRoiBlackMaskNode::handleParameterUpdates,
+            this,
+            std::placeholders::_1));
+
     RCLCPP_INFO(
         get_logger(),
       "yolo_roi_black_mask started. input_topic='%s', roi_mask_topic='%s', "
@@ -195,16 +203,125 @@ public:
 private:
   void loadParameters()
   {
-    black_h_min_ = clampHue(static_cast<int>(get_parameter("black_h_min").as_int()));
-    black_h_max_ = clampHue(static_cast<int>(get_parameter("black_h_max").as_int()));
-    black_s_min_ = clampByte(static_cast<int>(get_parameter("black_s_min").as_int()));
-    black_s_max_ = clampByte(static_cast<int>(get_parameter("black_s_max").as_int()));
-    black_v_min_ = clampByte(static_cast<int>(get_parameter("black_v_min").as_int()));
-    black_v_max_ = clampByte(static_cast<int>(get_parameter("black_v_max").as_int()));
+    black_h_min_ = requireHueParameter("black_h_min");
+    black_h_max_ = requireHueParameter("black_h_max");
+    black_s_min_ = requireByteParameter("black_s_min");
+    black_s_max_ = requireByteParameter("black_s_max");
+    black_v_min_ = requireByteParameter("black_v_min");
+    black_v_max_ = requireByteParameter("black_v_max");
     sync_queue_size_ =
       std::max(1, static_cast<int>(get_parameter("sync_queue_size").as_int()));
     publish_debug_image_ = get_parameter("publish_debug_image").as_bool();
     enable_image_view_ = get_parameter("enable_image_view").as_bool();
+  }
+
+  int requireHueParameter(const char *name) const
+  {
+    const int value = static_cast<int>(get_parameter(name).as_int());
+    if (!isHueInRange(value))
+    {
+      throw std::runtime_error(
+          std::string("Parameter '") + name + "' must be between 0 and " +
+          std::to_string(kHueMax) + ".");
+    }
+    return value;
+  }
+
+  int requireByteParameter(const char *name) const
+  {
+    const int value = static_cast<int>(get_parameter(name).as_int());
+    if (!isByteInRange(value))
+    {
+      throw std::runtime_error(
+          std::string("Parameter '") + name + "' must be between 0 and " +
+          std::to_string(kByteMax) + ".");
+    }
+    return value;
+  }
+
+  rcl_interfaces::msg::SetParametersResult handleParameterUpdates(
+      const std::vector<rclcpp::Parameter> &parameters)
+  {
+    auto result = rcl_interfaces::msg::SetParametersResult();
+    result.successful = true;
+
+    int candidate_black_h_min = black_h_min_;
+    int candidate_black_h_max = black_h_max_;
+    int candidate_black_s_min = black_s_min_;
+    int candidate_black_s_max = black_s_max_;
+    int candidate_black_v_min = black_v_min_;
+    int candidate_black_v_max = black_v_max_;
+
+    for (const auto &parameter : parameters)
+    {
+      const auto &name = parameter.get_name();
+      if (name != "black_h_min" && name != "black_h_max" &&
+          name != "black_s_min" && name != "black_s_max" &&
+          name != "black_v_min" && name != "black_v_max")
+      {
+        continue;
+      }
+
+      if (parameter.get_type() != rclcpp::ParameterType::PARAMETER_INTEGER)
+      {
+        result.successful = false;
+        result.reason = "Black HSV parameters must be integers.";
+        return result;
+      }
+
+      const int value = static_cast<int>(parameter.as_int());
+      if ((name == "black_h_min" || name == "black_h_max") && !isHueInRange(value))
+      {
+        result.successful = false;
+        result.reason =
+            std::string("Parameter '") + name + "' must be between 0 and " +
+            std::to_string(kHueMax) + ".";
+        return result;
+      }
+      if ((name == "black_s_min" || name == "black_s_max" ||
+           name == "black_v_min" || name == "black_v_max") &&
+          !isByteInRange(value))
+      {
+        result.successful = false;
+        result.reason =
+            std::string("Parameter '") + name + "' must be between 0 and " +
+            std::to_string(kByteMax) + ".";
+        return result;
+      }
+
+      if (name == "black_h_min")
+      {
+        candidate_black_h_min = value;
+      }
+      else if (name == "black_h_max")
+      {
+        candidate_black_h_max = value;
+      }
+      else if (name == "black_s_min")
+      {
+        candidate_black_s_min = value;
+      }
+      else if (name == "black_s_max")
+      {
+        candidate_black_s_max = value;
+      }
+      else if (name == "black_v_min")
+      {
+        candidate_black_v_min = value;
+      }
+      else if (name == "black_v_max")
+      {
+        candidate_black_v_max = value;
+      }
+    }
+
+    black_h_min_ = candidate_black_h_min;
+    black_h_max_ = candidate_black_h_max;
+    black_s_min_ = candidate_black_s_min;
+    black_s_max_ = candidate_black_s_max;
+    black_v_min_ = candidate_black_v_min;
+    black_v_max_ = candidate_black_v_max;
+    return result;
   }
 
   void synchronizedCallback(
@@ -307,6 +424,8 @@ private:
   bool enable_image_view_ = false;
   bool overlay_window_created_ = false;
   bool logged_first_sync_ = false;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
+      parameter_callback_handle_;
 };
 
 int main(int argc, char **argv)
