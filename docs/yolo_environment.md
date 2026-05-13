@@ -141,6 +141,45 @@ only if needed:
 ros2 launch rcj_localization yolo_black_circle_debug.launch.py publish_roi_mask:=false
 ```
 
+## ROI-Gated Black Mask Validation
+
+Step 2 adds a sidecar HSV node that turns the remapped image plus the YOLO ROI
+into a separate ROI-gated black mask. It does not modify the existing white-line
+or AMCL pipeline yet.
+
+Run the combined step-1 plus step-2 debug launch with:
+
+```bash
+ros2 launch rcj_localization yolo_roi_black_mask_debug.launch.py \
+  model_path:=~/Downloads/train-6/weights/best.pt
+```
+
+The new node publishes:
+
+- `/yolo_roi_black_mask/black_mask` as `sensor_msgs/msg/Image`
+- `/yolo_roi_black_mask/debug/overlay_image` as `sensor_msgs/msg/Image`
+
+The black-mask output uses the matched remapped image header and is all zeros
+when the synced YOLO ROI is all zeros.
+
+Useful checks:
+
+```bash
+ros2 topic echo --once /yolo_roi_black_mask/black_mask/header
+ros2 topic hz /yolo_roi_black_mask/black_mask
+```
+
+Expected validation results for step 2:
+
+1. Single detection over a black feature: black pixels appear only inside the YOLO rectangle.
+2. Single detection over a non-black area: the output is mostly or completely zero.
+3. No detections: the output mask becomes all zeros.
+4. Outside-ROI guarantee: no black pixels appear outside `/yolo_black_circle_debug/roi_mask`.
+
+For visual inspection, compare `/yolo_roi_black_mask/black_mask`,
+`/yolo_roi_black_mask/debug/overlay_image`, and
+`/yolo_black_circle_debug/roi_mask` in RViz or `rqt_image_view`.
+
 ## Notes for the Future YOLO Black Circle Node
 
 - Keep model weights out of git; `*.pt` is ignored.

@@ -289,6 +289,18 @@ target_link_libraries(white_line_hsv_white_node
   ${OpenCV_LIBRARIES}
 )
 
+add_executable(yolo_roi_black_mask_node src/yolo_roi_black_mask_node.cpp)
+ament_target_dependencies(yolo_roi_black_mask_node
+  rclcpp
+  sensor_msgs
+  cv_bridge
+  message_filters
+)
+target_link_libraries(yolo_roi_black_mask_node
+  white_line_debug_utils
+  ${OpenCV_LIBRARIES}
+)
+
 add_executable(white_line_lab_cluster_node src/white_line_lab_cluster_node.cpp)
 ament_target_dependencies(white_line_lab_cluster_node
   rclcpp
@@ -421,6 +433,7 @@ install(TARGETS
   white_line_cluster_node
   white_line_hsv_cluster_node
   white_line_hsv_white_node
+  yolo_roi_black_mask_node
   white_line_lab_cluster_node
   white_line_dt_ridge_filter_node
   topdown_pf_localization_node_v2

@@ -539,6 +539,8 @@ class YoloBlackCircleDebugNode(Node):
         skipped_now = max(0, sequence - self.processed_sequence - 1)
         self.skipped_frames += skipped_now
         frame = self.latest_frame.copy()
+        frame_stamp = self.latest_stamp
+        frame_id = self.latest_frame_id
         recv_time = self.latest_recv_time
         self.processed_sequence = sequence
 
@@ -576,16 +578,16 @@ class YoloBlackCircleDebugNode(Node):
 
         if self.debug_publisher is not None:
             msg = self.bridge.cv2_to_imgmsg(frame, encoding="bgr8")
-            if self.latest_stamp is not None:
-                msg.header.stamp = self.latest_stamp
+            if frame_stamp is not None:
+                msg.header.stamp = frame_stamp
             msg.header.frame_id = "yolo_black_circle_debug"
             self.debug_publisher.publish(msg)
 
         if self.roi_mask_publisher is not None:
             msg = self.bridge.cv2_to_imgmsg(roi_mask, encoding="mono8")
-            if self.latest_stamp is not None:
-                msg.header.stamp = self.latest_stamp
-            msg.header.frame_id = self.latest_frame_id
+            if frame_stamp is not None:
+                msg.header.stamp = frame_stamp
+            msg.header.frame_id = frame_id
             self.roi_mask_publisher.publish(msg)
 
         if len(self.process_times) % self.log_interval == 0:
