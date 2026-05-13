@@ -87,6 +87,19 @@ processed FPS, model inference time, total frame time, skipped frames, detection
 maximum confidence. It does not require Qt or a graphical desktop session on the
 robot.
 
+The node now also publishes a ROS ROI mask for downstream integration:
+
+- `/yolo_black_circle_debug/roi_mask` as `sensor_msgs/msg/Image`
+- encoding: `mono8`
+- semantics: `255` inside the selected YOLO bounding box, `0` elsewhere
+
+Step 1 selection behavior is intentionally simple:
+
+- YOLO runs on the remapped top-down image
+- if multiple detections exist, the node uses the highest-confidence detection
+- if there are no detections, the ROI mask is all zeros
+- the node does not reuse stale detections from previous frames
+
 Use a different port when needed:
 
 ```bash
@@ -97,6 +110,36 @@ If `camera_ros` reports `no cameras available`, the YOLO node is fine; the
 camera is not visible to `camera_ros`. Check that the camera is connected/enabled
 and not already owned by another process, or run with `enable_camera:=false`
 when another node is already publishing `/camera/image_raw`.
+
+## ROI Mask Validation
+
+Run the launch file:
+
+```bash
+ros2 launch rcj_localization yolo_black_circle_debug.launch.py
+```
+
+Then validate the new ROI output with:
+
+```bash
+ros2 topic echo --once /yolo_black_circle_debug/roi_mask/header
+ros2 topic hz /yolo_black_circle_debug/roi_mask
+```
+
+For image inspection, either subscribe in RViz/rqt or republish the mask through
+your usual image-viewing workflow. The expected checks for step 1 are:
+
+1. Single detection: the web/debug image shows one box and the ROI mask contains one filled rectangle aligned to it.
+2. Multiple detections: only the highest-confidence box appears in the ROI mask.
+3. No detections: the ROI mask becomes all zeros.
+4. Consistency: the ROI mask resolution and header stamp match the remapped YOLO input frame.
+
+ROI publishing is enabled by default in the launch file. Disable it explicitly
+only if needed:
+
+```bash
+ros2 launch rcj_localization yolo_black_circle_debug.launch.py publish_roi_mask:=false
+```
 
 ## Notes for the Future YOLO Black Circle Node
 

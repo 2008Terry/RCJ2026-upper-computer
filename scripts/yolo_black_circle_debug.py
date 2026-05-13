@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import json
 import mimetypes
+import numpy as np
 import statistics
 import time
 from collections import deque
@@ -185,6 +186,35 @@ def resolve_model_path(model_path: str) -> Path:
     if path.is_dir():
         path = path / "weights" / "best.pt"
     return path
+
+
+def clamp_box_to_image(bounds, width: int, height: int):
+    if width <= 0 or height <= 0:
+        return None
+
+    x1, y1, x2, y2 = bounds
+    x1 = max(0, min(width, int(x1)))
+    y1 = max(0, min(height, int(y1)))
+    x2 = max(0, min(width, int(x2)))
+    y2 = max(0, min(height, int(y2)))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return (x1, y1, x2, y2)
+
+
+def build_roi_mask(frame_shape, detection):
+    height, width = frame_shape[:2]
+    roi_mask = np.zeros((height, width), dtype=np.uint8)
+    if detection is None:
+        return roi_mask
+
+    bounds = clamp_box_to_image(detection["bounds"], width, height)
+    if bounds is None:
+        return roi_mask
+
+    x1, y1, x2, y2 = bounds
+    roi_mask[y1:y2, x1:x2] = 255
+    return roi_mask
 
 
 def fps_from_times(times: deque[float]) -> float:
@@ -375,6 +405,8 @@ class YoloBlackCircleDebugNode(Node):
         self.declare_parameter("jpeg_quality", 85)
         self.declare_parameter("publish_debug_image", False)
         self.declare_parameter("debug_image_topic", "~/debug_image")
+        self.declare_parameter("publish_roi_mask", True)
+        self.declare_parameter("roi_mask_topic", "~/roi_mask")
         self.declare_parameter("log_interval", 30)
 
         self.input_topic = self.get_parameter("input_topic").value
@@ -387,6 +419,7 @@ class YoloBlackCircleDebugNode(Node):
         self.web_port = int(self.get_parameter("web_port").value)
         self.jpeg_quality = int(self.get_parameter("jpeg_quality").value)
         self.publish_debug_image = bool(self.get_parameter("publish_debug_image").value)
+        self.publish_roi_mask = bool(self.get_parameter("publish_roi_mask").value)
         self.log_interval = max(1, int(self.get_parameter("log_interval").value))
         max_processing_hz = float(self.get_parameter("max_processing_hz").value)
         self.jpeg_quality = min(100, max(1, self.jpeg_quality))
@@ -403,13 +436,23 @@ class YoloBlackCircleDebugNode(Node):
         self.model = YOLO(str(self.model_path))
         self.get_logger().info(f"Loaded model in {(time.perf_counter() - load_start) * 1000.0:.1f} ms")
         self.get_logger().info(
-            "Input topic=%s confidence=%.2f iou=%.2f imgsz=%d device=%s max_det=%d"
-            % (self.input_topic, self.confidence, self.iou, self.imgsz, self.device, self.max_det)
+            "Input topic=%s confidence=%.2f iou=%.2f imgsz=%d device=%s max_det=%d "
+            "publish_roi_mask=%s"
+            % (
+                self.input_topic,
+                self.confidence,
+                self.iou,
+                self.imgsz,
+                self.device,
+                self.max_det,
+                "true" if self.publish_roi_mask else "false",
+            )
         )
 
         self.bridge = CvBridge()
         self.latest_frame = None
         self.latest_stamp = None
+        self.latest_frame_id = ""
         self.latest_recv_time = 0.0
         self.latest_sequence = 0
         self.processed_sequence = 0
@@ -452,6 +495,15 @@ class YoloBlackCircleDebugNode(Node):
                 str(self.get_parameter("debug_image_topic").value),
                 10,
             )
+        self.roi_mask_publisher = None
+        if self.publish_roi_mask:
+            self.roi_mask_topic = str(self.get_parameter("roi_mask_topic").value)
+            self.roi_mask_publisher = self.create_publisher(
+                Image,
+                self.roi_mask_topic,
+                10,
+            )
+            self.get_logger().info(f"Publishing ROI mask on {self.roi_mask_topic}")
 
         timer_period = 0.001
         if max_processing_hz > 0.0:
@@ -468,6 +520,7 @@ class YoloBlackCircleDebugNode(Node):
         now = time.perf_counter()
         self.latest_frame = frame
         self.latest_stamp = msg.header.stamp
+        self.latest_frame_id = msg.header.frame_id
         self.latest_recv_time = now
         self.latest_sequence += 1
         self.rx_times.append(now)
@@ -503,6 +556,12 @@ class YoloBlackCircleDebugNode(Node):
         yolo_speed = getattr(result, "speed", {}) or {}
         infer_elapsed_ms = float(yolo_speed.get("inference", 0.0))
         detections = self.draw_detections(frame, result)
+        selected_detection = max(
+            detections,
+            key=lambda det: det["confidence"],
+            default=None,
+        )
+        roi_mask = build_roi_mask(frame.shape, selected_detection)
         total_elapsed_ms = (time.perf_counter() - total_start) * 1000.0
 
         now = time.perf_counter()
@@ -521,6 +580,13 @@ class YoloBlackCircleDebugNode(Node):
                 msg.header.stamp = self.latest_stamp
             msg.header.frame_id = "yolo_black_circle_debug"
             self.debug_publisher.publish(msg)
+
+        if self.roi_mask_publisher is not None:
+            msg = self.bridge.cv2_to_imgmsg(roi_mask, encoding="mono8")
+            if self.latest_stamp is not None:
+                msg.header.stamp = self.latest_stamp
+            msg.header.frame_id = self.latest_frame_id
+            self.roi_mask_publisher.publish(msg)
 
         if len(self.process_times) % self.log_interval == 0:
             self.log_stats(sequence, len(detections), max_conf, skipped_now)

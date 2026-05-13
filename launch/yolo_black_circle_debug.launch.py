@@ -143,6 +143,10 @@ def build_nodes(context):
                         LaunchConfiguration("publish_debug_image"), value_type=bool
                     ),
                     "debug_image_topic": LaunchConfiguration("debug_image_topic"),
+                    "publish_roi_mask": ParameterValue(
+                        LaunchConfiguration("publish_roi_mask"), value_type=bool
+                    ),
+                    "roi_mask_topic": LaunchConfiguration("roi_mask_topic"),
                     "log_interval": ParameterValue(
                         LaunchConfiguration("log_interval"), value_type=int
                     ),
@@ -203,6 +207,11 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "debug_image_topic",
                 default_value="/yolo_black_circle_debug/debug_image",
+            ),
+            DeclareLaunchArgument("publish_roi_mask", default_value="true"),
+            DeclareLaunchArgument(
+                "roi_mask_topic",
+                default_value="/yolo_black_circle_debug/roi_mask",
             ),
             DeclareLaunchArgument("log_interval", default_value="30"),
             OpaqueFunction(function=build_nodes),
