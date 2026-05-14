@@ -20,6 +20,232 @@ from rcj_shared_launch_params import (
 )
 
 
+def launch_config_as_bool(context, name):
+    return (
+        LaunchConfiguration(name).perform(context).strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+
+def build_amcl_fusion_node(context):
+    mask_topic = "/white_line_dt_ridge_filter_node/white_final_mask"
+    if launch_config_as_bool(context, "enable_yolo_black_amcl_mask"):
+        mask_topic = "/amcl_input_mask_merge_node/combined_mask"
+
+    return [
+        Node(
+            package="rcj_localization",
+            executable="amcl_fusion",
+            name="amcl_fusion",
+            output="screen",
+            condition=IfCondition(
+                LaunchConfiguration("enable_topdown_pf_localization_node_v2")
+            ),
+            parameters=[
+                {
+                    "mask_topic": mask_topic,
+                    "meters_per_pixel": ParameterValue(
+                        LaunchConfiguration("meters_per_pixel"), value_type=float
+                    ),
+                    "forward_axis": LaunchConfiguration("forward_axis"),
+                    "left_axis": LaunchConfiguration("left_axis"),
+                    "max_points": ParameterValue(
+                        LaunchConfiguration("max_points"), value_type=int
+                    ),
+                    "use_weighted_mean_pose": ParameterValue(
+                        LaunchConfiguration("use_weighted_mean_pose"),
+                        value_type=bool,
+                    ),
+                    "enable_localization": ParameterValue(
+                        LaunchConfiguration("enable_localization"), value_type=bool
+                    ),
+                    "publish_debug_pointcloud": ParameterValue(
+                        LaunchConfiguration("publish_debug_pointcloud"),
+                        value_type=bool,
+                    ),
+                    "debug_pointcloud_topic": LaunchConfiguration(
+                        "debug_pointcloud_topic"
+                    ),
+                    "publish_particle_weight_markers": ParameterValue(
+                        LaunchConfiguration("publish_particle_weight_markers"),
+                        value_type=bool,
+                    ),
+                    "particle_weight_marker_topic": LaunchConfiguration(
+                        "particle_weight_marker_topic"
+                    ),
+                    "particle_weight_marker_scale": ParameterValue(
+                        LaunchConfiguration("particle_weight_marker_scale"),
+                        value_type=float,
+                    ),
+                    "num_particles": ParameterValue(
+                        LaunchConfiguration("num_particles"), value_type=int
+                    ),
+                    "map_topic": LaunchConfiguration("map_topic"),
+                    "yaw_topic": LaunchConfiguration("yaw_topic"),
+                    "use_fake_yaw": ParameterValue(
+                        LaunchConfiguration("use_fake_yaw"), value_type=bool
+                    ),
+                    "fake_yaw_degrees": ParameterValue(
+                        LaunchConfiguration("fake_yaw_degrees"), value_type=float
+                    ),
+                    "yaw_zero_map_degrees": ParameterValue(
+                        LaunchConfiguration("yaw_zero_map_degrees"),
+                        value_type=float,
+                    ),
+                    "use_stm32_gateway_odometry": ParameterValue(
+                        LaunchConfiguration("use_stm32_gateway_odometry"),
+                        value_type=bool,
+                    ),
+                    "stm32_command_service": LaunchConfiguration(
+                        "stm32_command_service"
+                    ),
+                    "stm32_request_timeout_ms": ParameterValue(
+                        LaunchConfiguration("stm32_request_timeout_ms"),
+                        value_type=int,
+                    ),
+                    "stm32_enable_odometry_log": ParameterValue(
+                        LaunchConfiguration("stm32_enable_odometry_log"),
+                        value_type=bool,
+                    ),
+                    "use_stm32_request_theta": ParameterValue(
+                        LaunchConfiguration("use_stm32_request_theta"),
+                        value_type=bool,
+                    ),
+                    "enable_global_search": ParameterValue(
+                        LaunchConfiguration("enable_global_search"),
+                        value_type=bool,
+                    ),
+                    "global_search_random_ratio": ParameterValue(
+                        LaunchConfiguration("global_search_random_ratio"),
+                        value_type=float,
+                    ),
+                    "global_search_noise_xy": ParameterValue(
+                        LaunchConfiguration("global_search_noise_xy"),
+                        value_type=float,
+                    ),
+                    "global_search_noise_theta": ParameterValue(
+                        LaunchConfiguration("global_search_noise_theta"),
+                        value_type=float,
+                    ),
+                    "localized_xy_std_threshold": ParameterValue(
+                        LaunchConfiguration("localized_xy_std_threshold"),
+                        value_type=float,
+                    ),
+                    "localized_theta_std_threshold": ParameterValue(
+                        LaunchConfiguration("localized_theta_std_threshold"),
+                        value_type=float,
+                    ),
+                    "localized_min_updates": ParameterValue(
+                        LaunchConfiguration("localized_min_updates"), value_type=int
+                    ),
+                    "lost_alpha_ratio_threshold": ParameterValue(
+                        LaunchConfiguration("lost_alpha_ratio_threshold"),
+                        value_type=float,
+                    ),
+                    "lost_min_updates": ParameterValue(
+                        LaunchConfiguration("lost_min_updates"), value_type=int
+                    ),
+                    "sigma_hit": ParameterValue(
+                        LaunchConfiguration("sigma_hit"), value_type=float
+                    ),
+                    "noise_xy": ParameterValue(
+                        LaunchConfiguration("noise_xy"), value_type=float
+                    ),
+                    "noise_theta": ParameterValue(
+                        LaunchConfiguration("noise_theta"), value_type=float
+                    ),
+                    "alpha_fast_rate": ParameterValue(
+                        LaunchConfiguration("alpha_fast_rate"), value_type=float
+                    ),
+                    "alpha_slow_rate": ParameterValue(
+                        LaunchConfiguration("alpha_slow_rate"), value_type=float
+                    ),
+                    "random_injection_max_ratio": ParameterValue(
+                        LaunchConfiguration("random_injection_max_ratio"),
+                        value_type=float,
+                    ),
+                    "off_map_penalty": ParameterValue(
+                        LaunchConfiguration("off_map_penalty"), value_type=float
+                    ),
+                    "occupancy_threshold": ParameterValue(
+                        LaunchConfiguration("occupancy_threshold"), value_type=int
+                    ),
+                    "distance_transform_mask_size": ParameterValue(
+                        LaunchConfiguration("distance_transform_mask_size"),
+                        value_type=int,
+                    ),
+                    "init_field_width": ParameterValue(
+                        LaunchConfiguration("init_field_width"), value_type=float
+                    ),
+                    "init_field_height": ParameterValue(
+                        LaunchConfiguration("init_field_height"), value_type=float
+                    ),
+                    "odom_noise_x_from_x": ParameterValue(
+                        LaunchConfiguration("odom_noise_x_from_x"), value_type=float
+                    ),
+                    "odom_noise_x_from_y": ParameterValue(
+                        LaunchConfiguration("odom_noise_x_from_y"), value_type=float
+                    ),
+                    "odom_noise_x_from_theta": ParameterValue(
+                        LaunchConfiguration("odom_noise_x_from_theta"),
+                        value_type=float,
+                    ),
+                    "odom_noise_x_bias": ParameterValue(
+                        LaunchConfiguration("odom_noise_x_bias"), value_type=float
+                    ),
+                    "odom_noise_y_from_x": ParameterValue(
+                        LaunchConfiguration("odom_noise_y_from_x"), value_type=float
+                    ),
+                    "odom_noise_y_from_y": ParameterValue(
+                        LaunchConfiguration("odom_noise_y_from_y"), value_type=float
+                    ),
+                    "odom_noise_y_from_theta": ParameterValue(
+                        LaunchConfiguration("odom_noise_y_from_theta"),
+                        value_type=float,
+                    ),
+                    "odom_noise_y_bias": ParameterValue(
+                        LaunchConfiguration("odom_noise_y_bias"), value_type=float
+                    ),
+                    "odom_noise_theta_from_x": ParameterValue(
+                        LaunchConfiguration("odom_noise_theta_from_x"),
+                        value_type=float,
+                    ),
+                    "odom_noise_theta_from_y": ParameterValue(
+                        LaunchConfiguration("odom_noise_theta_from_y"),
+                        value_type=float,
+                    ),
+                    "odom_noise_theta_from_theta": ParameterValue(
+                        LaunchConfiguration("odom_noise_theta_from_theta"),
+                        value_type=float,
+                    ),
+                    "odom_noise_theta_bias": ParameterValue(
+                        LaunchConfiguration("odom_noise_theta_bias"),
+                        value_type=float,
+                    ),
+                    "filter_period_ms": ParameterValue(
+                        LaunchConfiguration("filter_period_ms"), value_type=int
+                    ),
+                    "publish_processing_time": ParameterValue(
+                        LaunchConfiguration("topdown_pf_publish_processing_time"),
+                        value_type=bool,
+                    ),
+                    "processing_time_topic": LaunchConfiguration(
+                        "topdown_pf_processing_time_topic"
+                    ),
+                    "enable_timing_log": ParameterValue(
+                        LaunchConfiguration("topdown_pf_enable_timing_log"),
+                        value_type=bool,
+                    ),
+                    "timing_log_interval": ParameterValue(
+                        LaunchConfiguration("topdown_pf_timing_log_interval"),
+                        value_type=int,
+                    ),
+                }
+            ],
+        )
+    ]
+
+
 def generate_launch_description():
     package_share = Path(get_package_share_directory("rcj_localization"))
     stm32_gateway_launch_file = (
@@ -118,6 +344,7 @@ def generate_launch_description():
     topdown_pf_timing_log_interval = LaunchConfiguration(
         "topdown_pf_timing_log_interval"
     )
+    enable_yolo_black_amcl_mask = LaunchConfiguration("enable_yolo_black_amcl_mask")
 
     return LaunchDescription(
         [
@@ -486,6 +713,49 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "topdown_pf_timing_log_interval", default_value="10"
             ),  # PF timing log frame interval
+            DeclareLaunchArgument(
+                "enable_yolo_black_amcl_mask", default_value="false"
+            ),  # Whether to merge YOLO black mask into the AMCL input mask
+            DeclareLaunchArgument(
+                "model_path",
+                default_value="~/Downloads/train-6/weights/best.pt",
+            ),  # YOLO model weights path for black-feature ROI detection
+            DeclareLaunchArgument("confidence", default_value="0.25"),  # YOLO confidence threshold
+            DeclareLaunchArgument("iou", default_value="0.45"),  # YOLO NMS IoU threshold
+            DeclareLaunchArgument("imgsz", default_value="320"),  # YOLO inference image size
+            DeclareLaunchArgument("device", default_value="cpu"),  # YOLO inference device
+            DeclareLaunchArgument("max_det", default_value="20"),  # YOLO max detections per frame
+            DeclareLaunchArgument(
+                "max_processing_hz", default_value="30.0"
+            ),  # YOLO max processing frequency
+            DeclareLaunchArgument(
+                "yolo_black_h_min", default_value="69"
+            ),  # YOLO ROI black-mask HSV minimum H
+            DeclareLaunchArgument(
+                "yolo_black_h_max", default_value="92"
+            ),  # YOLO ROI black-mask HSV maximum H
+            DeclareLaunchArgument(
+                "yolo_black_s_min", default_value="75"
+            ),  # YOLO ROI black-mask HSV minimum S
+            DeclareLaunchArgument(
+                "yolo_black_s_max", default_value="255"
+            ),  # YOLO ROI black-mask HSV maximum S
+            DeclareLaunchArgument(
+                "yolo_black_v_min", default_value="72"
+            ),  # YOLO ROI black-mask HSV minimum V
+            DeclareLaunchArgument(
+                "yolo_black_v_max", default_value="141"
+            ),  # YOLO ROI black-mask HSV maximum V
+            DeclareLaunchArgument(
+                "amcl_mask_merge_sync_queue_size", default_value="60"
+            ),  # Sync queue size for the white+black AMCL mask merge
+            DeclareLaunchArgument(
+                "amcl_mask_merge_publish_debug_image", default_value="false"
+            ),  # Whether to publish the AMCL mask merge debug overlay
+            DeclareLaunchArgument(
+                "amcl_mask_merge_debug_image_topic",
+                default_value="/amcl_input_mask_merge_node/debug/overlay_image",
+            ),  # Debug overlay topic published by the AMCL mask merge node
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(str(stm32_gateway_launch_file)),
                 condition=IfCondition(use_stm32_gateway_odometry),
@@ -502,6 +772,103 @@ def generate_launch_description():
                 }.items(),
             ),
             OpaqueFunction(function=build_camera_hsv_dt_ridge_fastmap_nodes),
+            Node(
+                package="rcj_localization",
+                executable="yolo_black_circle_debug.py",
+                name="yolo_black_circle_debug",
+                output="screen",
+                condition=IfCondition(enable_yolo_black_amcl_mask),
+                parameters=[
+                    {
+                        "input_topic": LaunchConfiguration("remap_topic"),
+                        "model_path": LaunchConfiguration("model_path"),
+                        "confidence": ParameterValue(
+                            LaunchConfiguration("confidence"), value_type=float
+                        ),
+                        "iou": ParameterValue(
+                            LaunchConfiguration("iou"), value_type=float
+                        ),
+                        "imgsz": ParameterValue(
+                            LaunchConfiguration("imgsz"), value_type=int
+                        ),
+                        "device": LaunchConfiguration("device"),
+                        "max_det": ParameterValue(
+                            LaunchConfiguration("max_det"), value_type=int
+                        ),
+                        "max_processing_hz": ParameterValue(
+                            LaunchConfiguration("max_processing_hz"),
+                            value_type=float,
+                        ),
+                        "web_host": "0.0.0.0",
+                        "web_port": 8081,
+                        "jpeg_quality": 85,
+                        "publish_debug_image": False,
+                        "debug_image_topic": "/yolo_black_circle_debug/debug_image",
+                        "publish_roi_mask": True,
+                        "roi_mask_topic": "/yolo_black_circle_debug/roi_mask",
+                        "log_interval": 30,
+                    }
+                ],
+            ),
+            Node(
+                package="rcj_localization",
+                executable="yolo_roi_black_mask_node",
+                name="yolo_roi_black_mask",
+                output="screen",
+                condition=IfCondition(enable_yolo_black_amcl_mask),
+                parameters=[
+                    {
+                        "input_topic": LaunchConfiguration("remap_topic"),
+                        "roi_mask_topic": "/yolo_black_circle_debug/roi_mask",
+                        "black_h_min": ParameterValue(
+                            LaunchConfiguration("yolo_black_h_min"), value_type=int
+                        ),
+                        "black_h_max": ParameterValue(
+                            LaunchConfiguration("yolo_black_h_max"), value_type=int
+                        ),
+                        "black_s_min": ParameterValue(
+                            LaunchConfiguration("yolo_black_s_min"), value_type=int
+                        ),
+                        "black_s_max": ParameterValue(
+                            LaunchConfiguration("yolo_black_s_max"), value_type=int
+                        ),
+                        "black_v_min": ParameterValue(
+                            LaunchConfiguration("yolo_black_v_min"), value_type=int
+                        ),
+                        "black_v_max": ParameterValue(
+                            LaunchConfiguration("yolo_black_v_max"), value_type=int
+                        ),
+                        "sync_queue_size": 60,
+                        "publish_debug_image": False,
+                        "debug_image_topic": "/yolo_roi_black_mask/debug/overlay_image",
+                        "enable_image_view": False,
+                    }
+                ],
+            ),
+            Node(
+                package="rcj_localization",
+                executable="amcl_input_mask_merge_node",
+                name="amcl_input_mask_merge_node",
+                output="screen",
+                condition=IfCondition(enable_yolo_black_amcl_mask),
+                parameters=[
+                    {
+                        "white_mask_topic": "/white_line_dt_ridge_filter_node/white_final_mask",
+                        "black_mask_topic": "/yolo_roi_black_mask/black_mask",
+                        "sync_queue_size": ParameterValue(
+                            LaunchConfiguration("amcl_mask_merge_sync_queue_size"),
+                            value_type=int,
+                        ),
+                        "publish_debug_image": ParameterValue(
+                            LaunchConfiguration("amcl_mask_merge_publish_debug_image"),
+                            value_type=bool,
+                        ),
+                        "debug_image_topic": LaunchConfiguration(
+                            "amcl_mask_merge_debug_image_topic"
+                        ),
+                    }
+                ],
+            ),
             Node(
                 package="nav2_map_server",
                 executable="map_server",
@@ -523,178 +890,6 @@ def generate_launch_description():
                     }
                 ],
             ),
-            Node(
-                package="rcj_localization",
-                executable="amcl_fusion",
-                name="amcl_fusion",
-                output="screen",
-                condition=IfCondition(enable_topdown_pf_localization_node_v2),
-                parameters=[
-                    {
-                        "mask_topic": "/white_line_dt_ridge_filter_node/white_final_mask",
-                        "meters_per_pixel": ParameterValue(
-                            meters_per_pixel, value_type=float
-                        ),
-                        "forward_axis": forward_axis,
-                        "left_axis": left_axis,
-                        "max_points": ParameterValue(
-                            max_points, value_type=int
-                        ),
-                        "use_weighted_mean_pose": ParameterValue(
-                            use_weighted_mean_pose, value_type=bool
-                        ),
-                        "enable_localization": ParameterValue(
-                            enable_localization, value_type=bool
-                        ),
-                        "publish_debug_pointcloud": ParameterValue(
-                            publish_debug_pointcloud, value_type=bool
-                        ),
-                        "debug_pointcloud_topic": debug_pointcloud_topic,
-                        "publish_particle_weight_markers": ParameterValue(
-                            publish_particle_weight_markers, value_type=bool
-                        ),
-                        "particle_weight_marker_topic": particle_weight_marker_topic,
-                        "particle_weight_marker_scale": ParameterValue(
-                            particle_weight_marker_scale, value_type=float
-                        ),
-                        "num_particles": ParameterValue(
-                            num_particles, value_type=int
-                        ),
-                        "map_topic": map_topic,
-                        "yaw_topic": yaw_topic,
-                        "use_fake_yaw": ParameterValue(
-                            use_fake_yaw, value_type=bool
-                        ),
-                        "fake_yaw_degrees": ParameterValue(
-                            fake_yaw_degrees, value_type=float
-                        ),
-                        "yaw_zero_map_degrees": ParameterValue(
-                            yaw_zero_map_degrees, value_type=float
-                        ),
-                        "use_stm32_gateway_odometry": ParameterValue(
-                            use_stm32_gateway_odometry, value_type=bool
-                        ),
-                        "stm32_command_service": stm32_command_service,
-                        "stm32_request_timeout_ms": ParameterValue(
-                            stm32_request_timeout_ms, value_type=int
-                        ),
-                        "stm32_enable_odometry_log": ParameterValue(
-                            stm32_enable_odometry_log, value_type=bool
-                        ),
-                        "use_stm32_request_theta": ParameterValue(
-                            use_stm32_request_theta, value_type=bool
-                        ),
-                        "enable_global_search": ParameterValue(
-                            enable_global_search, value_type=bool
-                        ),
-                        "global_search_random_ratio": ParameterValue(
-                            global_search_random_ratio, value_type=float
-                        ),
-                        "global_search_noise_xy": ParameterValue(
-                            global_search_noise_xy, value_type=float
-                        ),
-                        "global_search_noise_theta": ParameterValue(
-                            global_search_noise_theta, value_type=float
-                        ),
-                        "localized_xy_std_threshold": ParameterValue(
-                            localized_xy_std_threshold, value_type=float
-                        ),
-                        "localized_theta_std_threshold": ParameterValue(
-                            localized_theta_std_threshold, value_type=float
-                        ),
-                        "localized_min_updates": ParameterValue(
-                            localized_min_updates, value_type=int
-                        ),
-                        "lost_alpha_ratio_threshold": ParameterValue(
-                            lost_alpha_ratio_threshold, value_type=float
-                        ),
-                        "lost_min_updates": ParameterValue(
-                            lost_min_updates, value_type=int
-                        ),
-                        "sigma_hit": ParameterValue(
-                            sigma_hit, value_type=float
-                        ),
-                        "noise_xy": ParameterValue(
-                            noise_xy, value_type=float
-                        ),
-                        "noise_theta": ParameterValue(
-                            noise_theta, value_type=float
-                        ),
-                        "alpha_fast_rate": ParameterValue(
-                            alpha_fast_rate, value_type=float
-                        ),
-                        "alpha_slow_rate": ParameterValue(
-                            alpha_slow_rate, value_type=float
-                        ),
-                        "random_injection_max_ratio": ParameterValue(
-                            random_injection_max_ratio, value_type=float
-                        ),
-                        "off_map_penalty": ParameterValue(
-                            off_map_penalty, value_type=float
-                        ),
-                        "occupancy_threshold": ParameterValue(
-                            occupancy_threshold, value_type=int
-                        ),
-                        "distance_transform_mask_size": ParameterValue(
-                            distance_transform_mask_size, value_type=int
-                        ),
-                        "init_field_width": ParameterValue(
-                            init_field_width, value_type=float
-                        ),
-                        "init_field_height": ParameterValue(
-                            init_field_height, value_type=float
-                        ),
-                        "odom_noise_x_from_x": ParameterValue(
-                            odom_noise_x_from_x, value_type=float
-                        ),
-                        "odom_noise_x_from_y": ParameterValue(
-                            odom_noise_x_from_y, value_type=float
-                        ),
-                        "odom_noise_x_from_theta": ParameterValue(
-                            odom_noise_x_from_theta, value_type=float
-                        ),
-                        "odom_noise_x_bias": ParameterValue(
-                            odom_noise_x_bias, value_type=float
-                        ),
-                        "odom_noise_y_from_x": ParameterValue(
-                            odom_noise_y_from_x, value_type=float
-                        ),
-                        "odom_noise_y_from_y": ParameterValue(
-                            odom_noise_y_from_y, value_type=float
-                        ),
-                        "odom_noise_y_from_theta": ParameterValue(
-                            odom_noise_y_from_theta, value_type=float
-                        ),
-                        "odom_noise_y_bias": ParameterValue(
-                            odom_noise_y_bias, value_type=float
-                        ),
-                        "odom_noise_theta_from_x": ParameterValue(
-                            odom_noise_theta_from_x, value_type=float
-                        ),
-                        "odom_noise_theta_from_y": ParameterValue(
-                            odom_noise_theta_from_y, value_type=float
-                        ),
-                        "odom_noise_theta_from_theta": ParameterValue(
-                            odom_noise_theta_from_theta, value_type=float
-                        ),
-                        "odom_noise_theta_bias": ParameterValue(
-                            odom_noise_theta_bias, value_type=float
-                        ),
-                        "filter_period_ms": ParameterValue(
-                            filter_period_ms, value_type=int
-                        ),
-                        "publish_processing_time": ParameterValue(
-                            topdown_pf_publish_processing_time, value_type=bool
-                        ),
-                        "processing_time_topic": topdown_pf_processing_time_topic,
-                        "enable_timing_log": ParameterValue(
-                            topdown_pf_enable_timing_log, value_type=bool
-                        ),
-                        "timing_log_interval": ParameterValue(
-                            topdown_pf_timing_log_interval, value_type=int
-                        ),
-                    }
-                ],
-            ),
+            OpaqueFunction(function=build_amcl_fusion_node),
         ]
     )
