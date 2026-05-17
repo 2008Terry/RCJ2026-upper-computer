@@ -724,7 +724,8 @@ def generate_launch_description():
             DeclareLaunchArgument("iou", default_value="0.45"),  # YOLO NMS IoU threshold
             DeclareLaunchArgument("imgsz", default_value="320"),  # YOLO inference image size
             DeclareLaunchArgument("device", default_value="cpu"),  # YOLO inference device
-            DeclareLaunchArgument("max_det", default_value="20"),  # YOLO max detections per frame
+            DeclareLaunchArgument("max_det", default_value="1"),  # YOLO max detections per frame
+            DeclareLaunchArgument("production_mode", default_value="true"),  # Whether the YOLO ROI node should use production-mode debug gating
             DeclareLaunchArgument(
                 "max_processing_hz", default_value="30.0"
             ),  # YOLO max processing frequency
@@ -799,10 +800,13 @@ def generate_launch_description():
                             LaunchConfiguration("max_processing_hz"),
                             value_type=float,
                         ),
+                        "production_mode": ParameterValue(
+                            LaunchConfiguration("production_mode"),
+                            value_type=bool,
+                        ),
                         "web_host": "0.0.0.0",
                         "web_port": 8081,
                         "jpeg_quality": 85,
-                        "publish_debug_image": False,
                         "debug_image_topic": "/yolo_black_circle_debug/debug_image",
                         "publish_roi_mask": True,
                         "roi_mask_topic": "/yolo_black_circle_debug/roi_mask",

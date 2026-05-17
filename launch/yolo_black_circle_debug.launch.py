@@ -30,6 +30,22 @@ def read_fastmap_source_size(fastmap_file):
     return int(source_width), int(source_height)
 
 
+def optional_bool_launch_config(context, name):
+    raw_value = LaunchConfiguration(name).perform(context).strip()
+    if raw_value == "":
+        return None
+
+    normalized = raw_value.lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+
+    raise RuntimeError(
+        f"Launch argument '{name}' must be empty or a boolean string, got '{raw_value}'."
+    )
+
+
 def build_nodes(context):
     selected_fastmap_file = resolve_fastmap_file()
     default_width, default_height = read_fastmap_source_size(selected_fastmap_file)
@@ -43,6 +59,51 @@ def build_nodes(context):
     input_topic = LaunchConfiguration("input_topic")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     remap_topic = LaunchConfiguration("remap_topic")
+    yolo_parameters = {
+        "input_topic": remap_topic,
+        "model_path": LaunchConfiguration("model_path"),
+        "confidence": ParameterValue(
+            LaunchConfiguration("confidence"), value_type=float
+        ),
+        "iou": ParameterValue(LaunchConfiguration("iou"), value_type=float),
+        "imgsz": ParameterValue(
+            LaunchConfiguration("imgsz"), value_type=int
+        ),
+        "device": LaunchConfiguration("device"),
+        "max_det": ParameterValue(
+            LaunchConfiguration("max_det"), value_type=int
+        ),
+        "max_processing_hz": ParameterValue(
+            LaunchConfiguration("max_processing_hz"), value_type=float
+        ),
+        "production_mode": ParameterValue(
+            LaunchConfiguration("production_mode"), value_type=bool
+        ),
+        "web_host": LaunchConfiguration("web_host"),
+        "web_port": ParameterValue(
+            LaunchConfiguration("web_port"), value_type=int
+        ),
+        "jpeg_quality": ParameterValue(
+            LaunchConfiguration("jpeg_quality"), value_type=int
+        ),
+        "debug_image_topic": LaunchConfiguration("debug_image_topic"),
+        "publish_roi_mask": ParameterValue(
+            LaunchConfiguration("publish_roi_mask"), value_type=bool
+        ),
+        "roi_mask_topic": LaunchConfiguration("roi_mask_topic"),
+        "log_interval": ParameterValue(
+            LaunchConfiguration("log_interval"), value_type=int
+        ),
+    }
+    for name in (
+        "enable_web_viewer",
+        "enable_yolo_overlay",
+        "enable_black_mask_preview",
+        "publish_debug_image",
+    ):
+        value = optional_bool_launch_config(context, name)
+        if value is not None:
+            yolo_parameters[name] = value
 
     return [
         Node(
@@ -114,44 +175,7 @@ def build_nodes(context):
             executable="yolo_black_circle_debug.py",
             name="yolo_black_circle_debug",
             output="screen",
-            parameters=[
-                {
-                    "input_topic": remap_topic,
-                    "model_path": LaunchConfiguration("model_path"),
-                    "confidence": ParameterValue(
-                        LaunchConfiguration("confidence"), value_type=float
-                    ),
-                    "iou": ParameterValue(LaunchConfiguration("iou"), value_type=float),
-                    "imgsz": ParameterValue(
-                        LaunchConfiguration("imgsz"), value_type=int
-                    ),
-                    "device": LaunchConfiguration("device"),
-                    "max_det": ParameterValue(
-                        LaunchConfiguration("max_det"), value_type=int
-                    ),
-                    "max_processing_hz": ParameterValue(
-                        LaunchConfiguration("max_processing_hz"), value_type=float
-                    ),
-                    "web_host": LaunchConfiguration("web_host"),
-                    "web_port": ParameterValue(
-                        LaunchConfiguration("web_port"), value_type=int
-                    ),
-                    "jpeg_quality": ParameterValue(
-                        LaunchConfiguration("jpeg_quality"), value_type=int
-                    ),
-                    "publish_debug_image": ParameterValue(
-                        LaunchConfiguration("publish_debug_image"), value_type=bool
-                    ),
-                    "debug_image_topic": LaunchConfiguration("debug_image_topic"),
-                    "publish_roi_mask": ParameterValue(
-                        LaunchConfiguration("publish_roi_mask"), value_type=bool
-                    ),
-                    "roi_mask_topic": LaunchConfiguration("roi_mask_topic"),
-                    "log_interval": ParameterValue(
-                        LaunchConfiguration("log_interval"), value_type=int
-                    ),
-                }
-            ],
+            parameters=[yolo_parameters],
         ),
     ]
 
@@ -198,12 +222,16 @@ def generate_launch_description():
             DeclareLaunchArgument("iou", default_value="0.45"),
             DeclareLaunchArgument("imgsz", default_value="320"),
             DeclareLaunchArgument("device", default_value="cpu"),
-            DeclareLaunchArgument("max_det", default_value="20"),
+            DeclareLaunchArgument("max_det", default_value="1"),
             DeclareLaunchArgument("max_processing_hz", default_value="30.0"),
+            DeclareLaunchArgument("production_mode", default_value="false"),
             DeclareLaunchArgument("web_host", default_value="0.0.0.0"),
             DeclareLaunchArgument("web_port", default_value="8081"),
+            DeclareLaunchArgument("enable_web_viewer", default_value=""),
+            DeclareLaunchArgument("enable_yolo_overlay", default_value=""),
+            DeclareLaunchArgument("enable_black_mask_preview", default_value=""),
             DeclareLaunchArgument("jpeg_quality", default_value="85"),
-            DeclareLaunchArgument("publish_debug_image", default_value="false"),
+            DeclareLaunchArgument("publish_debug_image", default_value=""),
             DeclareLaunchArgument(
                 "debug_image_topic",
                 default_value="/yolo_black_circle_debug/debug_image",

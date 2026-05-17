@@ -50,7 +50,7 @@ DEFAULT_HSV_VALUES = {
 SAVE_LAUNCH_FILENAME = "yolo_roi_black_mask_debug.launch.py"
 
 
-INDEX_HTML = """<!doctype html>
+INDEX_HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -431,13 +431,7 @@ INDEX_HTML = """<!doctype html>
           </div>
           <div class="viewer-meta" id="yoloMeta">Waiting for YOLO frames...</div>
         </figure>
-        <figure class="viewer-card">
-          <figcaption>Published ROI Black Mask</figcaption>
-          <div class="viewer-frame">
-            <img id="blackMaskStream" src="/stream.mjpg?stream=black_mask" alt="Published black mask stream">
-          </div>
-          <div class="viewer-meta" id="blackMaskMeta">Waiting for black-mask frames...</div>
-        </figure>
+        __BLACK_MASK_CARD__
       </div>
     </section>
 
@@ -603,6 +597,7 @@ INDEX_HTML = """<!doctype html>
 
     function updateViewerMeta(id, streamStatus, formatter) {
       const el = document.getElementById(id);
+      if (!el) return;
       el.textContent = formatter(streamStatus || {});
     }
 
@@ -708,21 +703,38 @@ INDEX_HTML = """<!doctype html>
 </body>
 </html>
 """
-INDEX_HTML = INDEX_HTML.replace(
-    "__HSV_FIELDS__",
-    json.dumps(
-        [
-            {
-                "name": spec["name"],
-                "label": spec["label"],
-                "min": spec["min"],
-                "max": spec["max"],
-                "default": spec["default"],
-            }
-            for spec in HSV_PARAM_SPECS
-        ]
-    ),
+
+HSV_FIELDS_JSON = json.dumps(
+    [
+        {
+            "name": spec["name"],
+            "label": spec["label"],
+            "min": spec["min"],
+            "max": spec["max"],
+            "default": spec["default"],
+        }
+        for spec in HSV_PARAM_SPECS
+    ]
 )
+
+BLACK_MASK_CARD_HTML = """
+        <figure class="viewer-card">
+          <figcaption>Published ROI Black Mask</figcaption>
+          <div class="viewer-frame">
+            <img id="blackMaskStream" src="/stream.mjpg?stream=black_mask" alt="Published black mask stream">
+          </div>
+          <div class="viewer-meta" id="blackMaskMeta">Waiting for black-mask frames...</div>
+        </figure>
+"""
+
+
+def render_index_html(enable_black_mask_preview: bool) -> str:
+    return (
+        INDEX_HTML_TEMPLATE.replace("__HSV_FIELDS__", HSV_FIELDS_JSON).replace(
+            "__BLACK_MASK_CARD__",
+            BLACK_MASK_CARD_HTML if enable_black_mask_preview else "",
+        )
+    )
 
 
 def resolve_model_path(model_path: str) -> Path:
@@ -1067,7 +1079,7 @@ class TunerState:
             return dict(self.last_save_result)
 
 
-def make_handler(streams, tuner_state: TunerState):
+def make_handler(streams, tuner_state: TunerState, enable_black_mask_preview: bool):
     class YoloDebugHandler(BaseHTTPRequestHandler):
         server_version = "YoloBlackCircleDebug/2.0"
 
@@ -1109,7 +1121,7 @@ def make_handler(streams, tuner_state: TunerState):
                 name: stream.status()
                 for name, stream in streams.items()
             }
-            yolo_meta = stream_statuses["yolo"].get("meta", {})
+            yolo_meta = stream_statuses.get("yolo", {}).get("meta", {})
             return {
                 "streams": stream_statuses,
                 "stats": dict(yolo_meta.get("stats", {})),
@@ -1119,7 +1131,10 @@ def make_handler(streams, tuner_state: TunerState):
         def do_GET(self):
             parsed = urlparse(self.path)
             if parsed.path in ("/", "/index.html"):
-                self.send_bytes(INDEX_HTML.encode("utf-8"), "text/html; charset=utf-8")
+                self.send_bytes(
+                    render_index_html(enable_black_mask_preview).encode("utf-8"),
+                    "text/html; charset=utf-8",
+                )
                 return
             if parsed.path == "/status":
                 self.send_json(self.status_payload())
@@ -1255,10 +1270,14 @@ class YoloBlackCircleDebugNode(Node):
         self.declare_parameter("iou", 0.45)
         self.declare_parameter("imgsz", 640)
         self.declare_parameter("device", "cpu")
-        self.declare_parameter("max_det", 20)
+        self.declare_parameter("max_det", 1) # Only the single most confident detection is used to define the ROI mask
         self.declare_parameter("max_processing_hz", 30.0)
         self.declare_parameter("web_host", "0.0.0.0")
         self.declare_parameter("web_port", 8081)
+        self.declare_parameter("production_mode", False)
+        self.declare_parameter("enable_web_viewer", True)
+        self.declare_parameter("enable_yolo_overlay", True)
+        self.declare_parameter("enable_black_mask_preview", True)
         self.declare_parameter("jpeg_quality", 85)
         self.declare_parameter("publish_debug_image", False)
         self.declare_parameter("debug_image_topic", "~/debug_image")
@@ -1276,8 +1295,28 @@ class YoloBlackCircleDebugNode(Node):
         self.max_det = int(self.get_parameter("max_det").value)
         self.web_host = str(self.get_parameter("web_host").value)
         self.web_port = int(self.get_parameter("web_port").value)
+        startup_override_names = set(getattr(self, "_parameter_overrides", {}).keys())
+        self.production_mode = bool(self.get_parameter("production_mode").value)
+        self.enable_web_viewer = self.resolve_effective_bool_parameter(
+            "enable_web_viewer",
+            startup_override_names,
+        )
+        self.enable_yolo_overlay = self.resolve_effective_bool_parameter(
+            "enable_yolo_overlay",
+            startup_override_names,
+        )
+        configured_black_mask_preview = self.resolve_effective_bool_parameter(
+            "enable_black_mask_preview",
+            startup_override_names,
+        )
+        self.enable_black_mask_preview = (
+            self.enable_web_viewer and configured_black_mask_preview
+        )
         self.jpeg_quality = min(100, max(1, int(self.get_parameter("jpeg_quality").value)))
-        self.publish_debug_image = bool(self.get_parameter("publish_debug_image").value)
+        self.publish_debug_image = self.resolve_effective_bool_parameter(
+            "publish_debug_image",
+            startup_override_names,
+        )
         self.publish_roi_mask = bool(self.get_parameter("publish_roi_mask").value)
         self.log_interval = max(1, int(self.get_parameter("log_interval").value))
         self.black_mask_node_name = str(
@@ -1317,36 +1356,56 @@ class YoloBlackCircleDebugNode(Node):
         self.infer_ms: deque[float] = deque(maxlen=120)
         self.total_ms: deque[float] = deque(maxlen=120)
 
-        self.streams = {
-            "yolo": StreamState("yolo", self.jpeg_quality),
-            "black_mask": StreamState("black_mask", self.jpeg_quality),
-        }
-        self.tuner_state = TunerState(
-            self.black_mask_node_name,
-            resolve_save_launch_path(),
-        )
-        self.parameter_client = AsyncParameterClient(self, self.black_mask_node_name)
+        self.streams = None
+        self.tuner_state = None
+        self.parameter_client = None
+        self.web_server = None
+        self.web_thread = None
+        self.black_mask_subscription = None
+        self.parameter_timer = None
 
-        self.web_server = ThreadingHTTPServer(
-            (self.web_host, self.web_port),
-            make_handler(self.streams, self.tuner_state),
-        )
-        self.web_thread = threading.Thread(
-            target=self.web_server.serve_forever,
-            name="yolo_black_circle_debug_http",
-            daemon=True,
-        )
-        self.web_thread.start()
+        if self.enable_web_viewer:
+            self.streams = {
+                "yolo": StreamState("yolo", self.jpeg_quality),
+            }
+            if self.enable_black_mask_preview:
+                self.streams["black_mask"] = StreamState(
+                    "black_mask",
+                    self.jpeg_quality,
+                )
+            self.tuner_state = TunerState(
+                self.black_mask_node_name,
+                resolve_save_launch_path(),
+            )
+            self.parameter_client = AsyncParameterClient(
+                self,
+                self.black_mask_node_name,
+            )
 
-        if self.web_host in ("", "0.0.0.0", "::"):
-            self.get_logger().info(
-                f"Web viewer listening on http://0.0.0.0:{self.web_port}/ "
-                f"(open http://<robot-ip>:{self.web_port}/ from your browser)"
+            self.web_server = ThreadingHTTPServer(
+                (self.web_host, self.web_port),
+                make_handler(
+                    self.streams,
+                    self.tuner_state,
+                    self.enable_black_mask_preview,
+                ),
             )
-        else:
-            self.get_logger().info(
-                f"Web viewer listening on http://{self.web_host}:{self.web_port}/"
+            self.web_thread = threading.Thread(
+                target=self.web_server.serve_forever,
+                name="yolo_black_circle_debug_http",
+                daemon=True,
             )
+            self.web_thread.start()
+
+            if self.web_host in ("", "0.0.0.0", "::"):
+                self.get_logger().info(
+                    f"Web viewer listening on http://0.0.0.0:{self.web_port}/ "
+                    f"(open http://<robot-ip>:{self.web_port}/ from your browser)"
+                )
+            else:
+                self.get_logger().info(
+                    f"Web viewer listening on http://{self.web_host}:{self.web_port}/"
+                )
 
         self.subscription = self.create_subscription(
             Image,
@@ -1354,12 +1413,13 @@ class YoloBlackCircleDebugNode(Node):
             self.image_callback,
             qos_profile_sensor_data,
         )
-        self.black_mask_subscription = self.create_subscription(
-            Image,
-            self.black_mask_topic,
-            self.black_mask_callback,
-            qos_profile_sensor_data,
-        )
+        if self.enable_web_viewer and self.enable_black_mask_preview:
+            self.black_mask_subscription = self.create_subscription(
+                Image,
+                self.black_mask_topic,
+                self.black_mask_callback,
+                qos_profile_sensor_data,
+            )
 
         self.debug_publisher = None
         if self.publish_debug_image:
@@ -1383,23 +1443,44 @@ class YoloBlackCircleDebugNode(Node):
         if max_processing_hz > 0.0:
             timer_period = 1.0 / max_processing_hz
         self.timer = self.create_timer(timer_period, self.process_latest_frame)
-        self.parameter_timer = self.create_timer(0.05, self.sync_black_mask_parameters)
+        if self.enable_web_viewer:
+            self.parameter_timer = self.create_timer(
+                0.05,
+                self.sync_black_mask_parameters,
+            )
 
         self.get_logger().info(
-            "Input topic=%s confidence=%.2f iou=%.2f imgsz=%d device=%s max_det=%d "
-            "black_mask_topic=%s black_mask_node_name=%s publish_roi_mask=%s"
+            "production_mode=%s enable_web_viewer=%s enable_yolo_overlay=%s "
+            "enable_black_mask_preview=%s publish_debug_image=%s "
+            "publish_roi_mask=%s imgsz=%d device=%s max_det=%d"
             % (
-                self.input_topic,
-                self.confidence,
-                self.iou,
+                "true" if self.production_mode else "false",
+                "true" if self.enable_web_viewer else "false",
+                "true" if self.enable_yolo_overlay else "false",
+                "true" if self.enable_black_mask_preview else "false",
+                "true" if self.publish_debug_image else "false",
+                "true" if self.publish_roi_mask else "false",
                 self.imgsz,
                 self.device,
                 self.max_det,
-                self.black_mask_topic,
-                self.black_mask_node_name,
-                "true" if self.publish_roi_mask else "false",
             )
         )
+
+    def resolve_effective_bool_parameter(self, name: str, startup_override_names) -> bool:
+        value = bool(self.get_parameter(name).value)
+        if (
+            self.production_mode
+            and name
+            in {
+                "enable_web_viewer",
+                "enable_yolo_overlay",
+                "enable_black_mask_preview",
+                "publish_debug_image",
+            }
+            and name not in startup_override_names
+        ):
+            return False
+        return value
 
     def image_callback(self, msg: Image):
         try:
@@ -1424,6 +1505,8 @@ class YoloBlackCircleDebugNode(Node):
             )
 
     def black_mask_callback(self, msg: Image):
+        if self.streams is None or "black_mask" not in self.streams:
+            return
         try:
             mask = self.bridge.imgmsg_to_cv2(msg, desired_encoding="mono8")
         except Exception as exc:  # noqa: BLE001
@@ -1446,6 +1529,8 @@ class YoloBlackCircleDebugNode(Node):
         )
 
     def sync_black_mask_parameters(self):
+        if self.parameter_client is None or self.tuner_state is None:
+            return
         services_ready = self.parameter_client.services_are_ready()
         self.tuner_state.set_service_ready(services_ready)
 
@@ -1480,6 +1565,8 @@ class YoloBlackCircleDebugNode(Node):
         )
 
     def handle_initial_parameter_result(self, future):
+        if self.tuner_state is None:
+            return
         try:
             response = future.result()
             values = {}
@@ -1493,6 +1580,8 @@ class YoloBlackCircleDebugNode(Node):
             self.tuner_state.fail_initial_fetch(str(exc))
 
     def handle_parameter_update_result(self, future, requested_values):
+        if self.tuner_state is None:
+            return
         try:
             response = future.result()
             failed_reasons = [
@@ -1539,7 +1628,7 @@ class YoloBlackCircleDebugNode(Node):
         result = results[0]
         yolo_speed = getattr(result, "speed", {}) or {}
         infer_elapsed_ms = float(yolo_speed.get("inference", 0.0))
-        detections = self.draw_detections(frame, result)
+        detections = self.extract_detections(result)
         selected_detection = max(
             detections,
             key=lambda det: det["confidence"],
@@ -1555,11 +1644,22 @@ class YoloBlackCircleDebugNode(Node):
 
         max_conf = max((det["confidence"] for det in detections), default=0.0)
         stats = self.make_stats(len(detections), max_conf, now - recv_time)
-        self.draw_stats(frame, stats)
-        self.streams["yolo"].update(frame, {"stats": stats})
+        overlay_needed = (
+            self.enable_yolo_overlay
+            or self.debug_publisher is not None
+            or self.enable_web_viewer
+        )
+        output_frame = frame
+        if overlay_needed:
+            output_frame = frame.copy()
+            self.draw_detections(output_frame, detections)
+            self.draw_stats(output_frame, stats)
+
+        if self.enable_web_viewer and self.streams is not None:
+            self.streams["yolo"].update(output_frame, {"stats": stats})
 
         if self.debug_publisher is not None:
-            msg = self.bridge.cv2_to_imgmsg(frame, encoding="bgr8")
+            msg = self.bridge.cv2_to_imgmsg(output_frame, encoding="bgr8")
             if frame_stamp is not None:
                 msg.header.stamp = frame_stamp
             msg.header.frame_id = "yolo_black_circle_debug"
@@ -1575,7 +1675,7 @@ class YoloBlackCircleDebugNode(Node):
         if len(self.process_times) % self.log_interval == 0:
             self.log_stats(sequence, len(detections), max_conf, skipped_now)
 
-    def draw_detections(self, frame, result):
+    def extract_detections(self, result):
         detections = []
         names = getattr(result, "names", {}) or getattr(self.model, "names", {})
         boxes = getattr(result, "boxes", None)
@@ -1600,6 +1700,13 @@ class YoloBlackCircleDebugNode(Node):
                     "label": label,
                 }
             )
+        return detections
+
+    def draw_detections(self, frame, detections):
+        for detection in detections:
+            x1, y1, x2, y2 = detection["bounds"]
+            confidence = detection["confidence"]
+            label = detection["label"]
             color = (0, 255, 120)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             center = ((x1 + x2) // 2, (y1 + y2) // 2)
@@ -1630,7 +1737,6 @@ class YoloBlackCircleDebugNode(Node):
                 1,
                 cv2.LINE_AA,
             )
-        return detections
 
     def make_stats(self, detection_count: int, max_conf: float, frame_age_s: float):
         avg_infer = statistics.fmean(self.infer_ms) if self.infer_ms else 0.0
@@ -1687,10 +1793,14 @@ class YoloBlackCircleDebugNode(Node):
         )
 
     def destroy_node(self):
-        for stream in self.streams.values():
-            stream.stop()
-        self.web_server.shutdown()
-        self.web_server.server_close()
+        if self.streams is not None:
+            for stream in self.streams.values():
+                stream.stop()
+        if self.web_server is not None:
+            self.web_server.shutdown()
+            self.web_server.server_close()
+        if self.web_thread is not None:
+            self.web_thread.join(timeout=1.0)
         super().destroy_node()
 
 
