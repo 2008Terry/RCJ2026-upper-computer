@@ -63,6 +63,29 @@ yolo checks
 Ubuntu's apt OpenCV package instead of pip's OpenCV wheel. That is expected as
 long as `check_yolo_env.py` reports `opencv`, `rclpy`, and `cv_bridge` present.
 
+## Export To NCNN
+
+After `source install/setup.bash`, both `python3` and `yolo` resolve from the
+repo-local `.venv-yolo` environment, so you can export the existing trained
+YOLO `.pt` model to NCNN format with:
+
+```bash
+python3 scripts/export_yolo_to_ncnn.py \
+  --model path/to/best.pt \
+  --imgsz 320
+```
+
+The helper prints the generated `*_ncnn_model/` directory path on success.
+Generated NCNN export directories are ignored by git alongside `*.pt` weights.
+
+This export step is preparatory only. The current runtime node still expects the
+existing `.pt` workflow.
+
+Important safety note: [scripts/yolo_black_circle_debug.py](/home/rcj/Documents/ros2_ws/src/rcj_localization/scripts/yolo_black_circle_debug.py)
+currently treats directory-valued `model_path` inputs as training run
+directories and appends `weights/best.pt`, so an exported `*_ncnn_model/`
+directory is not yet loadable there without a later runtime change.
+
 ## Live Black Circle YOLO Debugging
 
 Run the live remapped-camera YOLO web viewer with:

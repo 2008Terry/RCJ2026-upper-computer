@@ -27,3 +27,4 @@ __pycache__/
 .yolo-config/
 runs/
 *.pt
+*_ncnn_model/
