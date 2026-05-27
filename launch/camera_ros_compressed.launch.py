@@ -36,7 +36,7 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "compressed_topic",
-                default_value="/camera/image_compressed",
+                default_value="/foxglove/camera/image_compressed",
                 description="Compressed image output topic.",
             ),
             DeclareLaunchArgument(
@@ -78,12 +78,13 @@ def generate_launch_description() -> LaunchDescription:
             ),
             Node(
                 package="rcj_localization",
-                executable="camera_image_compressor.py",
-                name="camera_image_compressor",
+                executable="image_compression_relay.py",
+                name="camera_image_compression_relay",
                 output="screen",
                 arguments=["--ros-args", "--log-level", "info"],
                 parameters=[
                     {
+                        "relay_name": "camera",
                         "input_topic": input_topic,
                         "output_topic": compressed_topic,
                         "jpeg_quality": ParameterValue(jpeg_quality, value_type=int),
