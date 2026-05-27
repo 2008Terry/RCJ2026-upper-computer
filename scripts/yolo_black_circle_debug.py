@@ -48,6 +48,9 @@ DEFAULT_HSV_VALUES = {
     spec["name"]: int(spec["default"]) for spec in HSV_PARAM_SPECS
 }
 SAVE_LAUNCH_FILENAME = "yolo_roi_black_mask_debug.launch.py"
+NCNN_MODEL_PARAM_FILENAME = "model.ncnn.param"
+NCNN_MODEL_BIN_FILENAME = "model.ncnn.bin"
+NCNN_MODEL_METADATA_FILENAME = "metadata.yaml"
 
 
 INDEX_HTML_TEMPLATE = """<!doctype html>
@@ -737,11 +740,36 @@ def render_index_html(enable_black_mask_preview: bool) -> str:
     )
 
 
-def resolve_model_path(model_path: str) -> Path:
+def is_ncnn_model_directory(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+
+    has_param = (path / NCNN_MODEL_PARAM_FILENAME).is_file()
+    has_bin = (path / NCNN_MODEL_BIN_FILENAME).is_file()
+    has_metadata = (path / NCNN_MODEL_METADATA_FILENAME).is_file()
+    return (has_param and has_bin) or (has_metadata and (has_param or has_bin))
+
+
+def resolve_model_path(model_path: str) -> tuple[Path, str | None]:
     path = Path(model_path).expanduser()
+
     if path.is_dir():
-        path = path / "weights" / "best.pt"
-    return path
+        if is_ncnn_model_directory(path):
+            return path, "detect"
+
+        legacy_train_run_path = path / "weights" / "best.pt"
+        if legacy_train_run_path.is_file():
+            return legacy_train_run_path, None
+
+        raise ValueError(
+            "Unsupported YOLO model directory: "
+            f"{path}. Pass an NCNN export directory containing "
+            f"{NCNN_MODEL_PARAM_FILENAME} and {NCNN_MODEL_BIN_FILENAME}, "
+            "a training run directory containing weights/best.pt, or a direct "
+            "model file path such as /path/to/best.pt."
+        )
+
+    return path, None
 
 
 def clamp_box_to_image(bounds, width: int, height: int):
@@ -1264,7 +1292,7 @@ class YoloBlackCircleDebugNode(Node):
         )
         self.declare_parameter(
             "model_path",
-            str(Path.home() / "Downloads" / "train-6" / "weights" / "best.pt"),
+            str(Path.home() / "Downloads" / "train-6" / "weights" / "best_ncnn_model"),
         )
         self.declare_parameter("confidence", 0.25)
         self.declare_parameter("iou", 0.45)
@@ -1327,16 +1355,22 @@ class YoloBlackCircleDebugNode(Node):
         self.last_service_wait_log_time = 0.0
 
         max_processing_hz = float(self.get_parameter("max_processing_hz").value)
-        self.model_path = resolve_model_path(str(self.get_parameter("model_path").value))
+        self.model_path, self.model_task = resolve_model_path(
+            str(self.get_parameter("model_path").value)
+        )
         if not self.model_path.exists():
             raise FileNotFoundError(
                 f"YOLO model not found: {self.model_path}. "
-                "Pass model_path:=/path/to/train-6 or /path/to/best.pt."
+                "Pass model_path:=/path/to/best_ncnn_model, "
+                "model_path:=/path/to/best.pt, or model_path:=/path/to/train-6."
             )
 
         self.get_logger().info(f"Loading YOLO model: {self.model_path}")
         load_start = time.perf_counter()
-        self.model = YOLO(str(self.model_path))
+        if self.model_task is not None:
+            self.model = YOLO(str(self.model_path), task=self.model_task)
+        else:
+            self.model = YOLO(str(self.model_path))
         self.get_logger().info(
             f"Loaded model in {(time.perf_counter() - load_start) * 1000.0:.1f} ms"
         )

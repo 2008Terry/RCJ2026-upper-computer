@@ -718,7 +718,7 @@ def generate_launch_description():
             ),  # Whether to merge YOLO black mask into the AMCL input mask
             DeclareLaunchArgument(
                 "model_path",
-                default_value="~/Downloads/train-6/weights/best.pt",
+                default_value="~/Downloads/train-6/weights/best_ncnn_model",
             ),  # YOLO model weights path for black-feature ROI detection
             DeclareLaunchArgument("confidence", default_value="0.25"),  # YOLO confidence threshold
             DeclareLaunchArgument("iou", default_value="0.45"),  # YOLO NMS IoU threshold

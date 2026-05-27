@@ -78,13 +78,8 @@ python3 scripts/export_yolo_to_ncnn.py \
 The helper prints the generated `*_ncnn_model/` directory path on success.
 Generated NCNN export directories are ignored by git alongside `*.pt` weights.
 
-This export step is preparatory only. The current runtime node still expects the
-existing `.pt` workflow.
-
-Important safety note: [scripts/yolo_black_circle_debug.py](/home/rcj/Documents/ros2_ws/src/rcj_localization/scripts/yolo_black_circle_debug.py)
-currently treats directory-valued `model_path` inputs as training run
-directories and appends `weights/best.pt`, so an exported `*_ncnn_model/`
-directory is not yet loadable there without a later runtime change.
+The runtime now accepts the exported NCNN directory directly via
+`model_path:=/path/to/best_ncnn_model`.
 
 ## Live Black Circle YOLO Debugging
 
@@ -97,12 +92,18 @@ ros2 launch rcj_localization yolo_black_circle_debug.launch.py
 Then open `http://<robot-ip>:8081/` in a browser. If you are on the same
 machine, `http://localhost:8081/` also works.
 
-The default model path is `~/Downloads/train-6/weights/best.pt`. Override it
-explicitly when needed:
+The default model path is `~/Downloads/train-6/weights/best_ncnn_model`.
+Supported `model_path` forms are:
+
+- `~/Downloads/train-6/weights/best_ncnn_model`
+- `~/Downloads/train-6/weights/best.pt`
+- `~/Downloads/train-6`
+
+Override it explicitly when needed:
 
 ```bash
 ros2 launch rcj_localization yolo_black_circle_debug.launch.py \
-  model_path:=~/Downloads/train-6/weights/best.pt confidence:=0.25 imgsz:=320
+  model_path:=~/Downloads/train-6/weights/best_ncnn_model confidence:=0.25 imgsz:=320
 ```
 
 The browser view streams annotated detections and live stats for received FPS,
@@ -174,7 +175,7 @@ Run the combined step-1 plus step-2 debug launch with:
 
 ```bash
 ros2 launch rcj_localization yolo_roi_black_mask_debug.launch.py \
-  model_path:=~/Downloads/train-6/weights/best.pt
+  model_path:=~/Downloads/train-6/weights/best_ncnn_model
 ```
 
 The new node publishes:
